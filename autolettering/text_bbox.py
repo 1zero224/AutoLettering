@@ -3,18 +3,26 @@ from __future__ import annotations
 
 def selected_text_bbox(detection: dict, area_ratio_limit: float = 0.35, score_margin: float = 0.12) -> tuple[int, int, int, int]:
     selected = tuple(int(value) for value in detection["selected_text_box_xyxy"])
-    selected_area = _area(selected)
     candidates = [_candidate(item) for item in detection.get("candidate_boxes") or []]
+    search_region = _search_region(detection, selected, candidates)
+    max_text_area = min(_area(search_region) * area_ratio_limit, _area(selected) * 2.0)
     candidates = [
         candidate
         for candidate in candidates
         if candidate
-        and _inside(candidate["bbox"], selected)
-        and 0 < _area(candidate["bbox"]) <= selected_area * area_ratio_limit
+        and _inside(candidate["bbox"], search_region)
+        and 0 < _area(candidate["bbox"]) <= max_text_area
     ]
     if not candidates:
         return selected
-    return _union_bbox([candidate["bbox"] for candidate in _score_filtered(candidates, score_margin)])
+    if not any(candidate["score"] is not None for candidate in candidates):
+        return _union_bbox([candidate["bbox"] for candidate in candidates])
+    strong_candidates = _score_filtered(candidates, score_margin)
+    anchor = _anchor_bbox(strong_candidates, selected)
+    cluster = _connected_to_selected(strong_candidates, anchor)
+    if _is_tight_anchor(selected, search_region):
+        cluster = _expand_cluster(cluster, _score_filtered(candidates, score_margin + 0.04))
+    return _union_bbox([candidate["bbox"] for candidate in cluster or strong_candidates])
 
 
 def _candidate(item: dict) -> dict | None:
@@ -28,6 +36,18 @@ def _candidate(item: dict) -> dict | None:
     }
 
 
+def _search_region(
+    detection: dict,
+    selected: tuple[int, int, int, int],
+    candidates: list[dict | None],
+) -> tuple[int, int, int, int]:
+    xyxy = detection.get("search_region_xyxy")
+    if isinstance(xyxy, list) and len(xyxy) == 4:
+        return tuple(int(value) for value in xyxy)
+    candidate_bboxes = [candidate["bbox"] for candidate in candidates if candidate]
+    return _union_bbox([selected, *candidate_bboxes]) if candidate_bboxes else selected
+
+
 def _score_filtered(candidates: list[dict], score_margin: float) -> list[dict]:
     scores = [candidate["score"] for candidate in candidates if candidate["score"] is not None]
     if not scores:
@@ -35,6 +55,82 @@ def _score_filtered(candidates: list[dict], score_margin: float) -> list[dict]:
     threshold = max(scores) - score_margin
     filtered = [candidate for candidate in candidates if candidate["score"] is not None and candidate["score"] >= threshold]
     return filtered or candidates
+
+
+def _anchor_bbox(candidates: list[dict], selected: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+    inside = [candidate for candidate in candidates if _inside(candidate["bbox"], selected)]
+    scored = [candidate for candidate in inside if candidate["score"] is not None]
+    if scored:
+        return max(scored, key=lambda candidate: candidate["score"])["bbox"]
+    if inside:
+        return inside[0]["bbox"]
+    return selected
+
+
+def _is_tight_anchor(selected: tuple[int, int, int, int], search_region: tuple[int, int, int, int]) -> bool:
+    return _area(selected) <= _area(search_region) * 0.25
+
+
+def _connected_to_selected(candidates: list[dict], selected: tuple[int, int, int, int]) -> list[dict]:
+    cluster = [candidate for candidate in candidates if _touches_text_cluster(candidate["bbox"], selected)]
+    return _expand_cluster(cluster, candidates)
+
+
+def _expand_cluster(cluster: list[dict], candidates: list[dict]) -> list[dict]:
+    previous_len = -1
+    while len(cluster) != previous_len:
+        previous_len = len(cluster)
+        if not cluster:
+            return cluster
+        cluster_bbox = _union_bbox([candidate["bbox"] for candidate in cluster])
+        for candidate in candidates:
+            if candidate in cluster:
+                continue
+            if _touches_text_cluster(candidate["bbox"], cluster_bbox):
+                cluster.append(candidate)
+    return cluster
+
+
+def _touches_text_cluster(bbox: tuple[int, int, int, int], cluster: tuple[int, int, int, int]) -> bool:
+    same_column = _horizontal_overlap_ratio(bbox, cluster) >= 0.5 and _vertical_relation(bbox, cluster) <= 96
+    adjacent_column = (
+        _horizontal_gap(bbox, cluster) <= max(_width(bbox), 48)
+        and _vertical_overlap_ratio(bbox, cluster) >= 0.35
+    )
+    return same_column or adjacent_column
+
+
+def _horizontal_gap(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> int:
+    return max(0, max(a[0], b[0]) - min(a[2], b[2]))
+
+
+def _vertical_relation(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> int:
+    overlap = min(a[3], b[3]) - max(a[1], b[1])
+    if overlap > 0:
+        return 0
+    return max(0, max(a[1], b[1]) - min(a[3], b[3]))
+
+
+def _vertical_overlap_ratio(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
+    overlap = min(a[3], b[3]) - max(a[1], b[1])
+    if overlap <= 0:
+        return 0.0
+    return overlap / max(1, min(_height(a), _height(b)))
+
+
+def _horizontal_overlap_ratio(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
+    overlap = min(a[2], b[2]) - max(a[0], b[0])
+    if overlap <= 0:
+        return 0.0
+    return overlap / max(1, min(_width(a), _width(b)))
+
+
+def _width(bbox: tuple[int, int, int, int]) -> int:
+    return max(0, bbox[2] - bbox[0])
+
+
+def _height(bbox: tuple[int, int, int, int]) -> int:
+    return max(0, bbox[3] - bbox[1])
 
 
 def _inside(inner: tuple[int, int, int, int], outer: tuple[int, int, int, int]) -> bool:

@@ -14,6 +14,19 @@ def test_selected_text_bbox_unions_small_text_candidates_inside_large_detection(
     assert selected_text_bbox(detection) == (60, 40, 135, 160)
 
 
+def test_selected_text_bbox_preserves_unscored_wide_multicolumn_candidates():
+    detection = {
+        "selected_text_box_xyxy": [0, 0, 280, 200],
+        "candidate_boxes": [
+            {"xyxy": [50, 40, 75, 170], "area": 3250},
+            {"xyxy": [105, 40, 130, 170], "area": 3250},
+            {"xyxy": [225, 40, 250, 170], "area": 3250},
+        ],
+    }
+
+    assert selected_text_bbox(detection) == (50, 40, 250, 170)
+
+
 def test_selected_text_bbox_excludes_low_score_remote_noise():
     detection = {
         "selected_text_box_xyxy": [452, 785, 892, 1145],
@@ -47,3 +60,35 @@ def test_selected_text_bbox_keeps_high_score_vertical_cluster_for_adjacent_recor
     }
 
     assert selected_text_bbox(detection) == (340, 1036, 494, 1281)
+
+
+def test_selected_text_bbox_expands_from_selected_column_to_adjacent_text_columns():
+    detection = {
+        "selected_text_box_xyxy": [1252, 1466, 1285, 1560],
+        "candidate_boxes": [
+            {"xyxy": [1252, 1466, 1285, 1560], "area": 2404, "score": 0.9569},
+            {"xyxy": [1077, 1340, 1324, 1700], "area": 43429, "score": 0.8584},
+            {"xyxy": [1250, 1377, 1288, 1465], "area": 2759, "score": 0.8491},
+            {"xyxy": [1211, 1378, 1249, 1504], "area": 3856, "score": 0.848},
+            {"xyxy": [1172, 1378, 1209, 1529], "area": 4241, "score": 0.8158},
+        ],
+    }
+
+    assert selected_text_bbox(detection) == (1172, 1377, 1288, 1560)
+
+
+def test_selected_text_bbox_does_not_bridge_wide_gap_into_neighbor_bubble():
+    detection = {
+        "selected_text_box_xyxy": [523, 1336, 881, 1679],
+        "candidate_boxes": [
+            {"xyxy": [523, 1336, 881, 1679], "score": 0.9448},
+            {"xyxy": [577, 1368, 612, 1555], "score": 0.8993},
+            {"xyxy": [615, 1367, 653, 1462], "score": 0.883},
+            {"xyxy": [722, 1401, 757, 1493], "score": 0.8758},
+            {"xyxy": [760, 1367, 797, 1463], "score": 0.8095},
+            {"xyxy": [537, 1622, 624, 1679], "score": 0.7737},
+            {"xyxy": [441, 1336, 520, 1679], "score": 0.7616},
+        ],
+    }
+
+    assert selected_text_bbox(detection) == (577, 1367, 653, 1555)
