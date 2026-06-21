@@ -15,6 +15,7 @@ outputs/runs/phase8-gbc06-font-map-export-smoke
 - `photoshop-manifest.json`
 - `photoshop-import.jsx`
 - `reports/phase8-report.md`
+- `reports/photoshop-validation-checklist.md`
 
 Manifest summary:
 
@@ -23,7 +24,9 @@ Manifest summary:
 - Text layers exported: 2
 - Manifest size: `6117` bytes
 - JSX size: `4103` bytes
+- Validation checklist size: `1180` bytes
 - Missing cleanup layers: 0
+- Expected cleanup patch layers in checklist: 2
 - Effective cleanup methods: `bubble_fill=1`, `gpt_image2_masked_edit=1`
 
 ## Font Mapping
@@ -49,6 +52,7 @@ Users can copy the example mapping and change the value to the exact Photoshop-i
 - Photoshop is not available in this environment, so the generated JSX was not executed inside Photoshop.
 - This smoke validates that the manifest and report consume a mapping file. It does not prove that a specific mapped font name exists in the user's Photoshop installation.
 - The example mapping intentionally maps the extracted PostScript name to itself; it is a safe template rather than a claim about a separate local Photoshop font name.
+- `reports/photoshop-validation-checklist.md` is now generated as the manual Photoshop execution gate; it lists the expected PSD folder, editable text layer count, cleanup patch layer count, font mapping file, and compatibility checks.
 
 ## Verification
 
@@ -60,6 +64,6 @@ python -m pytest -q
 Fresh result before this report was written:
 
 ```text
-4 passed in 0.23s
-56 passed in 3.20s
+4 passed in 0.21s
+56 passed in 2.79s
 ```

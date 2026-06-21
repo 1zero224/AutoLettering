@@ -610,6 +610,7 @@ Recommended approach:
 - Preserve editable text layers in Photoshop.
 - Include coordinates, bbox, font, size, direction, angle, line spacing, letter spacing, layer name, cleanup method, and validation status.
 - Allow an optional font mapping JSON so extracted family/PostScript names can be mapped to the exact Photoshop-installed font name.
+- Generate a manual Photoshop validation checklist whenever local Photoshop execution is unavailable.
 
 ## Risk Register
 
@@ -622,7 +623,7 @@ Recommended approach:
 | Vertical Japanese source vs Chinese translation layout mismatch | Poor automatic layout | Deterministic measurement first, then model naturalness validation |
 | Non-bubble text cleanup is hard | gpt-image/inpaint may damage art | Keep methods selectable, save before/after, classify failures |
 | API calls may fail or change | Experiments become non-reproducible | Store request summaries, model names, timestamps, artifact paths, and failure reasons |
-| Photoshop scripting cannot be fully verified locally | Export path may drift from preview | Keep exported JSON deterministic, provide sample JSX input/output expectations, and expose font-name mapping for local Photoshop installs |
+| Photoshop scripting cannot be fully verified locally | Export path may drift from preview | Keep exported JSON deterministic, generate a manual validation checklist, provide sample JSX input/output expectations, and expose font-name mapping for local Photoshop installs |
 
 ## Immediate Next Step
 

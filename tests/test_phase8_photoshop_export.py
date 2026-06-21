@@ -32,6 +32,12 @@ def test_run_phase8_photoshop_export_writes_manifest_and_jsx(tmp_path: Path):
     assert "layout.line_spacing" in report
     assert "font.photoshop_font_name" in report
     assert "JSON font mapping file" in report
+    checklist = (run_dir / "reports" / "photoshop-validation-checklist.md").read_text(encoding="utf-8")
+    assert "Run `photoshop-import.jsx` from this export directory" in checklist
+    assert "Expected PSD output folder: `psd/`" in checklist
+    assert "- Expected editable text layers: 1" in checklist
+    assert "- Expected cleanup patch layers: 1" in checklist
+    assert "Font mapping file: none" in checklist
 
 
 def test_run_phase8_photoshop_export_preserves_replacement_cleanup(tmp_path: Path):

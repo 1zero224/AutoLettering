@@ -39,6 +39,7 @@ def run_phase8_photoshop_export(
         manifest,
         font_mapping_path,
     )
+    _write_photoshop_validation_checklist(run_dir / "reports" / "photoshop-validation-checklist.md", manifest, font_mapping_path)
     return run_dir
 
 
@@ -108,9 +109,57 @@ def _write_report(
         "- `photoshop-manifest.json`",
         "- `photoshop-import.jsx`",
         "- `reports/phase8-report.md`",
+        "- `reports/photoshop-validation-checklist.md`",
     ]
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_photoshop_validation_checklist(output_path: Path, manifest: dict, font_mapping_path: str | Path | None) -> None:
+    summary = manifest["summary"]
+    cleanup_patch_count = _cleanup_patch_count(manifest)
+    lines = [
+        "# Photoshop Validation Checklist",
+        "",
+        "## Run Steps",
+        "",
+        "1. Open Photoshop.",
+        "2. Run `photoshop-import.jsx` from this export directory.",
+        "3. Wait for the completion alert before inspecting saved PSD files.",
+        "",
+        "## Expected Output",
+        "",
+        "Expected PSD output folder: `psd/`",
+        f"- Expected pages: {summary['page_count']}",
+        f"- Expected editable text layers: {summary['record_count']}",
+        f"- Expected cleanup patch layers: {cleanup_patch_count}",
+        f"- Font mapping file: `{font_mapping_path}`" if font_mapping_path else "- Font mapping file: none",
+        "",
+        "## Manual Checks",
+        "",
+        "- Each PSD opens without missing image path errors.",
+        "- Cleanup patch layers align with their detected text boxes.",
+        "- Text layers remain editable paragraph text layers.",
+        "- Fonts resolve to `font.photoshop_font_name` or an acceptable fallback from `font.font_name_candidates`.",
+        "- Vertical, horizontal, rotation, leading, and tracking settings visually match the preview as closely as Photoshop permits.",
+        "",
+        "## Compatibility Notes",
+        "",
+        "- Photoshop was not executed by this pipeline; this checklist is the manual validation gate.",
+        "- If a font does not resolve, copy the example font map and map the exported source name to the installed Photoshop font name.",
+        "- If cleanup patch placement fails, the JSX should continue creating editable text layers.",
+    ]
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _cleanup_patch_count(manifest: dict) -> int:
+    count = 0
+    for page in manifest.get("pages", []):
+        for layer in page.get("layers", []):
+            if layer.get("cleanup", {}).get("effective_crop_path"):
+                count += 1
+    return count
 
 
 def _cleanup_summary(manifest: dict) -> dict:
