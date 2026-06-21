@@ -1,7 +1,8 @@
 import json
+from dataclasses import replace
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageChops
 
 from autolettering.layout.candidates import generate_line_break_candidates
 from autolettering.layout.measure import measure_text_layout, search_fitting_layout
@@ -82,6 +83,19 @@ def test_render_layout_preview_supports_vertical_text(tmp_path: Path):
         assert layout.orientation == "vertical"
 
 
+def test_render_layout_preview_applies_layout_angle(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+    base_path = tmp_path / "angle-0.png"
+    rotated_path = tmp_path / "angle-20.png"
+    layout = search_fitting_layout("街头演出？", font_path, (180, 100), max_font_size=42)
+
+    render_layout_preview(layout, font_path, base_path, canvas_size=(180, 100))
+    render_layout_preview(replace(layout, angle_degrees=20.0), font_path, rotated_path, canvas_size=(180, 100))
+
+    with Image.open(base_path) as base, Image.open(rotated_path) as rotated:
+        assert ImageChops.difference(base, rotated).getbbox() is not None
+
+
 def test_run_phase4_writes_layout_results_and_previews(tmp_path: Path):
     font_path = _copy_font(tmp_path)
     source_crop_path = tmp_path / "source-crop.png"
@@ -109,6 +123,31 @@ def test_run_phase4_writes_layout_results_and_previews(tmp_path: Path):
     assert (run_dir / "reports" / "phase4-report.md").exists()
 
 
+def test_run_phase4_uses_angle_run_orientation_and_angle(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+    source_crop_path = tmp_path / "source-crop.png"
+    Image.new("RGB", (90, 220), "white").save(source_crop_path)
+    phase3_run = tmp_path / "phase3-selection"
+    phase5_run = tmp_path / "phase5-angle"
+    phase3_run.mkdir()
+    phase5_run.mkdir()
+    _write_font_selection(phase3_run / "font-selections.jsonl", font_path, source_crop_path)
+    _write_angle_result(phase5_run / "angle-results.jsonl")
+
+    run_dir = run_phase4(
+        selection_run_dir=phase3_run,
+        angle_run_dir=phase5_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase4-angle-test",
+        sample_limit=1,
+    )
+
+    rows = _read_jsonl(run_dir / "layout-results.jsonl")
+    assert rows[0]["layout"]["orientation"] == "vertical"
+    assert rows[0]["layout"]["angle_degrees"] == -12.5
+    assert Path(rows[0]["layout"]["preview_path"]).exists()
+
+
 def _copy_font(tmp_path: Path) -> Path:
     source = sorted(Path("C:/Windows/Fonts").glob("*.ttf"))[0]
     target = tmp_path / source.name
@@ -126,6 +165,18 @@ def _write_font_selection(path: Path, font_path: Path, source_crop_path: Path) -
         "selected_font": {"font_id": "font-test", "path": str(font_path), "family_name": "Test"},
         "source_crop_path": str(source_crop_path),
         "comparison_image_path": str(path.parent / "comparison.png"),
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _write_angle_result(path: Path) -> None:
+    payload = {
+        "record_id": "page.png#1",
+        "status": "angle_estimated",
+        "orientation": {
+            "detected_orientation": "vertical",
+            "selected_angle_degrees": -12.5,
+        },
     }
     path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
 

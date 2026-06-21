@@ -33,10 +33,12 @@ def search_fitting_layout(
     max_font_size: int = 72,
     allow_overflow_ratio: float = 0.08,
     max_lines: int = 3,
+    orientation: str | None = None,
+    angle_degrees: float = 0.0,
 ) -> LayoutResult:
     target_width, target_height = target_size
-    orientation = _choose_orientation(target_width, target_height)
-    candidates = _candidate_texts(text, max_lines, orientation)
+    selected_orientation = orientation or _choose_orientation(target_width, target_height)
+    candidates = _candidate_texts(text, max_lines, selected_orientation)
     best = _search_best_candidate(
         candidates,
         font_path,
@@ -44,21 +46,22 @@ def search_fitting_layout(
         target_height,
         min_font_size,
         max_font_size,
-        orientation,
+        selected_orientation,
     )
     if best is None:
-        return _fallback_layout(text, font_path, target_width, target_height, min_font_size, orientation)
+        return _fallback_layout(text, font_path, target_width, target_height, min_font_size, selected_orientation, angle_degrees)
 
     line_breaks, font_size, measured = best
     return _layout_result(
         text,
         line_breaks,
         font_size,
-        orientation,
+        selected_orientation,
         target_width,
         target_height,
         measured,
         allow_overflow_ratio,
+        angle_degrees=angle_degrees,
     )
 
 
@@ -89,9 +92,21 @@ def _fallback_layout(
     target_height: int,
     font_size: int,
     orientation: str,
+    angle_degrees: float,
 ) -> LayoutResult:
     measured = measure_text_layout(text, font_path, font_size, orientation=orientation)
-    return _layout_result(text, text, font_size, orientation, target_width, target_height, measured, 0.0, "overflow")
+    return _layout_result(
+        text,
+        text,
+        font_size,
+        orientation,
+        target_width,
+        target_height,
+        measured,
+        0.0,
+        "overflow",
+        angle_degrees,
+    )
 
 
 def _layout_result(
@@ -104,6 +119,7 @@ def _layout_result(
     measured: TextMeasurement,
     allow_overflow_ratio: float,
     failure_reason: str | None = None,
+    angle_degrees: float = 0.0,
 ) -> LayoutResult:
     overflow = _overflow_ratio(measured.width, measured.height, target_width, target_height)
     status = "ok" if overflow <= allow_overflow_ratio else "failed"
@@ -115,7 +131,7 @@ def _layout_result(
         orientation=orientation,
         line_spacing=4,
         letter_spacing=0,
-        angle_degrees=0.0,
+        angle_degrees=round(angle_degrees, 1),
         target_width=target_width,
         target_height=target_height,
         measured_width=measured.width,

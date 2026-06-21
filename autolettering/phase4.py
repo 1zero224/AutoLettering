@@ -12,6 +12,7 @@ from .layout.render_text import render_layout_preview
 
 def run_phase4(
     selection_run_dir: str | Path,
+    angle_run_dir: str | Path | None = None,
     output_root: str | Path = "outputs/runs",
     run_id: str | None = None,
     sample_limit: int = 5,
@@ -19,9 +20,10 @@ def run_phase4(
     run_dir = Path(output_root) / (run_id or "phase4-layout-search")
     run_dir.mkdir(parents=True, exist_ok=True)
     selections = _load_selected_fonts(Path(selection_run_dir) / "font-selections.jsonl", sample_limit)
-    rows = [_layout_record(run_dir, row) for row in selections]
+    angle_rows = _load_angle_rows(angle_run_dir)
+    rows = [_layout_record(run_dir, row, angle_rows) for row in selections]
     _write_jsonl(run_dir / "layout-results.jsonl", rows)
-    _write_report(run_dir / "reports" / "phase4-report.md", selection_run_dir, rows)
+    _write_report(run_dir / "reports" / "phase4-report.md", selection_run_dir, angle_run_dir, rows)
     return run_dir
 
 
@@ -37,10 +39,30 @@ def _load_selected_fonts(path: Path, sample_limit: int) -> list[dict]:
     return rows
 
 
-def _layout_record(run_dir: Path, row: dict) -> dict:
+def _load_angle_rows(angle_run_dir: str | Path | None) -> dict[str, dict]:
+    if angle_run_dir is None:
+        return {}
+    path = Path(angle_run_dir) / "angle-results.jsonl"
+    rows: dict[str, dict] = {}
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            payload = json.loads(line)
+            if payload.get("status") == "angle_estimated":
+                rows[payload["record_id"]] = payload["orientation"]
+    return rows
+
+
+def _layout_record(run_dir: Path, row: dict, angle_rows: dict[str, dict]) -> dict:
     font_path = Path(row["selected_font"]["path"])
     target_size = _target_size_from_comparison(row)
-    layout = search_fitting_layout(row.get("translated_text", ""), font_path, target_size)
+    angle = angle_rows.get(row["record_id"])
+    layout = search_fitting_layout(
+        row.get("translated_text", ""),
+        font_path,
+        target_size,
+        orientation=_orientation_override(angle),
+        angle_degrees=_angle_override(angle),
+    )
     preview_path = run_dir / "debug" / "layout_candidates" / f"{_safe_name(row['record_id'])}.png"
     render_layout_preview(layout, font_path, preview_path, canvas_size=target_size)
     return {
@@ -78,6 +100,19 @@ def _layout_payload(layout, preview_path: Path) -> dict:
     return payload
 
 
+def _orientation_override(angle: dict | None) -> str | None:
+    if not angle:
+        return None
+    orientation = angle.get("detected_orientation")
+    return orientation if orientation in {"horizontal", "vertical"} else None
+
+
+def _angle_override(angle: dict | None) -> float:
+    if not angle:
+        return 0.0
+    return float(angle.get("selected_angle_degrees") or 0.0)
+
+
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="\n") as handle:
@@ -85,12 +120,18 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
-def _write_report(output_path: Path, selection_run_dir: str | Path, rows: list[dict]) -> None:
+def _write_report(
+    output_path: Path,
+    selection_run_dir: str | Path,
+    angle_run_dir: str | Path | None,
+    rows: list[dict],
+) -> None:
     generated = sum(1 for row in rows if row["status"] == "layout_generated")
     lines = [
         "# Phase 4 Layout Search Report",
         "",
         f"Selection run directory: `{selection_run_dir}`",
+        f"Angle run directory: `{angle_run_dir or 'not provided'}`",
         "",
         "## Summary",
         "",
