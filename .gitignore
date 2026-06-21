@@ -1,0 +1,15 @@
+.env
+outputs/
+__pycache__/
+.pytest_cache/
+*.pyc
+.agents/
+.codex/
+
+# Local reference projects and sample assets.
+/BallonsTranslator/
+/GBC06 (已翻 斗笠)/
+/gpt-image-playground/
+/LabelPlus/
+/PS-Script/
+/工具箱漫画字体V2.5/
