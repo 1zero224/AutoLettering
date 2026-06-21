@@ -97,6 +97,7 @@ def test_run_phase3_vision_selection_writes_results_and_api_summaries(tmp_path: 
     assert selections[0]["status"] == "selected"
     assert selections[0]["selected_font_id"] == "font-a"
     assert selections[0]["selected_font"]["font_id"] == "font-a"
+    assert selections[0]["source_crop_path"] == str(comparison_path)
     assert api_calls[0]["record_id"] == "page.png#1"
     assert api_calls[0]["request"]["prompt_chars"] > 0
     assert "api_key" not in json.dumps(api_calls[0]).lower()

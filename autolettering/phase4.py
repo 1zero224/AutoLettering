@@ -54,6 +54,11 @@ def _layout_record(run_dir: Path, row: dict) -> dict:
 
 
 def _target_size_from_comparison(row: dict) -> tuple[int, int]:
+    source_crop_path = row.get("source_crop_path")
+    if source_crop_path and Path(source_crop_path).exists():
+        with Image.open(source_crop_path) as image:
+            return image.size
+
     comparison_path = row.get("comparison_image_path")
     if comparison_path and Path(comparison_path).exists():
         with Image.open(comparison_path) as image:

@@ -27,12 +27,12 @@ Generated artifacts:
 - Layouts generated: 1
 - Layout failures: 0
 - Record: `GBC06_01.png#1`
-- Selected font: `font-51a342d311b2`
+- Selected font: `font-07af2e938e0c`
 - Orientation: `horizontal`
 - Font size: 72
 - Line breaks: `街头演出？`
-- Target size: `633 x 129`
-- Measured text size: `360 x 67`
+- Target size: `375 x 342`
+- Measured text size: `361 x 69`
 - Overflow ratio: `0.0`
 - Preview: `outputs/runs/phase4-gbc06-layout-smoke/debug/layout_candidates/GBC06-01-png-1.png`
 
@@ -55,10 +55,10 @@ Current limitations:
 - The first prototype only generates horizontal text.
 - `angle_degrees` is fixed at `0`.
 - MIMO naturalness validation is not run yet.
-- The target size in this smoke run is derived from the Phase 3 comparison image dimensions, not the exact Phase 2 detected text bbox.
+- The target size in this smoke run is now read from the Phase 3 source text crop dimensions, which were produced from the Phase 2 selected text box.
 - `manual_review_required` remains `true`.
 
-The next iteration should feed exact text-region bbox dimensions into Phase 4 and then add vertical layout and vision-model validation.
+The next iteration should add vertical layout and vision-model validation.
 
 ## Verification
 
@@ -69,7 +69,7 @@ python -m pytest -q
 Fresh result before this report was written:
 
 ```text
-23 passed in 0.98s
+23 passed in 1.07s
 ```
 
 ## Notes

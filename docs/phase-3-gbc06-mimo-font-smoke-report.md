@@ -44,18 +44,21 @@ Generated artifacts:
 - Selected: 1
 - Failed: 0
 - Record: `GBC06_01.png#1`
-- Selected font: `font-51a342d311b2`
-- Selected family: `[toolbox]POP1GB-JF-W5`
-- Confidence: `0.92`
+- Selected font: `font-07af2e938e0c`
+- Selected family: `[toolbox]WenHei-JF-Bold`
+- Confidence: `0.95`
 - Request prompt characters: 1703
 - Request image count: 1
-- Token usage: 3110 total tokens
+- Token usage: 3150 total tokens
+- Source crop path preserved for downstream layout: `outputs/runs/phase3-gbc06-font-smoke/crops/source_text/GBC06-01-png-1.png`
 
 ## Model Reasoning Summary
 
-The model selected `font-51a342d311b2` because it judged the source manga text as rounded, playful, casual dialogue lettering and matched it to the POP-style candidate.
+The model selected `font-07af2e938e0c` because it judged the source manga text as bold, thick, clean dialogue lettering and matched it to the WenHei bold candidate.
 
 This is a real model-backed result for one sample only. It is not yet enough to claim robust font selection across the sample set.
+
+An earlier run on the same comparison grid selected `font-51a342d311b2` with confidence `0.92`, and one retry returned invalid JSON. This shows the Phase 3 model-backed selector still needs stability controls such as repeated sampling, stricter JSON mode if available, or deterministic fallback rules.
 
 ## Safety Notes
 
@@ -73,5 +76,5 @@ python -m pytest -q
 Fresh result before this report was written:
 
 ```text
-19 passed in 0.90s
+23 passed in 1.07s
 ```

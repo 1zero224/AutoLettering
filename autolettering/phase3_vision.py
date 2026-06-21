@@ -80,6 +80,7 @@ def _selection_row(row: dict, result, raw_text: str) -> dict:
         "model_reasoning_summary": result.reasoning_summary,
         "failure_reason": result.failure_reason,
         "comparison_image_path": row["comparison_image_path"],
+        "source_crop_path": row.get("source_crop_path"),
         "raw_model_text": raw_text,
     }
 
@@ -105,6 +106,7 @@ def _api_failure_selection(row: dict, exc: Exception) -> dict:
         "model_reasoning_summary": None,
         "failure_reason": f"api_error:{type(exc).__name__}",
         "comparison_image_path": row.get("comparison_image_path"),
+        "source_crop_path": row.get("source_crop_path"),
         "raw_model_text": None,
     }
 

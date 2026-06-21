@@ -53,9 +53,11 @@ def test_render_layout_preview_writes_non_empty_transparent_png(tmp_path: Path):
 
 def test_run_phase4_writes_layout_results_and_previews(tmp_path: Path):
     font_path = _copy_font(tmp_path)
+    source_crop_path = tmp_path / "source-crop.png"
+    Image.new("RGB", (90, 44), "white").save(source_crop_path)
     phase3_run = tmp_path / "phase3-selection"
     phase3_run.mkdir()
-    _write_font_selection(phase3_run / "font-selections.jsonl", font_path)
+    _write_font_selection(phase3_run / "font-selections.jsonl", font_path, source_crop_path)
 
     run_dir = run_phase4(
         selection_run_dir=phase3_run,
@@ -69,6 +71,8 @@ def test_run_phase4_writes_layout_results_and_previews(tmp_path: Path):
     assert rows[0]["status"] == "layout_generated"
     assert rows[0]["layout"]["font_size"] >= 12
     assert rows[0]["layout"]["orientation"] == "horizontal"
+    assert rows[0]["layout"]["target_width"] == 90
+    assert rows[0]["layout"]["target_height"] == 44
     assert rows[0]["layout"]["validation"]["status"] == "deterministic_only"
     assert Path(rows[0]["layout"]["preview_path"]).exists()
     assert (run_dir / "reports" / "phase4-report.md").exists()
@@ -81,7 +85,7 @@ def _copy_font(tmp_path: Path) -> Path:
     return target
 
 
-def _write_font_selection(path: Path, font_path: Path) -> None:
+def _write_font_selection(path: Path, font_path: Path, source_crop_path: Path) -> None:
     payload = {
         "record_id": "page.png#1",
         "image_name": "page.png",
@@ -89,6 +93,7 @@ def _write_font_selection(path: Path, font_path: Path) -> None:
         "status": "selected",
         "selected_font_id": "font-test",
         "selected_font": {"font_id": "font-test", "path": str(font_path), "family_name": "Test"},
+        "source_crop_path": str(source_crop_path),
         "comparison_image_path": str(path.parent / "comparison.png"),
     }
     path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
