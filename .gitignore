@@ -2,6 +2,7 @@
 outputs/
 __pycache__/
 .pytest_cache/
+.npm-cache/
 *.pyc
 .agents/
 .codex/
