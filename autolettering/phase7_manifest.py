@@ -72,6 +72,7 @@ def _manifest_pages(rows: list[dict]) -> list[dict]:
                 "original_page_path": row["preview"]["original_page_path"],
                 "cleaned_page_path": row["preview"]["cleaned_page_path"],
                 "page_preview_path": row["preview"]["page_preview_path"],
+                "debug_overlay_path": row["preview"]["debug_overlay_path"],
                 "record_count": row["preview"]["record_count"],
                 "records": row.get("records", []),
             }

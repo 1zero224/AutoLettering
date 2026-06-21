@@ -120,6 +120,43 @@ def test_run_phase7_preview_writes_page_stage_images(tmp_path: Path):
     assert "- `pages/cleaned/*.png`" in report
 
 
+def test_run_phase7_preview_writes_page_debug_overlay(tmp_path: Path):
+    page_path = _write_page(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    cleanup_run = tmp_path / "phase6"
+    layout_run = tmp_path / "phase4"
+    detection_run.mkdir()
+    cleanup_run.mkdir()
+    layout_run.mkdir()
+    _write_detections(detection_run / "detections.jsonl", page_path)
+    _write_cleanups(cleanup_run / "cleanup-results.jsonl", tmp_path)
+    _write_layouts(layout_run / "layout-results.jsonl", tmp_path)
+
+    run_dir = run_phase7_preview(
+        detection_run_dir=detection_run,
+        cleanup_run_dir=cleanup_run,
+        layout_run_dir=layout_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase7-debug-overlay",
+        sample_limit=2,
+    )
+
+    rows = _read_jsonl(run_dir / "preview-results.jsonl")
+    debug_path = Path(rows[0]["preview"]["debug_overlay_path"])
+    assert debug_path == run_dir / "debug" / "page_overlays" / "page-png.png"
+    assert debug_path.exists()
+    with Image.open(rows[0]["preview"]["page_preview_path"]).convert("RGB") as final:
+        with Image.open(debug_path).convert("RGB") as debug:
+            assert debug.size == final.size
+            assert ImageChops.difference(debug, final).getbbox() is not None
+            assert debug.getpixel((40, 20)) == (255, 0, 0)
+
+    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["pages"][0]["debug_overlay_path"] == str(debug_path)
+    report = (run_dir / "reports" / "phase7-report.md").read_text(encoding="utf-8")
+    assert "- `debug/page_overlays/*.png`" in report
+
+
 def test_run_phase7_preview_writes_run_manifest(tmp_path: Path):
     page_path = _write_page(tmp_path / "page.png")
     detection_run = tmp_path / "phase2"

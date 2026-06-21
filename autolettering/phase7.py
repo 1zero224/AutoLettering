@@ -9,6 +9,7 @@ from .cleanup_runs import CleanupRunInput, format_cleanup_run_dirs, load_cleanup
 from .phase7_manifest import write_phase7_manifest
 from .phase7_review import write_phase7_manual_review_csv
 from .rendering.compose import compose_page_stages
+from .rendering.debug_overlay import draw_page_debug_overlay
 
 
 def run_phase7_preview(
@@ -120,6 +121,11 @@ def _preview_page(run_dir: Path, image_name: str, records: list[dict]) -> dict:
         run_dir / "pages" / "cleaned" / page_name,
         run_dir / "pages" / page_name,
     )
+    debug_overlay_path = draw_page_debug_overlay(
+        stage_paths["page_preview_path"],
+        records,
+        run_dir / "debug" / "page_overlays" / page_name,
+    )
     _write_record_before_after_crops(run_dir, stage_paths["page_preview_path"], records)
     return {
         "image_name": image_name,
@@ -129,6 +135,7 @@ def _preview_page(run_dir: Path, image_name: str, records: list[dict]) -> dict:
             "original_page_path": str(stage_paths["original_page_path"]),
             "cleaned_page_path": str(stage_paths["cleaned_page_path"]),
             "page_preview_path": str(stage_paths["page_preview_path"]),
+            "debug_overlay_path": str(debug_overlay_path),
             "record_count": len(records),
         },
     }
@@ -227,6 +234,7 @@ def _write_report(
         "- `pages/original/*.png`",
         "- `pages/cleaned/*.png`",
         "- `pages/*.png`",
+        "- `debug/page_overlays/*.png`",
         "- `crops/before_after/*.png`",
         "- `reports/manual-review.csv`",
     ]

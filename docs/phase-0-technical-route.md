@@ -371,6 +371,7 @@ outputs/
         font_comparison/
         layout_candidates/
         angle_candidates/
+        page_overlays/
         masks/
       reports/
         run-summary.md
@@ -603,7 +604,7 @@ The preview must be programmatic and independent of Photoshop.
 
 Each preview run should write `manifest.json` with schema version `autolettering.phase7.preview.v1`. The run manifest is the traceability index for Phase 7: it records input run directories, summary counts, main artifact paths, generated page preview records, and skipped records with failure reasons.
 
-Each generated page should include three page-level stage images: `pages/original/*.png`, `pages/cleaned/*.png`, and `pages/*.png`. The original page is a copy of the source image, the cleaned page applies cleanup patches without translated text, and the final page applies both cleanup patches and rendered text overlays.
+Each generated page should include four page-level traceability images: `pages/original/*.png`, `pages/cleaned/*.png`, `pages/*.png`, and `debug/page_overlays/*.png`. The original page is a copy of the source image, the cleaned page applies cleanup patches without translated text, the final page applies both cleanup patches and rendered text overlays, and the debug overlay draws each generated record bbox and index on top of the final page.
 
 Each preview run should write per-record local comparison crops under `crops/before_after/*.png`. These crops are side-by-side pairs of the original page crop and the final composed preview crop for the same bbox, so visual review can inspect what changed without opening the full page.
 

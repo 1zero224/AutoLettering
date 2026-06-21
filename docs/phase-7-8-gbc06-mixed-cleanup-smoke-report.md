@@ -42,6 +42,7 @@ Generated Phase 7 artifacts:
 - `pages/original/GBC06-01-png.png`
 - `pages/cleaned/GBC06-01-png.png`
 - `pages/GBC06-01-png.png`
+- `debug/page_overlays/GBC06-01-png.png`
 - `crops/before_after/*.png`
 - `reports/phase7-report.md`
 - `reports/manual-review.csv`
@@ -51,11 +52,15 @@ Image check:
 - Original page copy: `outputs/runs/phase7-gbc06-mixed-cleanup-preview-smoke/pages/original/GBC06-01-png.png`
 - Cleaned page: `outputs/runs/phase7-gbc06-mixed-cleanup-preview-smoke/pages/cleaned/GBC06-01-png.png`
 - Final page preview: `outputs/runs/phase7-gbc06-mixed-cleanup-preview-smoke/pages/GBC06-01-png.png`
+- Debug overlay: `outputs/runs/phase7-gbc06-mixed-cleanup-preview-smoke/debug/page_overlays/GBC06-01-png.png`
 - Original page image: `1440 x 2048`, `RGB`, size `3144189` bytes
 - Cleaned page image: `1440 x 2048`, `RGB`, size `2984495` bytes
 - Final page image: `1440 x 2048`, `RGB`, size `3002971` bytes
+- Debug overlay image: `1440 x 2048`, `RGB`, size `3002473` bytes
 - Original vs cleaned changed: `true`
 - Cleaned vs final preview changed: `true`
+- Final preview vs debug overlay changed: `true`
+- Debug overlay bbox pixels: `GBC06_01.png#1@(674,0)=(255,0,0)`, `GBC06_01.png#16@(1349,121)=(255,0,0)`
 
 `preview-results.jsonl` contains one generated page preview with two records:
 
@@ -83,6 +88,7 @@ Image check:
     "original_page_path": "outputs\\runs\\phase7-gbc06-mixed-cleanup-preview-smoke\\pages\\original\\GBC06-01-png.png",
     "cleaned_page_path": "outputs\\runs\\phase7-gbc06-mixed-cleanup-preview-smoke\\pages\\cleaned\\GBC06-01-png.png",
     "page_preview_path": "outputs\\runs\\phase7-gbc06-mixed-cleanup-preview-smoke\\pages\\GBC06-01-png.png",
+    "debug_overlay_path": "outputs\\runs\\phase7-gbc06-mixed-cleanup-preview-smoke\\debug\\page_overlays\\GBC06-01-png.png",
     "record_count": 2
   }
 }
@@ -97,7 +103,7 @@ Phase 7 report summary:
 - Manifest schema: `autolettering.phase7.preview.v1`
 - Manifest summary: `record_count=2`, `page_count=1`, `skipped_count=0`
 - Manifest artifact keys: `manual_review_csv`, `phase7_report`, `preview_results_jsonl`
-- Manifest size: `2731` bytes
+- Manifest size: `2859` bytes
 - `GBC06_01.png#1` preview before/after size: `750 x 342`
 - `GBC06_01.png#16` preview before/after size: `116 x 257`
 - Manual review CSV rows: 2
@@ -106,6 +112,8 @@ Phase 7 report summary:
 `manifest.json` is the Phase 7 run-level traceability index for the mixed cleanup preview. It records the Phase 2 detection run, both Phase 6 cleanup runs, the Phase 4 layout run, the generated page preview, both page records, and an empty `skipped_records` list.
 
 `pages/original/*.png`, `pages/cleaned/*.png`, and `pages/*.png` now preserve the page-level preview stages: source page copy, cleanup-only page, and final translated preview.
+
+`debug/page_overlays/*.png` stores a page-level inspection overlay with red bboxes and record indices drawn on top of the final preview, so the grouped two-record page can be checked against individual source records.
 
 `crops/before_after/*.png` stores per-record side-by-side crops. The left half is the original page crop for the detected bbox, and the right half is the same bbox from the final composed page preview.
 
@@ -163,6 +171,7 @@ The exported cleanup paths are:
 - Phase 7 now writes per-record `crops/before_after/*.png` previews so manual review can inspect local changes without opening the full page.
 - Phase 7 now writes `manifest.json` so input runs, summary counts, artifact paths, generated page records, and skipped records are available from one run-level index.
 - Phase 7 now writes page-level `pages/original/*.png` and `pages/cleaned/*.png` stage images next to the final preview.
+- Phase 7 now writes page-level `debug/page_overlays/*.png` inspection images with generated record bboxes and indices.
 - The Photoshop JSX now attempts to place each layer's `cleanup.effective_crop_path` as a bitmap patch layer named `AL cleanup <record_id>` before adding the editable text layer.
 - The editable text layer is now `TextType.PARAGRAPHTEXT` with `item.width` and `item.height` set from the detected bbox dimensions.
 - The JSX maps `layout.line_spacing` to Photoshop `leading` and maps `layout.letter_spacing` to best-effort `tracking`.
@@ -191,8 +200,8 @@ python -m pytest -q
 Recorded verification results during this report refresh:
 
 ```text
-5 passed in 0.40s
-9 passed in 0.41s
-4 passed in 0.19s
-61 passed in 2.61s
+5 passed in 0.51s
+10 passed in 0.59s
+4 passed in 0.23s
+62 passed in 2.81s
 ```
