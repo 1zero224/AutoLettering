@@ -65,14 +65,14 @@ JSX_SOURCE = """#target photoshop
         layer.name = layerData.layer_name;
         var item = layer.textItem;
         item.kind = TextType.PARAGRAPHTEXT;
-        item.width = UnitValue(layerData.bbox.width, 'px');
-        item.height = UnitValue(layerData.bbox.height, 'px');
+        item.width = UnitValue(layerData.text_bbox.width, 'px');
+        item.height = UnitValue(layerData.text_bbox.height, 'px');
         item.contents = textContents(layerData.text);
         item.size = UnitValue(layerData.layout.font_size || 24, 'px');
         setTextFont(item, layerData.font.photoshop_font_name || layerData.font.family_name);
         setTextDirection(item, layerData.layout.orientation);
         setTextSpacing(item, layerData.layout);
-        item.position = [UnitValue(layerData.position.x_px, 'px'), UnitValue(layerData.position.y_px, 'px')];
+        item.position = [UnitValue(layerData.text_position.x_px, 'px'), UnitValue(layerData.text_position.y_px, 'px')];
         if (layerData.layout.angle_degrees) { layer.rotate(layerData.layout.angle_degrees); }
     }
     var scriptFile = new File($.fileName);
@@ -151,6 +151,7 @@ def _layer_record(
 ) -> dict:
     bbox = detection["selected_text_box_xyxy"]
     layout = layout_row["layout"]
+    text_bbox = layout.get("target_bbox") or bbox
     image_size = _image_size(detection["image_path"])
     return {
         "record_id": detection["record_id"],
@@ -161,7 +162,9 @@ def _layer_record(
         "translated_text": detection.get("translated_text", ""),
         "group_name": detection.get("group_name"),
         "bbox": _bbox_payload(bbox),
+        "text_bbox": _bbox_payload(text_bbox),
         "position": _position_payload(bbox, image_size),
+        "text_position": _position_payload(text_bbox, image_size),
         "font": _font_payload(font_row, font_mapping),
         "layout": _layout_payload(layout),
         "cleanup": _cleanup_payload(cleanup_row),

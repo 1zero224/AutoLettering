@@ -15,6 +15,9 @@ def test_run_phase8_photoshop_export_writes_manifest_and_jsx(tmp_path: Path):
     assert manifest["summary"] == {"record_count": 1, "page_count": 1}
     assert layer["record_id"] == "page.png#1"
     assert layer["bbox"]["xyxy"] == [10, 20, 80, 90]
+    assert layer["text_bbox"]["xyxy"] == [30, 40, 60, 85]
+    assert layer["text_position"]["x_px"] == 30
+    assert layer["text_position"]["y_px"] == 40
     assert layer["font"]["family_name"] == "TestFont"
     assert layer["font"]["photoshop_font_name"] == "TestFontPS"
     assert layer["font"]["font_name_candidates"] == ["TestFontPS", "TestFont"]
@@ -165,8 +168,9 @@ def _assert_rich_jsx_importer(jsx: str) -> None:
         "addCleanupPatchLayer(doc, layerData)",
         "AL cleanup ",
         "TextType.PARAGRAPHTEXT",
-        "item.width = UnitValue(layerData.bbox.width, 'px')",
-        "item.height = UnitValue(layerData.bbox.height, 'px')",
+        "item.width = UnitValue(layerData.text_bbox.width, 'px')",
+        "item.height = UnitValue(layerData.text_bbox.height, 'px')",
+        "layerData.text_position.x_px",
         "function setTextSpacing",
         "textItem.leading",
         "textItem.tracking",
@@ -216,6 +220,7 @@ def _layout_payload() -> dict:
             "letter_spacing": 0,
             "target_width": 70,
             "target_height": 70,
+            "target_bbox": [30, 40, 60, 85],
             "overflow_ratio": 0.0,
             "validation": {"status": "deterministic_only"},
         },

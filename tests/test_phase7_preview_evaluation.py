@@ -4,6 +4,7 @@ from pathlib import Path
 from PIL import Image
 
 from autolettering.phase7_evaluate import (
+    _record_label,
     build_preview_evaluation_prompt,
     parse_preview_evaluation_response,
     run_phase7_preview_evaluation,
@@ -105,6 +106,16 @@ def test_parse_preview_evaluation_response_accepts_per_record_array():
     assert result.summary == "page.png#1: bad placement; page.png#2: clean"
 
 
+def test_parse_preview_evaluation_response_rejects_echoed_record_array_without_verdicts():
+    result = parse_preview_evaluation_response(
+        '[{"record_id":"page.png#1","text":"街头演出？","bbox":[1,2,3,4]},'
+        '{"record_id":"page.png#2","text":"来自桃香的唐突的提案","bbox":[5,6,7,8]}]'
+    )
+
+    assert result.status == "failed"
+    assert result.failure_reason == "invalid_json"
+
+
 def test_build_preview_evaluation_prompt_lists_records_and_methods():
     prompt = build_preview_evaluation_prompt(
         {
@@ -125,7 +136,21 @@ def test_build_preview_evaluation_prompt_lists_records_and_methods():
     assert "oversized" in prompt
     assert "outside the original text area" in prompt
     assert "covers nearby art" in prompt
+    assert "Do not echo the Records JSON" in prompt
+    assert "Every returned object must include score and usable" in prompt
     assert "score" in prompt
+
+
+def test_record_label_omits_translated_text_to_avoid_contact_sheet_glyph_noise():
+    label = _record_label(
+        {
+            "record_id": "GBC06_01.png#16",
+            "cleanup_method": "bt_lama_large_inpaint",
+            "translated_text": "来自桃香的唐突的提案",
+        }
+    )
+
+    assert label == "GBC06_01.png#16 | bt_lama_large_inpaint"
 
 
 def test_run_phase7_preview_evaluation_writes_results_and_api_summaries(tmp_path: Path):

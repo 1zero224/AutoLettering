@@ -208,19 +208,36 @@ The Phase 7 preview row now preserves both bboxes:
 }
 ```
 
-MIMO result for the corrected tight-layout run:
+Phase 8 now preserves the same split in `photoshop-manifest.json` and the generated JSX:
+
+- cleanup patch placement uses `bbox`
+- editable Photoshop paragraph text uses `text_bbox`
+- text layer position uses `text_position`
+
+For `GBC06_01.png#1`, the exported Photoshop layer now contains:
 
 ```json
 {
-  "score": 8,
+  "bbox": {"x": 674, "y": 0, "width": 375, "height": 342, "xyxy": [674, 0, 1049, 342]},
+  "text_bbox": {"x": 799, "y": 145, "width": 75, "height": 155, "xyxy": [799, 145, 874, 300]},
+  "text_position": {"x_px": 799, "y_px": 145}
+}
+```
+
+The evaluation contact sheet label was also tightened to avoid model confusion. Earlier labels rendered Chinese translated text with the default bitmap font, producing square placeholder glyphs that MIMO could misread as generated artifacts. Contact sheet labels now use only the record id and cleanup method; the translated text remains in the prompt `Records JSON`.
+
+The parser now rejects a per-record array that merely echoes `Records JSON` without verdict fields. The prompt also explicitly says not to echo the records and requires `score` and `usable` in every returned object.
+
+MIMO result for the corrected tight-layout run after the Phase 8/text-bbox and evaluation-input fixes:
+
+```json
+{
+  "score": 9,
   "usable": true,
   "original_text_removed": true,
   "art_preserved": true,
   "lettering_readable": true,
-  "issues": [
-    "GBC06_01.png#1: The translated text is placed vertically, which is acceptable but differs from the standard horizontal layout. The text is slightly shifted to the left compared to the center of the speech bubble.",
-    "GBC06_01.png#16: The translated text is slightly compressed horizontally to fit the narrow vertical space, but it remains perfectly legible."
-  ]
+  "issues": []
 }
 ```
 
@@ -260,10 +277,9 @@ git diff --check
 Observed results:
 
 ```text
-24 passed in 1.15s
-7 passed in 0.26s
-4 passed in 0.20s
-85 passed in 3.20s
+25 passed in 1.21s
+12 passed in 0.25s
+87 passed in 3.21s
 git diff --check: exit 0
 AST length gate (project code): ok
 ```

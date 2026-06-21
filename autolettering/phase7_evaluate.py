@@ -69,6 +69,8 @@ def build_preview_evaluation_prompt(row: dict) -> str:
             "Compare the generated lettering against the original text area, not only readability.",
             "Mark it unusable or lower the score if translated lettering is oversized, outside the original text area, or covers nearby art.",
             f"Records JSON: {json.dumps(records, ensure_ascii=False)}",
+            "Do not echo the Records JSON. Evaluate the image and fill the verdict fields.",
+            "Every returned object must include score and usable.",
             "Return only JSON with keys: score (0-10), usable, original_text_removed, art_preserved, lettering_readable, issues, summary.",
         ]
     )
@@ -104,6 +106,8 @@ def _result_from_record_payloads(payloads: list[object]) -> PreviewEvaluationRes
     rows = [payload for payload in payloads if isinstance(payload, dict)]
     if not rows:
         return _failed("invalid_json")
+    if not any(_has_evaluation_fields(row) for row in rows):
+        return _failed("invalid_json")
     scores = [_optional_int(row.get("score")) for row in rows]
     return PreviewEvaluationResult(
         status="evaluated",
@@ -116,6 +120,11 @@ def _result_from_record_payloads(payloads: list[object]) -> PreviewEvaluationRes
         summary=_record_summary(rows),
         failure_reason=None,
     )
+
+
+def _has_evaluation_fields(row: dict) -> bool:
+    fields = {"score", "usable", "original_text_removed", "art_preserved", "lettering_readable", "issues", "summary"}
+    return any(field in row for field in fields)
 
 
 def _load_preview_rows(path: Path, sample_limit: int) -> list[dict]:
@@ -264,7 +273,6 @@ def _record_label(record: dict) -> str:
         [
             str(record.get("record_id", "")),
             str(record.get("cleanup_method", "")),
-            str(record.get("translated_text", "")),
         ]
     )
 
