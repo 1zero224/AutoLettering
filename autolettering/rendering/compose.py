@@ -11,17 +11,20 @@ def compose_page_preview(
     cleaned_crop_path: str | Path,
     layout_preview_path: str | Path,
     output_path: str | Path,
+    text_bbox: tuple[int, int, int, int] | None = None,
 ) -> Path:
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     with Image.open(image_path) as image:
         canvas = image.convert("RGB")
     cleaned = _resize_to_bbox(cleaned_crop_path, bbox).convert("RGB")
-    overlay = _resize_to_bbox(layout_preview_path, bbox).convert("RGBA")
+    overlay_bbox = text_bbox or bbox
+    overlay = _resize_to_bbox(layout_preview_path, overlay_bbox).convert("RGBA")
 
     x1, y1, _, _ = bbox
+    text_x1, text_y1, _, _ = overlay_bbox
     canvas.paste(cleaned, (x1, y1))
-    canvas.paste(overlay, (x1, y1), overlay)
+    canvas.paste(overlay, (text_x1, text_y1), overlay)
     canvas.save(output)
     return output
 
@@ -34,11 +37,13 @@ def compose_page_records(image_path: str | Path, records: list[dict], output_pat
 
     for record in records:
         bbox = tuple(record["bbox"])
+        text_bbox = tuple(record.get("text_bbox") or record["bbox"])
         cleaned = _resize_to_bbox(record["cleaned_crop_path"], bbox).convert("RGB")
-        overlay = _resize_to_bbox(record["layout_preview_path"], bbox).convert("RGBA")
+        overlay = _resize_to_bbox(record["layout_preview_path"], text_bbox).convert("RGBA")
         x1, y1, _, _ = bbox
+        text_x1, text_y1, _, _ = text_bbox
         canvas.paste(cleaned, (x1, y1))
-        canvas.paste(overlay, (x1, y1), overlay)
+        canvas.paste(overlay, (text_x1, text_y1), overlay)
 
     canvas.save(output)
     return output
@@ -65,12 +70,14 @@ def compose_page_stages(
 
     for record in records:
         bbox = tuple(record["bbox"])
+        text_bbox = tuple(record.get("text_bbox") or record["bbox"])
         cleaned = _resize_to_bbox(record["cleaned_crop_path"], bbox).convert("RGB")
-        overlay = _resize_to_bbox(record["layout_preview_path"], bbox).convert("RGBA")
+        overlay = _resize_to_bbox(record["layout_preview_path"], text_bbox).convert("RGBA")
         x1, y1, _, _ = bbox
+        text_x1, text_y1, _, _ = text_bbox
         cleaned_canvas.paste(cleaned, (x1, y1))
         final_canvas.paste(cleaned, (x1, y1))
-        final_canvas.paste(overlay, (x1, y1), overlay)
+        final_canvas.paste(overlay, (text_x1, text_y1), overlay)
 
     original.save(original_path)
     cleaned_canvas.save(cleaned_path)

@@ -100,12 +100,14 @@ def _preview_records(
 
 def _preview_record(detection: dict, cleanup: dict, layout: dict) -> dict:
     bbox = cleanup["cleanup"]["bbox"]
+    text_bbox = layout["layout"].get("target_bbox") or bbox
     return {
         "record_id": detection["record_id"],
         "image_name": detection.get("image_name"),
         "translated_text": detection.get("translated_text", ""),
         "image_path": detection["image_path"],
         "bbox": bbox,
+        "text_bbox": text_bbox,
         "cleanup_method": _cleanup_method(cleanup["cleanup"]),
         "cleaned_crop_path": _cleanup_crop_path(cleanup["cleanup"]),
         "layout_preview_path": layout["layout"]["preview_path"],
@@ -145,6 +147,7 @@ def _record_summary(record: dict) -> dict:
     return {
         "record_id": record["record_id"],
         "bbox": record["bbox"],
+        "text_bbox": record.get("text_bbox", record["bbox"]),
         "translated_text": record.get("translated_text", ""),
         "cleanup_method": record.get("cleanup_method"),
         "cleanup_crop_path": record.get("cleaned_crop_path", ""),

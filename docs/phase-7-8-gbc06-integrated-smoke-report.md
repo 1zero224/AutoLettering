@@ -154,6 +154,78 @@ Keep the current cleanup defaults:
 
 The next useful optimization target is layout, especially reducing the `GBC06_01.png#1` translated text size and improving placement inside the speech bubble.
 
+## Tight Text Layout Follow-up
+
+The first integrated smoke made `GBC06_01.png#1` usable from a cleanup perspective, but MIMO and manual review both showed the rendered translation was oversized and crossed the speech bubble boundary. The root cause was that Phase 4 used the full detected cleanup bbox `[674, 0, 1049, 342]` as the layout canvas. That bbox contains the speech bubble, screentone, and character hair, while the actual source text occupies the smaller candidate union `[799, 145, 874, 300]`.
+
+Phase 4 now accepts an optional detection run and uses the tight text candidate union as the layout target when available:
+
+```powershell
+python experiments/phase4_layout_search.py --selection-run-dir outputs/runs/phase3-gbc06-nonbubble-mimo-font-smoke --angle-run-dir outputs/runs/phase5-gbc06-nonbubble-angle-smoke --detection-run-dir outputs/runs/phase2-gbc06-smoke --run-id phase4-gbc06-tight-text-layout-smoke --sample-limit 2
+```
+
+The first attempt generated a smaller Phase 4 layout, but Phase 7 still resized that small text image back to the full cleanup bbox. That produced large blurry text in the page preview. Phase 7 now separates the cleanup bbox from the text overlay bbox:
+
+- `bbox`: cleanup/patch area.
+- `text_bbox`: layout target and overlay placement area.
+
+The corrected integrated command is:
+
+```powershell
+python experiments/phase7_8_integrated_smoke.py --detection-run-dir outputs/runs/phase2-gbc06-smoke --cleanup-run-dir outputs/runs/phase6-gbc06-bubble-mask-smoke --cleanup-run-dir outputs/runs/phase6-gbc06-nonbubble-lama-large-compare --layout-run-dir outputs/runs/phase4-gbc06-tight-text-layout-smoke --font-selection-run-dir outputs/runs/phase3-gbc06-nonbubble-mimo-font-smoke --run-id phase7-8-gbc06-tight-layout-smoke --sample-limit 2
+```
+
+New output directory:
+
+```text
+outputs/runs/phase7-8-gbc06-tight-layout-smoke
+```
+
+The Phase 4 row for `GBC06_01.png#1` now records:
+
+```json
+{
+  "font_size": 30,
+  "orientation": "vertical",
+  "angle_degrees": 0.0,
+  "target_width": 75,
+  "target_height": 155,
+  "target_bbox": [799, 145, 874, 300],
+  "measured_width": 30,
+  "measured_height": 155,
+  "overflow_ratio": 0.0
+}
+```
+
+The Phase 7 preview row now preserves both bboxes:
+
+```json
+{
+  "record_id": "GBC06_01.png#1",
+  "bbox": [674, 0, 1049, 342],
+  "text_bbox": [799, 145, 874, 300],
+  "cleanup_method": "bubble_mask_fill"
+}
+```
+
+MIMO result for the corrected tight-layout run:
+
+```json
+{
+  "score": 8,
+  "usable": true,
+  "original_text_removed": true,
+  "art_preserved": true,
+  "lettering_readable": true,
+  "issues": [
+    "GBC06_01.png#1: The translated text is placed vertically, which is acceptable but differs from the standard horizontal layout. The text is slightly shifted to the left compared to the center of the speech bubble.",
+    "GBC06_01.png#16: The translated text is slightly compressed horizontally to fit the narrow vertical space, but it remains perfectly legible."
+  ]
+}
+```
+
+Manual inspection of `outputs/runs/phase7-8-gbc06-tight-layout-smoke/runs/phase7-preview/debug/evaluation_contact_sheets/GBC06-01-png.png` confirms the earlier oversized/blurry overlay is gone. `GBC06_01.png#1` is now readable and contained inside the bubble. Remaining layout work is finer placement/style tuning, not cleanup failure.
+
 ## Verification
 
 Fresh verification after the integrated runner and MIMO evaluation changes:
@@ -171,6 +243,27 @@ Observed results:
 7 passed in 0.24s
 14 passed in 0.55s
 81 passed in 3.39s
+git diff --check: exit 0
+AST length gate (project code): ok
+```
+
+Additional verification after the tight text layout and `text_bbox` overlay follow-up:
+
+```powershell
+python -m pytest tests/test_phase4_layout.py tests/test_phase7_preview.py -q
+python -m pytest tests/test_phase7_preview_evaluation.py tests/test_phase7_8_smoke.py -q
+python -m pytest tests/test_phase8_photoshop_export.py -q
+python -m pytest -q
+git diff --check
+```
+
+Observed results:
+
+```text
+24 passed in 1.15s
+7 passed in 0.26s
+4 passed in 0.20s
+85 passed in 3.20s
 git diff --check: exit 0
 AST length gate (project code): ok
 ```

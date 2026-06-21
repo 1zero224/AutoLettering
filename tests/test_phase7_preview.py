@@ -39,6 +39,36 @@ def test_compose_page_preview_pastes_cleaned_crop_and_text_overlay(tmp_path: Pat
         assert ImageChops.difference(preview, original).getbbox() is not None
 
 
+def test_compose_page_preview_can_place_text_in_smaller_overlay_bbox(tmp_path: Path):
+    image_path = tmp_path / "page.png"
+    original = Image.new("RGB", (120, 100), "white")
+    ImageDraw.Draw(original).rectangle((40, 20, 100, 80), fill="black")
+    original.save(image_path)
+
+    cleaned_crop = Image.new("RGB", (60, 60), "white")
+    cleaned_crop_path = tmp_path / "cleaned.png"
+    cleaned_crop.save(cleaned_crop_path)
+    layout_preview = Image.new("RGBA", (20, 30), (255, 255, 255, 0))
+    ImageDraw.Draw(layout_preview).rectangle((6, 6, 14, 24), fill=(0, 0, 0, 255))
+    layout_preview_path = tmp_path / "layout.png"
+    layout_preview.save(layout_preview_path)
+
+    output_path = tmp_path / "preview.png"
+    compose_page_preview(
+        image_path=image_path,
+        bbox=(40, 20, 100, 80),
+        cleaned_crop_path=cleaned_crop_path,
+        layout_preview_path=layout_preview_path,
+        output_path=output_path,
+        text_bbox=(60, 30, 80, 60),
+    )
+
+    with Image.open(output_path).convert("RGB") as preview:
+        assert preview.getpixel((50, 30)) == (255, 255, 255)
+        assert preview.getpixel((68, 43)) == (0, 0, 0)
+        assert preview.getpixel((90, 70)) == (255, 255, 255)
+
+
 def test_run_phase7_preview_groups_multiple_records_on_one_page(tmp_path: Path):
     page_path = _write_page(tmp_path / "page.png")
     detection_run = tmp_path / "phase2"
@@ -267,6 +297,36 @@ def test_run_phase7_preview_writes_record_before_after_crops(tmp_path: Path):
         assert crop.getpixel((60, 25)) == (0, 0, 0)
 
 
+def test_run_phase7_preview_uses_layout_target_bbox_for_text_overlay(tmp_path: Path):
+    page_path = _write_page(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    cleanup_run = tmp_path / "phase6"
+    layout_run = tmp_path / "phase4"
+    detection_run.mkdir()
+    cleanup_run.mkdir()
+    layout_run.mkdir()
+    _write_jsonl(
+        detection_run / "detections.jsonl",
+        [_detection_payload("page.png#1", page_path, [40, 20, 100, 80])],
+    )
+    _write_jsonl(
+        cleanup_run / "cleanup-results.jsonl",
+        [_cleanup_payload("page.png#1", _write_cleaned_crop(tmp_path / "cleaned.png"), [40, 20, 100, 80])],
+    )
+    _write_jsonl(layout_run / "layout-results.jsonl", [_layout_payload_with_target_bbox(tmp_path)])
+
+    run_dir = run_phase7_preview(detection_run, cleanup_run, layout_run, tmp_path / "outputs", "phase7-text-bbox", 1)
+
+    row = _read_jsonl(run_dir / "preview-results.jsonl")[0]
+    record = row["records"][0]
+    assert record["bbox"] == [40, 20, 100, 80]
+    assert record["text_bbox"] == [60, 30, 80, 60]
+    with Image.open(row["preview"]["page_preview_path"]).convert("RGB") as preview:
+        assert preview.getpixel((50, 30)) == (255, 255, 255)
+        assert preview.getpixel((68, 43)) == (0, 0, 0)
+        assert preview.getpixel((90, 70)) == (255, 255, 255)
+
+
 def test_run_phase7_preview_merges_multiple_cleanup_runs(tmp_path: Path):
     page_path = _write_page(tmp_path / "page.png")
     detection_run = tmp_path / "phase2"
@@ -453,12 +513,26 @@ def _transparent_layout(tmp_path: Path) -> Path:
     return path
 
 
+def _small_layout_preview(tmp_path: Path) -> Path:
+    path = tmp_path / "small-layout.png"
+    image = Image.new("RGBA", (20, 30), (255, 255, 255, 0))
+    ImageDraw.Draw(image).rectangle((6, 6, 14, 24), fill=(0, 0, 0, 255))
+    image.save(path)
+    return path
+
+
 def _layout_payload(record_id: str, layout_path: Path) -> dict:
     return {
         "record_id": record_id,
         "status": "layout_generated",
         "layout": {"preview_path": str(layout_path)},
     }
+
+
+def _layout_payload_with_target_bbox(tmp_path: Path) -> dict:
+    payload = _layout_payload("page.png#1", _small_layout_preview(tmp_path))
+    payload["layout"]["target_bbox"] = [60, 30, 80, 60]
+    return payload
 
 
 def _skipped_payload(record_id: str, reason: str) -> dict:

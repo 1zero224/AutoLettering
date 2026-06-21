@@ -15,6 +15,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run Phase 4 deterministic layout search.")
     parser.add_argument("--selection-run-dir", default="outputs/runs/phase3-gbc06-mimo-font-smoke")
     parser.add_argument("--angle-run-dir", default=None)
+    parser.add_argument("--detection-run-dir", default=None)
     parser.add_argument("--output-root", default="outputs/runs")
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--sample-limit", type=int, default=5)
@@ -23,6 +24,7 @@ def main() -> None:
     run_dir = run_phase4(
         selection_run_dir=Path(args.selection_run_dir),
         angle_run_dir=Path(args.angle_run_dir) if args.angle_run_dir else None,
+        detection_run_dir=Path(args.detection_run_dir) if args.detection_run_dir else None,
         output_root=Path(args.output_root),
         run_id=args.run_id,
         sample_limit=args.sample_limit,
