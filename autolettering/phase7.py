@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .rendering.compose import compose_page_preview
+from .rendering.compose import compose_page_records
 
 
 def run_phase7_preview(
@@ -52,48 +52,71 @@ def _preview_rows(
     layouts: dict[str, dict],
     sample_limit: int,
 ) -> list[dict]:
-    rows: list[dict] = []
-    for record_id, cleanup in cleanups.items():
-        if len(rows) >= sample_limit:
-            break
-        rows.append(_preview_one(run_dir, record_id, detections, cleanup, layouts))
-    return rows
+    records, skipped_rows = _preview_records(detections, cleanups, layouts, sample_limit)
+    page_rows = [
+        _preview_page(run_dir, image_name, page_records)
+        for image_name, page_records in _group_by_image(records).items()
+    ]
+    return page_rows + skipped_rows
 
 
-def _preview_one(
-    run_dir: Path,
-    record_id: str,
+def _preview_records(
     detections: dict[str, dict],
-    cleanup: dict,
+    cleanups: dict[str, dict],
     layouts: dict[str, dict],
-) -> dict:
-    detection = detections.get(record_id)
-    layout = layouts.get(record_id)
-    if detection is None:
-        return _skipped_row(record_id, "missing_detection")
-    if layout is None:
-        return _skipped_row(record_id, "missing_layout")
+    sample_limit: int,
+) -> tuple[list[dict], list[dict]]:
+    records: list[dict] = []
+    skipped_rows: list[dict] = []
+    for index, (record_id, cleanup) in enumerate(cleanups.items()):
+        if index >= sample_limit:
+            break
+        detection = detections.get(record_id)
+        layout = layouts.get(record_id)
+        if detection is None:
+            skipped_rows.append(_skipped_row(record_id, "missing_detection"))
+            continue
+        if layout is None:
+            skipped_rows.append(_skipped_row(record_id, "missing_layout"))
+            continue
+        records.append(_preview_record(detection, cleanup, layout))
+    return records, skipped_rows
 
-    bbox = tuple(cleanup["cleanup"]["bbox"])
-    preview_path = run_dir / "pages" / f"{_safe_name(record_id)}.png"
-    compose_page_preview(
-        detection["image_path"],
-        bbox,
-        cleanup["cleanup"]["cleaned_crop_path"],
-        layout["layout"]["preview_path"],
-        preview_path,
-    )
+
+def _preview_record(detection: dict, cleanup: dict, layout: dict) -> dict:
+    bbox = cleanup["cleanup"]["bbox"]
     return {
-        "record_id": record_id,
+        "record_id": detection["record_id"],
         "image_name": detection.get("image_name"),
         "translated_text": detection.get("translated_text", ""),
-        "status": "preview_generated",
+        "image_path": detection["image_path"],
+        "bbox": bbox,
+        "cleanup_method": cleanup["cleanup"].get("method"),
+        "cleaned_crop_path": cleanup["cleanup"]["cleaned_crop_path"],
+        "layout_preview_path": layout["layout"]["preview_path"],
+    }
+
+
+def _preview_page(run_dir: Path, image_name: str, records: list[dict]) -> dict:
+    preview_path = run_dir / "pages" / f"{_safe_name(image_name)}.png"
+    compose_page_records(records[0]["image_path"], records, preview_path)
+    return {
+        "image_name": image_name,
+        "status": "page_preview_generated",
+        "records": [_record_summary(record) for record in records],
         "preview": {
             "page_preview_path": str(preview_path),
-            "bbox": list(bbox),
-            "cleanup_method": cleanup["cleanup"].get("method"),
-            "layout_preview_path": layout["layout"]["preview_path"],
+            "record_count": len(records),
         },
+    }
+
+
+def _record_summary(record: dict) -> dict:
+    return {
+        "record_id": record["record_id"],
+        "bbox": record["bbox"],
+        "cleanup_method": record.get("cleanup_method"),
+        "layout_preview_path": record["layout_preview_path"],
     }
 
 
@@ -103,6 +126,13 @@ def _skipped_row(record_id: str, reason: str) -> dict:
         "status": "skipped",
         "preview": {"failure_reason": reason},
     }
+
+
+def _group_by_image(records: list[dict]) -> dict[str, list[dict]]:
+    grouped: dict[str, list[dict]] = {}
+    for record in records:
+        grouped.setdefault(record.get("image_name") or "unknown", []).append(record)
+    return grouped
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -119,7 +149,9 @@ def _write_report(
     layout_run_dir: str | Path,
     rows: list[dict],
 ) -> None:
-    generated = sum(1 for row in rows if row["status"] == "preview_generated")
+    generated = sum(1 for row in rows if row["status"] == "page_preview_generated")
+    skipped = sum(1 for row in rows if row["status"] == "skipped")
+    record_count = sum(len(row.get("records", [])) for row in rows) + skipped
     lines = [
         "# Phase 7 Page Preview Report",
         "",
@@ -129,9 +161,9 @@ def _write_report(
         "",
         "## Summary",
         "",
-        f"- Records processed: {len(rows)}",
+        f"- Records processed: {record_count}",
         f"- Page previews generated: {generated}",
-        f"- Skipped: {len(rows) - generated}",
+        f"- Skipped: {skipped}",
         "",
         "## Generated Artifacts",
         "",

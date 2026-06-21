@@ -38,19 +38,58 @@ def test_compose_page_preview_pastes_cleaned_crop_and_text_overlay(tmp_path: Pat
         assert ImageChops.difference(preview, original).getbbox() is not None
 
 
-def test_run_phase7_preview_writes_page_preview_and_records(tmp_path: Path):
+def test_run_phase7_preview_groups_multiple_records_on_one_page(tmp_path: Path):
     page_path = _write_page(tmp_path / "page.png")
-    cleaned_path = _write_cleaned_crop(tmp_path / "cleaned.png")
-    layout_path = _write_layout_preview(tmp_path / "layout.png")
     detection_run = tmp_path / "phase2"
     cleanup_run = tmp_path / "phase6"
     layout_run = tmp_path / "phase4"
     detection_run.mkdir()
     cleanup_run.mkdir()
     layout_run.mkdir()
-    _write_detection(detection_run / "detections.jsonl", page_path)
-    _write_cleanup(cleanup_run / "cleanup-results.jsonl", cleaned_path)
-    _write_layout(layout_run / "layout-results.jsonl", layout_path)
+    _write_detections(detection_run / "detections.jsonl", page_path)
+    _write_cleanups(cleanup_run / "cleanup-results.jsonl", tmp_path)
+    _write_layouts(layout_run / "layout-results.jsonl", tmp_path)
+
+    run_dir = run_phase7_preview(
+        detection_run_dir=detection_run,
+        cleanup_run_dir=cleanup_run,
+        layout_run_dir=layout_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase7-test",
+        sample_limit=2,
+    )
+
+    rows = _read_jsonl(run_dir / "preview-results.jsonl")
+    assert len(rows) == 1
+    assert rows[0]["image_name"] == "page.png"
+    assert rows[0]["status"] == "page_preview_generated"
+    assert [record["record_id"] for record in rows[0]["records"]] == ["page.png#1", "page.png#2"]
+    preview_path = Path(rows[0]["preview"]["page_preview_path"])
+    assert preview_path.exists()
+    with Image.open(preview_path).convert("RGB") as preview:
+        assert preview.getpixel((60, 45)) == (0, 0, 0)
+        assert preview.getpixel((30, 25)) == (0, 0, 0)
+    assert (run_dir / "reports" / "phase7-report.md").exists()
+
+
+def test_run_phase7_preview_records_missing_layout_as_skipped(tmp_path: Path):
+    page_path = _write_page(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    cleanup_run = tmp_path / "phase6"
+    layout_run = tmp_path / "phase4"
+    detection_run.mkdir()
+    cleanup_run.mkdir()
+    layout_run.mkdir()
+    bbox = [40, 20, 80, 70]
+    _write_jsonl(
+        detection_run / "detections.jsonl",
+        [_detection_payload("page.png#1", page_path, bbox)],
+    )
+    _write_jsonl(
+        cleanup_run / "cleanup-results.jsonl",
+        [_cleanup_payload("page.png#1", _write_cleaned_crop(tmp_path / "cleaned.png"), bbox)],
+    )
+    _write_jsonl(layout_run / "layout-results.jsonl", [])
 
     run_dir = run_phase7_preview(
         detection_run_dir=detection_run,
@@ -62,15 +101,17 @@ def test_run_phase7_preview_writes_page_preview_and_records(tmp_path: Path):
     )
 
     rows = _read_jsonl(run_dir / "preview-results.jsonl")
-    assert rows[0]["record_id"] == "page.png#1"
-    assert rows[0]["status"] == "preview_generated"
-    assert Path(rows[0]["preview"]["page_preview_path"]).exists()
-    assert (run_dir / "reports" / "phase7-report.md").exists()
+    assert rows == [_skipped_payload("page.png#1", "missing_layout")]
+    report = (run_dir / "reports" / "phase7-report.md").read_text(encoding="utf-8")
+    assert "- Records processed: 1" in report
+    assert "- Page previews generated: 0" in report
+    assert "- Skipped: 1" in report
 
 
 def _write_page(path: Path) -> Path:
     image = Image.new("RGB", (120, 100), "white")
     ImageDraw.Draw(image).rectangle((40, 20, 80, 70), fill="black")
+    ImageDraw.Draw(image).rectangle((10, 10, 50, 40), fill="black")
     image.save(path)
     return path
 
@@ -87,33 +128,78 @@ def _write_layout_preview(path: Path) -> Path:
     return path
 
 
-def _write_detection(path: Path, page_path: Path) -> None:
-    payload = {
-        "record_id": "page.png#1",
+def _write_detections(path: Path, page_path: Path) -> None:
+    payloads = [
+        _detection_payload("page.png#1", page_path, [40, 20, 80, 70]),
+        _detection_payload("page.png#2", page_path, [10, 10, 50, 40]),
+    ]
+    _write_jsonl(path, payloads)
+
+
+def _write_cleanups(path: Path, tmp_path: Path) -> None:
+    payloads = [
+        _cleanup_payload(
+            "page.png#1",
+            _write_cleaned_crop(tmp_path / "cleaned-1.png"),
+            [40, 20, 80, 70],
+        ),
+        _cleanup_payload(
+            "page.png#2",
+            _write_cleaned_crop(tmp_path / "cleaned-2.png"),
+            [10, 10, 50, 40],
+        ),
+    ]
+    _write_jsonl(path, payloads)
+
+
+def _write_layouts(path: Path, tmp_path: Path) -> None:
+    payloads = [
+        _layout_payload("page.png#1", _write_layout_preview(tmp_path / "layout-1.png")),
+        _layout_payload("page.png#2", _write_layout_preview(tmp_path / "layout-2.png")),
+    ]
+    _write_jsonl(path, payloads)
+
+
+def _detection_payload(record_id: str, page_path: Path, bbox: list[int]) -> dict:
+    return {
+        "record_id": record_id,
         "status": "ok",
         "image_name": "page.png",
         "image_path": str(page_path),
-        "selected_text_box_xyxy": [40, 20, 80, 70],
+        "selected_text_box_xyxy": bbox,
     }
-    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-def _write_cleanup(path: Path, cleaned_path: Path) -> None:
-    payload = {
-        "record_id": "page.png#1",
+def _cleanup_payload(record_id: str, cleaned_path: Path, bbox: list[int]) -> dict:
+    return {
+        "record_id": record_id,
         "status": "cleaned",
-        "cleanup": {"cleaned_crop_path": str(cleaned_path), "bbox": [40, 20, 80, 70]},
+        "cleanup": {"cleaned_crop_path": str(cleaned_path), "bbox": bbox},
     }
-    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-def _write_layout(path: Path, layout_path: Path) -> None:
-    payload = {
-        "record_id": "page.png#1",
+def _layout_payload(record_id: str, layout_path: Path) -> dict:
+    return {
+        "record_id": record_id,
         "status": "layout_generated",
         "layout": {"preview_path": str(layout_path)},
     }
-    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _skipped_payload(record_id: str, reason: str) -> dict:
+    return {
+        "record_id": record_id,
+        "status": "skipped",
+        "preview": {"failure_reason": reason},
+    }
+
+
+def _write_jsonl(path: Path, payloads: list[dict]) -> None:
+    path.write_text(_jsonl(payloads), encoding="utf-8")
+
+
+def _jsonl(payloads: list[dict]) -> str:
+    return "".join(json.dumps(payload, ensure_ascii=False) + "\n" for payload in payloads)
 
 
 def _read_jsonl(path: Path) -> list[dict]:
