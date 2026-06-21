@@ -32,21 +32,22 @@ Generated artifacts:
 - Record: `GBC06_01.png#1`
 - Layout preview: `outputs/runs/phase4-gbc06-layout-smoke/debug/layout_candidates/GBC06-01-png-1.png`
 - Layout alpha ink center offset after correction: `-0.5px` horizontal, `-0.5px` vertical
+- Validation row now carries `layout_alignment` beside the model verdict, so batch review can filter by deterministic ink placement without joining against `layout-results.jsonl`.
 - Validation status: `accepted`
 - Selection source: `mimo_vision`
 - Accepted: `true`
 - Needs revision: `false`
 - Failure reason: `null`
 - Model failure reason: `null`
-- Raw model text: `ACCEPT: Text is centered and fits the target bounding box without overflow.`
-- Reasoning summary: `Text is centered and fits the target bounding box without overflow.`
+- Raw model text: `ACCEPT: The text "街头演出？" is correctly lettered, horizontally oriented, and properly fits within the target dimensions without overflow.`
+- Reasoning summary: `The text "街头演出？" is correctly lettered, horizontally oriented, and properly fits within the target dimensions without overflow.`
 - Recommended changes: none
 - Request prompt characters: 205
 - Request thinking type: `disabled`
 - Request image count: 1
 - Max completion tokens: 96
-- Last observed token usage: 239 total tokens
-- Last observed completion tokens: 15
+- Last observed token usage: 252 total tokens
+- Last observed completion tokens: 28
 - Last observed reasoning tokens: 0
 
 ## Interpretation
@@ -55,9 +56,11 @@ This phase now has a real model-backed validation path plus a deterministic fall
 
 The latest API request completed, returned usage metadata, and produced non-empty model text. Disabling thinking changed the observed response from an empty body with `95` reasoning tokens to usable verdict text with `0` reasoning tokens.
 
-The previous persisted model-backed verdict was `REVISE, text is vertically centered but lacks horizontal centering within the target width.` The current layout run now records alpha-channel ink alignment and recenters the visible ink after rendering. On the same smoke record, `horizontal_center_offset_px` moved from `-16.5` before correction to `-0.5` after correction, and MIMO now returns `ACCEPT: Text is centered and fits the target bounding box without overflow.`
+The previous persisted model-backed verdict was `REVISE, text is vertically centered but lacks horizontal centering within the target width.` The current layout run now records alpha-channel ink alignment and recenters the visible ink after rendering. On the same smoke record, `horizontal_center_offset_px` moved from `-16.5` before correction to `-0.5` after correction, and MIMO now returns `ACCEPT`.
 
 This is the first closed layout feedback loop in Phase 4: MIMO reported a concrete visual issue, deterministic alpha metrics made the issue measurable, the renderer corrected the visible-ink placement, and MIMO accepted the corrected preview.
+
+The validation artifact now preserves that deterministic alignment data in each `layout-validation.jsonl` row as `layout_alignment`. This makes the next 10-30 record batch inspectable by verdict, model reason, and measurable ink-center offset from a single JSONL stream.
 
 ## Adjustment Already Tried
 

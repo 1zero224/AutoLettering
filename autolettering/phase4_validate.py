@@ -116,6 +116,7 @@ def _validation_row(row: dict, result, raw_text: str) -> dict:
         "model_failure_reason": getattr(result, "model_failure_reason", None),
         "selection_source": getattr(result, "selection_source", "mimo_vision"),
         "layout_preview_path": layout["preview_path"],
+        "layout_alignment": layout.get("alignment"),
         "raw_model_text": raw_text,
     }
 
@@ -144,6 +145,7 @@ def _failure_validation(row: dict, exc: Exception) -> dict:
         "reasoning_summary": None,
         "failure_reason": f"api_error:{type(exc).__name__}",
         "layout_preview_path": layout.get("preview_path"),
+        "layout_alignment": layout.get("alignment"),
         "raw_model_text": None,
     }
 

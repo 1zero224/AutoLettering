@@ -132,6 +132,8 @@ def test_run_phase4_layout_validation_writes_results_and_api_summaries(tmp_path:
     assert validations[0]["accepted"] is True
     assert validations[0]["naturalness_score"] == 0.86
     assert validations[0]["layout_preview_path"] == str(preview_path)
+    assert validations[0]["layout_alignment"]["ink_bbox"] == [10, 20, 110, 60]
+    assert validations[0]["layout_alignment"]["horizontal_center_offset_px"] == 0.0
     assert api_calls[0]["record_id"] == "page.png#1"
     assert api_calls[0]["request"]["prompt_chars"] > 0
     assert "api_key" not in json.dumps(api_calls[0]).lower()
@@ -209,6 +211,15 @@ def _write_layout_results(path: Path, preview_path: Path) -> None:
             "measured_width": 100,
             "measured_height": 40,
             "preview_path": str(preview_path),
+            "alignment": {
+                "canvas_width": 120,
+                "canvas_height": 80,
+                "ink_bbox": [10, 20, 110, 60],
+                "ink_width": 100,
+                "ink_height": 40,
+                "horizontal_center_offset_px": 0.0,
+                "vertical_center_offset_px": 0.0,
+            },
         },
     }
     path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
