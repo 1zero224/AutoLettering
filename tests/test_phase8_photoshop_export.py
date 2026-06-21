@@ -53,21 +53,20 @@ def test_run_phase8_photoshop_export_preserves_replacement_cleanup(tmp_path: Pat
     detection_run = _mkdir(tmp_path / "phase2")
     font_run = _mkdir(tmp_path / "phase3")
     layout_run = _mkdir(tmp_path / "phase4")
-    cleanup_run = _mkdir(tmp_path / "phase6")
+    cleanup_run_a = _mkdir(tmp_path / "phase6-a")
+    cleanup_run_b = _mkdir(tmp_path / "phase6-b")
     replacement_path = tmp_path / "replacement.png"
     _write_jsonl(detection_run / "detections.jsonl", [_detection_payload(image_path)])
     _write_jsonl(font_run / "font-selections.jsonl", [_font_payload(tmp_path / "font.ttf")])
     _write_jsonl(layout_run / "layout-results.jsonl", [_layout_payload()])
-    _write_jsonl(
-        cleanup_run / "cleanup-results.jsonl",
-        [_cleanup_payload(tmp_path / "local.png", replacement_path)],
-    )
+    _write_jsonl(cleanup_run_a / "cleanup-results.jsonl", [_cleanup_payload(tmp_path / "local.png")])
+    _write_jsonl(cleanup_run_b / "cleanup-results.jsonl", [_cleanup_payload(tmp_path / "local.png", replacement_path)])
 
     run_dir = run_phase8_photoshop_export(
         detection_run,
         font_run,
         layout_run,
-        cleanup_run,
+        [cleanup_run_a, cleanup_run_b],
         tmp_path / "outputs",
         sample_limit=1,
     )
@@ -80,6 +79,8 @@ def test_run_phase8_photoshop_export_preserves_replacement_cleanup(tmp_path: Pat
     assert cleanup["effective_method"] == "gpt_image2_masked_edit"
     assert cleanup["effective_crop_path"] == str(replacement_path)
     report = (run_dir / "reports" / "phase8-report.md").read_text(encoding="utf-8")
+    assert str(cleanup_run_a) in report
+    assert str(cleanup_run_b) in report
     assert "`gpt_image2_masked_edit=1`" in report
 
 

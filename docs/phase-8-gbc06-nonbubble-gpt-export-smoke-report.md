@@ -75,7 +75,7 @@ For the non-bubble record, `effective_*` points at the GPT replacement crop beca
 ## Limitations
 
 - The generated JSX still creates editable text layers only. It records cleanup bitmap paths in the manifest but does not yet place cleaned/replacement bitmap patches as Photoshop layers.
-- This run uses a non-bubble cleanup directory only, so the first bubble record has missing cleanup metadata. A mixed bubble/non-bubble export needs a merged cleanup input or multi-cleanup-run support.
+- This run uses a non-bubble cleanup directory only, so the first bubble record has missing cleanup metadata. Mixed bubble/non-bubble export is now covered by `docs/phase-7-8-gbc06-mixed-cleanup-smoke-report.md`, using repeated `--cleanup-run-dir` inputs.
 - Photoshop is not available in this environment, so the JSX was not executed inside Photoshop.
 
 ## Verification

@@ -72,6 +72,43 @@ def test_run_phase7_preview_groups_multiple_records_on_one_page(tmp_path: Path):
     assert (run_dir / "reports" / "phase7-report.md").exists()
 
 
+def test_run_phase7_preview_merges_multiple_cleanup_runs(tmp_path: Path):
+    page_path = _write_page(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    cleanup_run_a = tmp_path / "phase6-a"
+    cleanup_run_b = tmp_path / "phase6-b"
+    layout_run = tmp_path / "phase4"
+    detection_run.mkdir()
+    cleanup_run_a.mkdir()
+    cleanup_run_b.mkdir()
+    layout_run.mkdir()
+    _write_detections(detection_run / "detections.jsonl", page_path)
+    _write_jsonl(
+        cleanup_run_a / "cleanup-results.jsonl",
+        [_cleanup_payload("page.png#1", _write_cleaned_crop(tmp_path / "cleaned-1.png"), [40, 20, 80, 70])],
+    )
+    _write_jsonl(
+        cleanup_run_b / "cleanup-results.jsonl",
+        [_cleanup_payload("page.png#2", _write_cleaned_crop(tmp_path / "cleaned-2.png"), [10, 10, 50, 40])],
+    )
+    _write_layouts(layout_run / "layout-results.jsonl", tmp_path)
+
+    run_dir = run_phase7_preview(
+        detection_run,
+        [cleanup_run_a, cleanup_run_b],
+        layout_run,
+        tmp_path / "outputs",
+        "phase7-merged-cleanups",
+        2,
+    )
+
+    rows = _read_jsonl(run_dir / "preview-results.jsonl")
+    assert [record["record_id"] for record in rows[0]["records"]] == ["page.png#1", "page.png#2"]
+    report = (run_dir / "reports" / "phase7-report.md").read_text(encoding="utf-8")
+    assert str(cleanup_run_a) in report
+    assert str(cleanup_run_b) in report
+
+
 def test_run_phase7_preview_records_missing_layout_as_skipped(tmp_path: Path):
     page_path = _write_page(tmp_path / "page.png")
     detection_run = tmp_path / "phase2"

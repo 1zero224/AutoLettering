@@ -102,7 +102,7 @@ This is the first preview smoke where a non-bubble region uses a real gpt-image-
 - The gpt-image-2 output is center-fit back to the detected bbox size. This is deterministic but may not preserve the best part of the generated image.
 - The detected non-bubble bbox is narrow and tall, so both inpainting and text rendering remain highly sensitive to Phase 2 detection quality.
 - Layout validation remains deterministic-only; the final page preview is not yet model-approved.
-- The preview covers one non-bubble record; broader multi-record mixed bubble/non-bubble composition still needs a merged cleanup run.
+- This non-bubble-only preview covers one record. Mixed bubble/non-bubble composition is now covered by `docs/phase-7-8-gbc06-mixed-cleanup-smoke-report.md`, using repeated `--cleanup-run-dir` inputs.
 
 ## Verification
 

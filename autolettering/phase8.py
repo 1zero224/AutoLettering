@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from .cleanup_runs import CleanupRunInput, format_cleanup_run_dirs, load_cleanup_rows_by_id
 from .export.photoshop import build_photoshop_manifest, write_json, write_photoshop_import_jsx
 
 
@@ -10,7 +11,7 @@ def run_phase8_photoshop_export(
     detection_run_dir: str | Path,
     font_selection_run_dir: str | Path,
     layout_run_dir: str | Path,
-    cleanup_run_dir: str | Path,
+    cleanup_run_dir: CleanupRunInput,
     output_root: str | Path = "outputs/runs",
     run_id: str | None = None,
     sample_limit: int = 5,
@@ -21,7 +22,7 @@ def run_phase8_photoshop_export(
         detection_rows=_load_jsonl_by_id(Path(detection_run_dir) / "detections.jsonl", "ok"),
         font_rows=_load_jsonl_by_id(Path(font_selection_run_dir) / "font-selections.jsonl", "selected"),
         layout_rows=_load_jsonl(Path(layout_run_dir) / "layout-results.jsonl", "layout_generated"),
-        cleanup_rows=_load_jsonl_by_id(Path(cleanup_run_dir) / "cleanup-results.jsonl", "cleaned"),
+        cleanup_rows=load_cleanup_rows_by_id(cleanup_run_dir),
         sample_limit=sample_limit,
     )
     write_json(run_dir / "photoshop-manifest.json", manifest)
@@ -59,7 +60,7 @@ def _write_report(
     detection_run_dir: str | Path,
     font_selection_run_dir: str | Path,
     layout_run_dir: str | Path,
-    cleanup_run_dir: str | Path,
+    cleanup_run_dir: CleanupRunInput,
     manifest: dict,
 ) -> None:
     cleanup_summary = _cleanup_summary(manifest)
@@ -69,7 +70,7 @@ def _write_report(
         f"Detection run directory: `{detection_run_dir}`",
         f"Font selection run directory: `{font_selection_run_dir}`",
         f"Layout run directory: `{layout_run_dir}`",
-        f"Cleanup run directory: `{cleanup_run_dir}`",
+        f"Cleanup run directories: {format_cleanup_run_dirs(cleanup_run_dir)}",
         "",
         "## Summary",
         "",

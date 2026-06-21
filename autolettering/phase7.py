@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from .cleanup_runs import CleanupRunInput, format_cleanup_run_dirs, load_cleanup_rows_by_id
 from .rendering.compose import compose_page_records
 
 
 def run_phase7_preview(
     detection_run_dir: str | Path,
-    cleanup_run_dir: str | Path,
+    cleanup_run_dir: CleanupRunInput,
     layout_run_dir: str | Path,
     output_root: str | Path = "outputs/runs",
     run_id: str | None = None,
@@ -17,7 +18,7 @@ def run_phase7_preview(
     run_dir = Path(output_root) / (run_id or "phase7-page-preview")
     run_dir.mkdir(parents=True, exist_ok=True)
     detections = _load_detection_rows(Path(detection_run_dir) / "detections.jsonl")
-    cleanups = _load_jsonl_by_id(Path(cleanup_run_dir) / "cleanup-results.jsonl", "cleaned")
+    cleanups = load_cleanup_rows_by_id(cleanup_run_dir)
     layouts = _load_jsonl_by_id(Path(layout_run_dir) / "layout-results.jsonl", "layout_generated")
     rows = _preview_rows(run_dir, detections, cleanups, layouts, sample_limit)
     _write_jsonl(run_dir / "preview-results.jsonl", rows)
@@ -153,7 +154,7 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
 def _write_report(
     output_path: Path,
     detection_run_dir: str | Path,
-    cleanup_run_dir: str | Path,
+    cleanup_run_dir: CleanupRunInput,
     layout_run_dir: str | Path,
     rows: list[dict],
 ) -> None:
@@ -164,7 +165,7 @@ def _write_report(
         "# Phase 7 Page Preview Report",
         "",
         f"Detection run directory: `{detection_run_dir}`",
-        f"Cleanup run directory: `{cleanup_run_dir}`",
+        f"Cleanup run directories: {format_cleanup_run_dirs(cleanup_run_dir)}",
         f"Layout run directory: `{layout_run_dir}`",
         "",
         "## Summary",
