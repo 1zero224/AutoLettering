@@ -601,7 +601,9 @@ Compose page previews from:
 
 The preview must be programmatic and independent of Photoshop.
 
-Each preview run should also write `reports/manual-review.csv`. The review CSV is the human inspection queue for rendered page previews, with one row per generated or skipped record. It should include `record_id`, `status`, `image_name`, `translated_text`, `bbox`, `cleanup_method`, `cleanup_crop_path`, `layout_preview_path`, `page_preview_path`, `failure_reason`, and blank `manual_decision` / `review_notes` columns so visual review decisions can be tracked without editing JSONL artifacts.
+Each preview run should write per-record local comparison crops under `crops/before_after/*.png`. These crops are side-by-side pairs of the original page crop and the final composed preview crop for the same bbox, so visual review can inspect what changed without opening the full page.
+
+Each preview run should also write `reports/manual-review.csv`. The review CSV is the human inspection queue for rendered page previews, with one row per generated or skipped record. It should include `record_id`, `status`, `image_name`, `translated_text`, `bbox`, `cleanup_method`, `cleanup_crop_path`, `layout_preview_path`, `page_preview_path`, `preview_before_after_path`, `failure_reason`, and blank `manual_decision` / `review_notes` columns so visual review decisions can be tracked without editing JSONL artifacts.
 
 ### Phase 8: Photoshop Export
 

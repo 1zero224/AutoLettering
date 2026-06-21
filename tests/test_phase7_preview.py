@@ -103,12 +103,46 @@ def test_run_phase7_preview_writes_manual_review_csv(tmp_path: Path):
     assert rows[0]["cleanup_method"] == "bubble_fill"
     assert rows[0]["cleanup_crop_path"].endswith("cleaned-1.png")
     assert rows[0]["layout_preview_path"].endswith("layout-1.png")
+    assert rows[0]["preview_before_after_path"].endswith("page-png-1.png")
     assert rows[0]["failure_reason"] == ""
     assert rows[0]["manual_decision"] == ""
     assert rows[0]["review_notes"] == ""
     assert rows[1]["status"] == "skipped"
     assert rows[1]["failure_reason"] == "missing_layout"
     assert rows[1]["page_preview_path"] == ""
+    assert rows[1]["preview_before_after_path"] == ""
+
+
+def test_run_phase7_preview_writes_record_before_after_crops(tmp_path: Path):
+    page_path = _write_page(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    cleanup_run = tmp_path / "phase6"
+    layout_run = tmp_path / "phase4"
+    detection_run.mkdir()
+    cleanup_run.mkdir()
+    layout_run.mkdir()
+    _write_detections(detection_run / "detections.jsonl", page_path)
+    _write_cleanups(cleanup_run / "cleanup-results.jsonl", tmp_path)
+    _write_layouts(layout_run / "layout-results.jsonl", tmp_path)
+
+    run_dir = run_phase7_preview(
+        detection_run_dir=detection_run,
+        cleanup_run_dir=cleanup_run,
+        layout_run_dir=layout_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase7-before-after",
+        sample_limit=2,
+    )
+
+    rows = _read_jsonl(run_dir / "preview-results.jsonl")
+    crop_path = Path(rows[0]["records"][0]["preview_before_after_path"])
+    assert crop_path.exists()
+    assert crop_path.parent.name == "before_after"
+    with Image.open(crop_path).convert("RGB") as crop:
+        assert crop.size == (80, 50)
+        assert crop.getpixel((5, 5)) == (0, 0, 0)
+        assert crop.getpixel((45, 5)) == (255, 255, 255)
+        assert crop.getpixel((60, 25)) == (0, 0, 0)
 
 
 def test_run_phase7_preview_merges_multiple_cleanup_runs(tmp_path: Path):

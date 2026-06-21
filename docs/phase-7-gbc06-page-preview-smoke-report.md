@@ -18,6 +18,7 @@ Generated artifacts:
 
 - `preview-results.jsonl`
 - `pages/*.png`
+- `crops/before_after/*.png`
 - `reports/phase7-report.md`
 - `reports/manual-review.csv`
 
@@ -35,8 +36,10 @@ Generated artifacts:
 - Preview image size: `1440 x 2048`
 - Text bbox: `[674, 0, 1049, 342]`
 - Cleanup method: `bubble_fill`
+- Preview before/after crop: `outputs/runs/phase7-gbc06-page-group-preview-smoke/crops/before_after/GBC06-01-png-1.png`
+- Preview before/after image size: `750 x 342`
 - Manual review CSV rows: `1`
-- Manual review CSV size: `498` bytes
+- Manual review CSV size: `613` bytes
 - Layout preview: `outputs/runs/phase4-gbc06-layout-smoke/debug/layout_candidates/GBC06-01-png-1.png`
 
 The page-level JSONL row is now grouped by image:
@@ -52,7 +55,8 @@ The page-level JSONL row is now grouped by image:
       "translated_text": "街头演出？",
       "cleanup_method": "bubble_fill",
       "cleanup_crop_path": "outputs\\runs\\phase6-gbc06-bubble-smoke\\crops\\cleaned\\GBC06-01-png-1.png",
-      "layout_preview_path": "outputs\\runs\\phase4-gbc06-layout-smoke\\debug\\layout_candidates\\GBC06-01-png-1.png"
+      "layout_preview_path": "outputs\\runs\\phase4-gbc06-layout-smoke\\debug\\layout_candidates\\GBC06-01-png-1.png",
+      "preview_before_after_path": "outputs\\runs\\phase7-gbc06-page-group-preview-smoke\\crops\\before_after\\GBC06-01-png-1.png"
     }
   ],
   "preview": {
@@ -74,7 +78,8 @@ This is the first complete local preview chain:
 
 This creates one inspectable full-page preview per processed source image. Synthetic tests cover multiple records on the same page; the current GBC06 smoke still uses one real record because the upstream Phase 3/4/6 runs only contain one aligned record.
 Records missing matching detection or layout rows are kept as `skipped` rows with a failure reason instead of being silently dropped.
-`reports/manual-review.csv` now provides the Phase 7 human review queue. Each row includes the record, translated text, bbox, cleanup method/crop, layout preview, page preview, failure reason, and blank `manual_decision` / `review_notes` columns.
+`crops/before_after/*.png` stores per-record side-by-side crops: the left half is the original page crop for the detected bbox, and the right half is the same bbox from the final composed page preview.
+`reports/manual-review.csv` now provides the Phase 7 human review queue. Each row includes the record, translated text, bbox, cleanup method/crop, layout preview, page preview, preview before/after crop, failure reason, and blank `manual_decision` / `review_notes` columns.
 
 ## Limitations
 
@@ -93,7 +98,7 @@ python -m pytest -q
 Recorded full-suite result during this report refresh:
 
 ```text
-58 passed in 3.55s
+59 passed in 3.24s
 ```
 
 ## Notes

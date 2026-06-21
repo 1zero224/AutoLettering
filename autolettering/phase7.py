@@ -4,6 +4,8 @@ import csv
 import json
 from pathlib import Path
 
+from PIL import Image
+
 from .cleanup_runs import CleanupRunInput, format_cleanup_run_dirs, load_cleanup_rows_by_id
 from .rendering.compose import compose_page_records
 
@@ -103,6 +105,7 @@ def _preview_record(detection: dict, cleanup: dict, layout: dict) -> dict:
 def _preview_page(run_dir: Path, image_name: str, records: list[dict]) -> dict:
     preview_path = run_dir / "pages" / f"{_safe_name(image_name)}.png"
     compose_page_records(records[0]["image_path"], records, preview_path)
+    _write_record_before_after_crops(run_dir, preview_path, records)
     return {
         "image_name": image_name,
         "status": "page_preview_generated",
@@ -122,6 +125,7 @@ def _record_summary(record: dict) -> dict:
         "cleanup_method": record.get("cleanup_method"),
         "cleanup_crop_path": record.get("cleaned_crop_path", ""),
         "layout_preview_path": record["layout_preview_path"],
+        "preview_before_after_path": record.get("preview_before_after_path", ""),
     }
 
 
@@ -155,6 +159,27 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def _write_record_before_after_crops(run_dir: Path, preview_path: Path, records: list[dict]) -> None:
+    with Image.open(records[0]["image_path"]) as original_image:
+        original = original_image.convert("RGB")
+    with Image.open(preview_path) as preview_image:
+        preview = preview_image.convert("RGB")
+    for record in records:
+        output_path = run_dir / "crops" / "before_after" / f"{_safe_name(record['record_id'])}.png"
+        _save_before_after_crop(original, preview, tuple(record["bbox"]), output_path)
+        record["preview_before_after_path"] = str(output_path)
+
+
+def _save_before_after_crop(original: Image.Image, preview: Image.Image, bbox: tuple[int, int, int, int], path: Path) -> None:
+    before = original.crop(bbox)
+    after = preview.crop(bbox)
+    comparison = Image.new("RGB", (before.width + after.width, before.height), "white")
+    comparison.paste(before, (0, 0))
+    comparison.paste(after, (before.width, 0))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    comparison.save(path)
+
+
 def _write_manual_review_csv(output_path: Path, rows: list[dict]) -> None:
     fieldnames = [
         "record_id",
@@ -166,6 +191,7 @@ def _write_manual_review_csv(output_path: Path, rows: list[dict]) -> None:
         "cleanup_crop_path",
         "layout_preview_path",
         "page_preview_path",
+        "preview_before_after_path",
         "failure_reason",
         "manual_decision",
         "review_notes",
@@ -199,6 +225,7 @@ def _generated_review_row(row: dict, record: dict) -> dict:
         "cleanup_crop_path": record.get("cleanup_crop_path", ""),
         "layout_preview_path": record.get("layout_preview_path", ""),
         "page_preview_path": row.get("preview", {}).get("page_preview_path", ""),
+        "preview_before_after_path": record.get("preview_before_after_path", ""),
         "failure_reason": "",
         "manual_decision": "",
         "review_notes": "",
@@ -216,6 +243,7 @@ def _skipped_review_row(row: dict) -> dict:
         "cleanup_crop_path": "",
         "layout_preview_path": "",
         "page_preview_path": "",
+        "preview_before_after_path": "",
         "failure_reason": row.get("preview", {}).get("failure_reason", ""),
         "manual_decision": "",
         "review_notes": "",
@@ -249,6 +277,7 @@ def _write_report(
         "",
         "- `preview-results.jsonl`",
         "- `pages/*.png`",
+        "- `crops/before_after/*.png`",
         "- `reports/manual-review.csv`",
     ]
     output_path.parent.mkdir(parents=True, exist_ok=True)

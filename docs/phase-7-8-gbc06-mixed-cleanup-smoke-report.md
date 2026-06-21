@@ -39,6 +39,7 @@ Generated Phase 7 artifacts:
 
 - `preview-results.jsonl`
 - `pages/GBC06-01-png.png`
+- `crops/before_after/*.png`
 - `reports/phase7-report.md`
 - `reports/manual-review.csv`
 
@@ -59,13 +60,15 @@ Image check:
       "record_id": "GBC06_01.png#1",
       "translated_text": "街头演出？",
       "cleanup_method": "bubble_fill",
-      "cleanup_crop_path": "outputs\\runs\\phase6-gbc06-bubble-smoke\\crops\\cleaned\\GBC06-01-png-1.png"
+      "cleanup_crop_path": "outputs\\runs\\phase6-gbc06-bubble-smoke\\crops\\cleaned\\GBC06-01-png-1.png",
+      "preview_before_after_path": "outputs\\runs\\phase7-gbc06-mixed-cleanup-preview-smoke\\crops\\before_after\\GBC06-01-png-1.png"
     },
     {
       "record_id": "GBC06_01.png#16",
       "translated_text": "来自桃香的唐突的提案",
       "cleanup_method": "gpt_image2_masked_edit",
-      "cleanup_crop_path": "outputs\\runs\\phase6-gbc06-nonbubble-gpt-image-smoke\\gpt_image2_normalized\\GBC06-01-png-16.png"
+      "cleanup_crop_path": "outputs\\runs\\phase6-gbc06-nonbubble-gpt-image-smoke\\gpt_image2_normalized\\GBC06-01-png-16.png",
+      "preview_before_after_path": "outputs\\runs\\phase7-gbc06-mixed-cleanup-preview-smoke\\crops\\before_after\\GBC06-01-png-16.png"
     }
   ],
   "preview": {
@@ -79,10 +82,15 @@ Phase 7 report summary:
 - Records processed: 2
 - Page previews generated: 1
 - Skipped: 0
+- Preview before/after crops generated: 2
+- `GBC06_01.png#1` preview before/after size: `750 x 342`
+- `GBC06_01.png#16` preview before/after size: `116 x 257`
 - Manual review CSV rows: 2
-- Manual review CSV size: `910` bytes
+- Manual review CSV size: `1121` bytes
 
-`reports/manual-review.csv` now gives the human review queue for the generated page preview. It contains one row per record, including `record_id`, preview status, image name, translated text, bbox, cleanup method/crop, layout preview path, page preview path, failure reason, and blank `manual_decision` / `review_notes` columns. In this smoke, the two review rows cover:
+`crops/before_after/*.png` stores per-record side-by-side crops. The left half is the original page crop for the detected bbox, and the right half is the same bbox from the final composed page preview.
+
+`reports/manual-review.csv` now gives the human review queue for the generated page preview. It contains one row per record, including `record_id`, preview status, image name, translated text, bbox, cleanup method/crop, layout preview path, page preview path, preview before/after crop path, failure reason, and blank `manual_decision` / `review_notes` columns. In this smoke, the two review rows cover:
 
 - `GBC06_01.png#1`: `bubble_fill`
 - `GBC06_01.png#16`: `gpt_image2_masked_edit`
@@ -133,6 +141,7 @@ The exported cleanup paths are:
 - The experiment CLI keeps the same `--cleanup-run-dir` name but allows repeating it.
 - This removes the previous need to manually create a merged cleanup run before composing a mixed bubble/non-bubble page.
 - Phase 7 now writes `reports/manual-review.csv` so generated page previews and skipped records can be accepted, rejected, or annotated during human inspection.
+- Phase 7 now writes per-record `crops/before_after/*.png` previews so manual review can inspect local changes without opening the full page.
 - The Photoshop JSX now attempts to place each layer's `cleanup.effective_crop_path` as a bitmap patch layer named `AL cleanup <record_id>` before adding the editable text layer.
 - The editable text layer is now `TextType.PARAGRAPHTEXT` with `item.width` and `item.height` set from the detected bbox dimensions.
 - The JSX maps `layout.line_spacing` to Photoshop `leading` and maps `layout.letter_spacing` to best-effort `tracking`.
@@ -161,8 +170,8 @@ python -m pytest -q
 Recorded verification results during this report refresh:
 
 ```text
-5 passed in 0.65s
-6 passed in 0.27s
-4 passed in 0.28s
-58 passed in 3.55s
+5 passed in 0.72s
+7 passed in 0.55s
+4 passed in 0.34s
+59 passed in 3.24s
 ```
