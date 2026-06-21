@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
 
@@ -43,12 +44,15 @@ def _write_detections(
     radius_y: int,
 ) -> tuple[int, int]:
     ok_count = failed_count = 0
+    rows: list[dict] = []
     with (run_dir / "detections.jsonl").open("w", encoding="utf-8", newline="\n") as handle:
         for image, label in selected_records:
             payload = _detect_record(run_dir, image, label, radius_x, radius_y)
+            rows.append(payload)
             ok_count += int(payload["status"] == "ok")
             failed_count += int(payload["status"] != "ok")
             handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    _write_manual_review_csv(run_dir / "reports" / "manual-review.csv", rows)
     return ok_count, failed_count
 
 
@@ -76,6 +80,40 @@ def _detect_record(
     return payload
 
 
+def _write_manual_review_csv(output_path: Path, rows: list[dict]) -> None:
+    fieldnames = [
+        "record_id",
+        "status",
+        "confidence",
+        "failure_reason",
+        "candidate_count",
+        "selected_text_box_xyxy",
+        "debug_image_path",
+        "manual_decision",
+        "review_notes",
+    ]
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(_manual_review_row(row))
+
+
+def _manual_review_row(row: dict) -> dict:
+    return {
+        "record_id": row["record_id"],
+        "status": row["status"],
+        "confidence": row["confidence"],
+        "failure_reason": row.get("failure_reason") or "",
+        "candidate_count": len(row.get("candidate_boxes", [])),
+        "selected_text_box_xyxy": json.dumps(row.get("selected_text_box_xyxy"), ensure_ascii=False),
+        "debug_image_path": row.get("debug_image_path", ""),
+        "manual_decision": "",
+        "review_notes": "",
+    }
+
+
 def _write_phase2_report(
     output_path: Path,
     labelplus_file: Path,
@@ -101,6 +139,7 @@ def _write_phase2_report(
         "",
         "- `detections.jsonl`",
         "- `debug/detection/*.png`",
+        "- `reports/manual-review.csv`",
     ]
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")

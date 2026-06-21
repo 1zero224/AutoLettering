@@ -1,3 +1,4 @@
+import csv
 import json
 from pathlib import Path
 
@@ -120,4 +121,12 @@ Comment
     assert records[0]["status"] == "ok"
     assert records[0]["selected_text_box_xyxy"] is not None
     assert Path(records[0]["debug_image_path"]).exists()
+    review_path = run_dir / "reports" / "manual-review.csv"
+    review_rows = list(csv.DictReader(review_path.read_text(encoding="utf-8").splitlines()))
+    assert review_rows[0]["record_id"] == "page.png#1"
+    assert review_rows[0]["status"] == "ok"
+    assert review_rows[0]["manual_decision"] == ""
+    assert review_rows[0]["candidate_count"] == str(len(records[0]["candidate_boxes"]))
+    assert review_rows[0]["selected_text_box_xyxy"] == json.dumps(records[0]["selected_text_box_xyxy"])
+    assert Path(review_rows[0]["debug_image_path"]).exists()
     assert (run_dir / "reports" / "phase2-report.md").exists()

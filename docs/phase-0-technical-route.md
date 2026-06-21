@@ -531,6 +531,7 @@ Start with a local CV prototype before model integration:
 - Find connected components or contours.
 - Score candidates by distance to point, area, aspect ratio, and ink density.
 - Save debug overlay for every record.
+- Write `reports/manual-review.csv` so each selected box can be accepted, rejected, or annotated during manual inspection.
 
 Then add a BallonsTranslator-compatible detector adapter only after the local prototype establishes baseline artifacts and failure categories.
 
