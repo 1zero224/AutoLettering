@@ -64,11 +64,12 @@ def test_mimo_vision_client_analyze_image_uses_given_image_path(tmp_path: Path, 
         return {"choices": [{"message": {"content": "{}"}}], "model": "mimo-v2.5"}
 
     monkeypatch.setattr("autolettering.models.mimo._post_json", fake_post_json)
-    result = client.analyze_image(image_path, "Validate layout", kind="layout_validation")
+    result = client.analyze_image(image_path, "Validate layout", kind="layout_validation", max_completion_tokens=96)
 
     assert result["raw_text"] == "{}"
     assert result["request"]["kind"] == "layout_validation"
     assert result["request"]["image_path"] == str(image_path)
+    assert result["request"]["max_completion_tokens"] == 96
 
 
 def test_parse_font_selection_response_extracts_selected_candidate():

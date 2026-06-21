@@ -17,21 +17,11 @@ class LayoutValidationResult:
 
 
 def build_layout_validation_prompt(translated_text: str, layout: dict) -> str:
-    facts = {
-        "translated_text": translated_text,
-        "orientation": layout.get("orientation"),
-        "font_size": layout.get("font_size"),
-        "overflow_ratio": layout.get("overflow_ratio"),
-        "target_size": [layout.get("target_width"), layout.get("target_height")],
-        "measured_size": [layout.get("measured_width"), layout.get("measured_height")],
-    }
-    return "\n".join(
-        [
-            "Evaluate the manga lettering layout preview.",
-            "Check whether the translated text is readable, natural, and not overflowing.",
-            f"Layout facts JSON: {json.dumps(facts, ensure_ascii=False)}",
-            "Return only JSON with keys: accepted, needs_revision, overflow_ok, naturalness_score, recommended_changes, reasoning_summary.",
-        ]
+    facts = _compact_facts(translated_text, layout)
+    return (
+        "Judge manga text layout. "
+        f"Facts JSON: {json.dumps(facts, ensure_ascii=False, separators=(',', ':'))}. "
+        "Return JSON only: accepted,needs_revision,overflow_ok,naturalness_score,reasoning_summary."
     )
 
 
@@ -101,3 +91,14 @@ def _failed(reason: str) -> LayoutValidationResult:
         reasoning_summary=None,
         failure_reason=reason,
     )
+
+
+def _compact_facts(translated_text: str, layout: dict) -> dict:
+    return {
+        "text": translated_text,
+        "orientation": layout.get("orientation"),
+        "font_size": layout.get("font_size"),
+        "overflow": layout.get("overflow_ratio"),
+        "target": [layout.get("target_width"), layout.get("target_height")],
+        "measured": [layout.get("measured_width"), layout.get("measured_height")],
+    }

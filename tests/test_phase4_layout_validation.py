@@ -11,9 +11,16 @@ from autolettering.phase4_validate import run_phase4_layout_validation
 
 
 class FakeLayoutValidationClient:
-    def analyze_image(self, image_path: str | Path, prompt: str, kind: str = "image_analysis") -> dict:
+    def analyze_image(
+        self,
+        image_path: str | Path,
+        prompt: str,
+        kind: str = "image_analysis",
+        max_completion_tokens: int | None = None,
+    ) -> dict:
         assert Path(image_path).exists()
         assert kind == "layout_validation"
+        assert max_completion_tokens == 96
         assert "overflow" in prompt
         return {
             "raw_text": json.dumps(
@@ -101,6 +108,8 @@ def test_build_layout_validation_prompt_includes_measurements():
     assert "街头演出？" in prompt
     assert "overflow" in prompt
     assert "JSON" in prompt
+    assert "recommended_changes" not in prompt
+    assert len(prompt) < 260
 
 
 def _write_layout_results(path: Path, preview_path: Path) -> None:

@@ -57,7 +57,12 @@ def _validate_one(row: dict, client: LayoutValidationClient) -> tuple[dict, dict
     layout = row["layout"]
     prompt = build_layout_validation_prompt(row.get("translated_text", ""), layout)
     try:
-        response = client.analyze_image(layout["preview_path"], prompt, kind="layout_validation")
+        response = client.analyze_image(
+            layout["preview_path"],
+            prompt,
+            kind="layout_validation",
+            max_completion_tokens=96,
+        )
         result = parse_layout_validation_response(response["raw_text"])
         return _validation_row(row, result, response["raw_text"]), _api_call_row(row, response)
     except Exception as exc:

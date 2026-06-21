@@ -32,7 +32,13 @@ class MimoVisionClient:
     def __init__(self, config: MimoVisionConfig) -> None:
         self.config = config
 
-    def build_chat_payload(self, image_path: str | Path, prompt: str, system_prompt: str | None = None) -> dict:
+    def build_chat_payload(
+        self,
+        image_path: str | Path,
+        prompt: str,
+        system_prompt: str | None = None,
+        max_completion_tokens: int | None = None,
+    ) -> dict:
         return {
             "model": self.config.model,
             "messages": [
@@ -51,7 +57,7 @@ class MimoVisionClient:
                     ],
                 },
             ],
-            "max_completion_tokens": self.config.max_completion_tokens,
+            "max_completion_tokens": max_completion_tokens or self.config.max_completion_tokens,
         }
 
     def choose_font(self, comparison_image_path: str | Path, prompt: str) -> dict:
@@ -64,9 +70,15 @@ class MimoVisionClient:
         prompt: str,
         kind: str = "image_analysis",
         system_prompt: str | None = None,
+        max_completion_tokens: int | None = None,
     ) -> dict:
         image_path = Path(image_path)
-        payload = self.build_chat_payload(image_path, prompt, system_prompt=system_prompt)
+        payload = self.build_chat_payload(
+            image_path,
+            prompt,
+            system_prompt=system_prompt,
+            max_completion_tokens=max_completion_tokens,
+        )
         response = _post_json(self._chat_completions_url(), self.config.api_key, payload)
         return {
             "raw_text": _message_content(response),
