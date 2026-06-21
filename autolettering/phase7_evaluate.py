@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from typing import Protocol
 
+from PIL import Image, ImageDraw, ImageFont
+
 
 class PreviewEvaluationClient(Protocol):
     def analyze_image(
@@ -61,8 +63,11 @@ def build_preview_evaluation_prompt(row: dict) -> str:
     ]
     return "\n".join(
         [
-            "Evaluate this manga auto-lettering page preview.",
+            "Evaluate this manga auto-lettering contact sheet.",
+            "Each tile is a before/after crop for one record: left is original, right is generated preview.",
             "Focus on whether the original Japanese text was removed, nearby art/tones are preserved, and translated lettering is readable.",
+            "Compare the generated lettering against the original text area, not only readability.",
+            "Mark it unusable or lower the score if translated lettering is oversized, outside the original text area, or covers nearby art.",
             f"Records JSON: {json.dumps(records, ensure_ascii=False)}",
             "Return only JSON with keys: score (0-10), usable, original_text_removed, art_preserved, lettering_readable, issues, summary.",
         ]
@@ -74,6 +79,14 @@ def parse_preview_evaluation_response(raw_text: str) -> PreviewEvaluationResult:
         payload = json.loads(_strip_json_wrapper(raw_text))
     except json.JSONDecodeError:
         return _failed("invalid_json")
+    if isinstance(payload, list):
+        return _result_from_record_payloads(payload)
+    if not isinstance(payload, dict):
+        return _failed("invalid_json")
+    return _result_from_payload(payload)
+
+
+def _result_from_payload(payload: dict) -> PreviewEvaluationResult:
     return PreviewEvaluationResult(
         status="evaluated",
         score=_optional_int(payload.get("score")),
@@ -83,6 +96,24 @@ def parse_preview_evaluation_response(raw_text: str) -> PreviewEvaluationResult:
         lettering_readable=_optional_bool(payload.get("lettering_readable")),
         issues=_string_list(payload.get("issues")),
         summary=str(payload.get("summary", "")).strip() or None,
+        failure_reason=None,
+    )
+
+
+def _result_from_record_payloads(payloads: list[object]) -> PreviewEvaluationResult:
+    rows = [payload for payload in payloads if isinstance(payload, dict)]
+    if not rows:
+        return _failed("invalid_json")
+    scores = [_optional_int(row.get("score")) for row in rows]
+    return PreviewEvaluationResult(
+        status="evaluated",
+        score=min(score for score in scores if score is not None) if any(score is not None for score in scores) else None,
+        usable=all(_optional_bool(row.get("usable")) is True for row in rows),
+        original_text_removed=all(_optional_bool(row.get("original_text_removed")) is not False for row in rows),
+        art_preserved=all(_optional_bool(row.get("art_preserved")) is True for row in rows),
+        lettering_readable=all(_optional_bool(row.get("lettering_readable")) is True for row in rows),
+        issues=_record_issues(rows),
+        summary=_record_summary(rows),
         failure_reason=None,
     )
 
@@ -111,13 +142,13 @@ def _evaluate_previews(rows: list[dict], client: PreviewEvaluationClient) -> tup
 
 def _evaluate_one(row: dict, client: PreviewEvaluationClient) -> tuple[dict, dict]:
     prompt = build_preview_evaluation_prompt(row)
-    image_path = row.get("preview", {}).get("page_preview_path")
+    image_path = _build_evaluation_contact_sheet(row)
     try:
         response = client.analyze_image(
             image_path,
             prompt,
             kind="phase7_preview_evaluation",
-            max_completion_tokens=192,
+            max_completion_tokens=512,
         )
         result = parse_preview_evaluation_response(response["raw_text"])
         return _evaluation_row(row, result, response["raw_text"]), _api_call_row(row, response)
@@ -127,6 +158,7 @@ def _evaluate_one(row: dict, client: PreviewEvaluationClient) -> tuple[dict, dic
 
 def _evaluation_row(row: dict, result: PreviewEvaluationResult, raw_text: str) -> dict:
     preview_path = row.get("preview", {}).get("page_preview_path")
+    evaluation_image_path = row.get("preview", {}).get("evaluation_image_path")
     return {
         "image_name": row.get("image_name"),
         "status": result.status,
@@ -139,6 +171,7 @@ def _evaluation_row(row: dict, result: PreviewEvaluationResult, raw_text: str) -
         "summary": result.summary,
         "failure_reason": result.failure_reason,
         "preview_path": preview_path,
+        "evaluation_image_path": evaluation_image_path,
         "record_count": row.get("preview", {}).get("record_count"),
         "records": [
             {
@@ -174,6 +207,7 @@ def _failure_evaluation(row: dict, exc: Exception) -> dict:
         "summary": None,
         "failure_reason": f"api_error:{type(exc).__name__}",
         "preview_path": row.get("preview", {}).get("page_preview_path"),
+        "evaluation_image_path": row.get("preview", {}).get("evaluation_image_path"),
         "record_count": row.get("preview", {}).get("record_count"),
         "records": [],
         "raw_model_text": None,
@@ -187,6 +221,56 @@ def _failure_api_call(row: dict, exc: Exception, prompt: str, image_path: str | 
         "request": {"prompt_chars": len(prompt), "image_path": image_path},
         "response": {"error_type": type(exc).__name__, "error_message": str(exc)[:500]},
     }
+
+
+def _build_evaluation_contact_sheet(row: dict) -> str:
+    output = _contact_sheet_path(row)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    records = [record for record in row.get("records", []) if record.get("preview_before_after_path")]
+    if not records:
+        row.setdefault("preview", {})["evaluation_image_path"] = row.get("preview", {}).get("page_preview_path")
+        return str(row["preview"]["evaluation_image_path"])
+
+    font = ImageFont.load_default()
+    label_height = 26
+    padding = 12
+    loaded = [(_record_label(record), Image.open(record["preview_before_after_path"]).convert("RGB")) for record in records]
+    width = max(image.width for _, image in loaded) + padding * 2
+    height = padding + sum(label_height + image.height + padding for _, image in loaded)
+    sheet = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(sheet)
+    y = padding
+    for label, image in loaded:
+        draw.text((padding, y), label[:120], fill="black", font=font)
+        y += label_height
+        draw.rectangle((padding - 1, y - 1, padding + image.width, y + image.height), outline=(180, 180, 180), width=1)
+        sheet.paste(image, (padding, y))
+        split_x = padding + image.width // 2
+        draw.line((split_x, y, split_x, y + image.height - 1), fill=(255, 0, 0), width=1)
+        y += image.height + padding
+    sheet.save(output)
+    row.setdefault("preview", {})["evaluation_image_path"] = str(output)
+    return str(output)
+
+
+def _contact_sheet_path(row: dict) -> Path:
+    preview_path = Path(row.get("preview", {}).get("page_preview_path", "preview.png"))
+    run_dir = preview_path.parent.parent if preview_path.parent.name == "pages" else preview_path.parent
+    return run_dir / "debug" / "evaluation_contact_sheets" / f"{_safe_name(str(row.get('image_name') or preview_path.stem))}.png"
+
+
+def _record_label(record: dict) -> str:
+    return " | ".join(
+        [
+            str(record.get("record_id", "")),
+            str(record.get("cleanup_method", "")),
+            str(record.get("translated_text", "")),
+        ]
+    )
+
+
+def _safe_name(value: str) -> str:
+    return "".join(char if char.isalnum() else "-" for char in value).strip("-") or "record"
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -245,9 +329,32 @@ def _optional_bool(value: object) -> bool | None:
 
 
 def _string_list(value: object) -> list[str]:
+    if isinstance(value, str):
+        stripped = value.strip()
+        return [stripped] if stripped else []
     if not isinstance(value, list):
         return []
     return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _record_issues(rows: list[dict]) -> list[str]:
+    issues: list[str] = []
+    for row in rows:
+        prefix = str(row.get("record_id", "")).strip()
+        for issue in _string_list(row.get("issues")):
+            issues.append(f"{prefix}: {issue}" if prefix else issue)
+    return issues
+
+
+def _record_summary(rows: list[dict]) -> str | None:
+    summaries = []
+    for row in rows:
+        summary = str(row.get("summary", "")).strip()
+        if not summary:
+            continue
+        record_id = str(row.get("record_id", "")).strip()
+        summaries.append(f"{record_id}: {summary}" if record_id else summary)
+    return "; ".join(summaries) or None
 
 
 def _strip_json_wrapper(raw_text: str) -> str:
