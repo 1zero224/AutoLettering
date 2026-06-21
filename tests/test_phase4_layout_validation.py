@@ -43,6 +43,21 @@ class FakeLayoutValidationClient:
         }
 
 
+class EmptyLayoutValidationClient:
+    def analyze_image(
+        self,
+        image_path: str | Path,
+        prompt: str,
+        kind: str = "image_analysis",
+        max_completion_tokens: int | None = None,
+    ) -> dict:
+        return {
+            "raw_text": "",
+            "request": {"image_path": str(image_path), "prompt_chars": len(prompt)},
+            "response": {"status": "ok"},
+        }
+
+
 def test_parse_layout_validation_response_accepts_structured_json():
     result = parse_layout_validation_response(
         '{"accepted":true,"needs_revision":false,"overflow_ok":true,'
@@ -89,6 +104,31 @@ def test_run_phase4_layout_validation_writes_results_and_api_summaries(tmp_path:
     assert api_calls[0]["record_id"] == "page.png#1"
     assert api_calls[0]["request"]["prompt_chars"] > 0
     assert "api_key" not in json.dumps(api_calls[0]).lower()
+
+
+def test_run_phase4_layout_validation_falls_back_when_model_returns_invalid_json(tmp_path: Path):
+    layout_run = tmp_path / "phase4"
+    layout_run.mkdir()
+    preview_path = tmp_path / "layout.png"
+    Image.new("RGBA", (120, 80), (255, 255, 255, 0)).save(preview_path)
+    _write_layout_results(layout_run / "layout-results.jsonl", preview_path)
+
+    run_dir = run_phase4_layout_validation(
+        layout_run_dir=layout_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase4-validation-fallback-test",
+        sample_limit=1,
+        client=EmptyLayoutValidationClient(),
+    )
+
+    validation = _read_jsonl(run_dir / "layout-validation.jsonl")[0]
+    assert validation["status"] == "accepted"
+    assert validation["accepted"] is True
+    assert validation["overflow_ok"] is True
+    assert validation["selection_source"] == "deterministic_fallback"
+    assert validation["failure_reason"] is None
+    assert validation["model_failure_reason"] == "invalid_json"
+    assert "model returned invalid_json" in validation["reasoning_summary"]
 
 
 def test_build_layout_validation_prompt_includes_measurements():

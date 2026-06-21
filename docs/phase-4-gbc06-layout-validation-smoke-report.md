@@ -6,7 +6,7 @@
 python experiments/phase4_layout_validate.py --layout-run-dir outputs/runs/phase4-gbc06-layout-smoke --run-id phase4-gbc06-layout-validation-smoke --sample-limit 1
 ```
 
-The command has been run with both the original validation prompt and a shorter minimal prompt. All observed runs reached the MIMO API successfully but returned an empty model text field, so the structured validator recorded `invalid_json`.
+The command has been run with both the original validation prompt and a shorter minimal prompt. The current run reached the MIMO API successfully but returned an empty model text field. Because the deterministic layout measurement has `overflow_ratio = 0.0`, the validator now records an accepted deterministic fallback while preserving the model failure reason as `invalid_json`.
 
 ## Output
 
@@ -26,12 +26,15 @@ Generated artifacts:
 
 - Layout source: `outputs/runs/phase4-gbc06-layout-smoke/layout-results.jsonl`
 - Records submitted: 1
-- Accepted: 0
+- Accepted: 1
 - Needs revision: 0
-- Failed: 1
+- Failed: 0
 - Record: `GBC06_01.png#1`
 - Layout preview: `outputs/runs/phase4-gbc06-layout-smoke/debug/layout_candidates/GBC06-01-png-1.png`
-- Failure reason: `invalid_json`
+- Validation status: `accepted`
+- Selection source: `deterministic_fallback`
+- Failure reason: `null`
+- Model failure reason: `invalid_json`
 - Raw model text: empty string
 - Request prompt characters: 241
 - Request image count: 1
@@ -40,11 +43,11 @@ Generated artifacts:
 
 ## Interpretation
 
-This phase now has a real model-backed validation path, but the first smoke result did not produce a usable validation decision.
+This phase now has a real model-backed validation path plus a deterministic fallback for model formatting failures.
 
 The API request completed and returned usage metadata, so this was not a connectivity or authentication failure. The model response content was empty in all observed validation runs, which caused the JSON parser to classify the validation as `invalid_json`.
 
-This is a valid experiment result, not a pass. The current validator correctly preserves the failed result in `layout-validation.jsonl` instead of inventing a mock validation.
+The accepted result in this smoke is not a model approval. It means deterministic measurement accepted the layout because `overflow_ratio = 0.0`; `layout-validation.jsonl` still records `model_failure_reason = "invalid_json"` and `raw_model_text = ""`.
 
 ## Adjustment Already Tried
 
@@ -63,19 +66,21 @@ The next iteration should make the MIMO validation call easier to satisfy:
 - test whether the MIMO API supports disabling or limiting reasoning tokens
 - ask a yes/no textual answer first, then map it into JSON locally
 - try `MIMO_TEXT_MODEL` for validation of rendered-preview metadata if visual inspection keeps returning empty text
-- consider adding a deterministic fallback verdict when deterministic overflow checks pass but model output is empty
 - keep recording every failed model response as an experiment artifact
+- use fallback verdicts only as deterministic acceptance, not as visual/model approval
 
 ## Verification
 
 ```powershell
+python -m pytest tests/test_phase4_layout_validation.py -q
 python -m pytest -q
 ```
 
 Fresh result before this report was written:
 
 ```text
-30 passed in 1.13s
+5 passed in 0.23s
+57 passed in 3.55s
 ```
 
 ## Notes

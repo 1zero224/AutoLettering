@@ -64,9 +64,39 @@ def _validate_one(row: dict, client: LayoutValidationClient) -> tuple[dict, dict
             max_completion_tokens=96,
         )
         result = parse_layout_validation_response(response["raw_text"])
-        return _validation_row(row, result, response["raw_text"]), _api_call_row(row, response)
+        return _validation_row(row, _fallback_result(row, result), response["raw_text"]), _api_call_row(row, response)
     except Exception as exc:
         return _failure_validation(row, exc), _failure_api_call(row, exc, prompt)
+
+
+def _fallback_result(row: dict, result):
+    if result.status != "failed" or result.failure_reason != "invalid_json":
+        return result
+    layout = row.get("layout", {})
+    if _overflow_ratio(layout) <= 0.0:
+        return _DeterministicValidation(result.failure_reason)
+    return result
+
+
+def _overflow_ratio(layout: dict) -> float:
+    try:
+        return float(layout.get("overflow_ratio", 1.0) or 0.0)
+    except (TypeError, ValueError):
+        return 1.0
+
+
+class _DeterministicValidation:
+    def __init__(self, model_failure_reason: str) -> None:
+        self.status = "accepted"
+        self.accepted = True
+        self.needs_revision = False
+        self.overflow_ok = True
+        self.naturalness_score = None
+        self.recommended_changes: list[str] = []
+        self.reasoning_summary = f"deterministic fallback after model returned {model_failure_reason}"
+        self.failure_reason = None
+        self.model_failure_reason = model_failure_reason
+        self.selection_source = "deterministic_fallback"
 
 
 def _validation_row(row: dict, result, raw_text: str) -> dict:
@@ -83,6 +113,8 @@ def _validation_row(row: dict, result, raw_text: str) -> dict:
         "recommended_changes": result.recommended_changes,
         "reasoning_summary": result.reasoning_summary,
         "failure_reason": result.failure_reason,
+        "model_failure_reason": getattr(result, "model_failure_reason", None),
+        "selection_source": getattr(result, "selection_source", "mimo_vision"),
         "layout_preview_path": layout["preview_path"],
         "raw_model_text": raw_text,
     }
