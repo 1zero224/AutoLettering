@@ -32,13 +32,13 @@ class MimoVisionClient:
     def __init__(self, config: MimoVisionConfig) -> None:
         self.config = config
 
-    def build_chat_payload(self, image_path: str | Path, prompt: str) -> dict:
+    def build_chat_payload(self, image_path: str | Path, prompt: str, system_prompt: str | None = None) -> dict:
         return {
             "model": self.config.model,
             "messages": [
                 {
                     "role": "system",
-                    "content": "You select manga lettering fonts from labeled comparison images.",
+                    "content": system_prompt or "You inspect manga lettering images and return structured JSON.",
                 },
                 {
                     "role": "user",
@@ -55,14 +55,24 @@ class MimoVisionClient:
         }
 
     def choose_font(self, comparison_image_path: str | Path, prompt: str) -> dict:
-        image_path = Path(comparison_image_path)
-        payload = self.build_chat_payload(image_path, prompt)
+        system_prompt = "You select manga lettering fonts from labeled comparison images."
+        return self.analyze_image(comparison_image_path, prompt, kind="font_selection", system_prompt=system_prompt)
+
+    def analyze_image(
+        self,
+        image_path: str | Path,
+        prompt: str,
+        kind: str = "image_analysis",
+        system_prompt: str | None = None,
+    ) -> dict:
+        image_path = Path(image_path)
+        payload = self.build_chat_payload(image_path, prompt, system_prompt=system_prompt)
         response = _post_json(self._chat_completions_url(), self.config.api_key, payload)
         return {
             "raw_text": _message_content(response),
             "request": {
                 "url": self._chat_completions_url(),
-                **request_summary("font_selection", payload, image_path=image_path),
+                **request_summary(kind, payload, image_path=image_path),
             },
             "response": _response_summary(response),
         }

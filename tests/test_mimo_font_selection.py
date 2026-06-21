@@ -52,6 +52,25 @@ def test_mimo_vision_client_builds_image_request_without_exposing_key(tmp_path: 
     assert summary["image_path"] == str(image_path)
 
 
+def test_mimo_vision_client_analyze_image_uses_given_image_path(tmp_path: Path, monkeypatch):
+    image_path = tmp_path / "layout.png"
+    Image.new("RGB", (10, 10), "white").save(image_path)
+    client = MimoVisionClient(MimoVisionConfig("https://api.example/v1", "secret-value", "mimo-v2.5"))
+
+    def fake_post_json(url: str, api_key: str, payload: dict) -> dict:
+        assert url == "https://api.example/v1/chat/completions"
+        assert api_key == "secret-value"
+        assert payload["messages"][1]["content"][0]["image_url"]["url"].startswith("data:image/png;base64,")
+        return {"choices": [{"message": {"content": "{}"}}], "model": "mimo-v2.5"}
+
+    monkeypatch.setattr("autolettering.models.mimo._post_json", fake_post_json)
+    result = client.analyze_image(image_path, "Validate layout", kind="layout_validation")
+
+    assert result["raw_text"] == "{}"
+    assert result["request"]["kind"] == "layout_validation"
+    assert result["request"]["image_path"] == str(image_path)
+
+
 def test_parse_font_selection_response_extracts_selected_candidate():
     result = parse_font_selection_response(
         raw_text='{"selected_font_id":"font-a","confidence":0.75,"reasoning_summary":"closest stroke weight"}',
