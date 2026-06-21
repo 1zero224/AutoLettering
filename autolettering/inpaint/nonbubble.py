@@ -5,6 +5,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageChops, ImageFilter
 
+from .balloons import lama_large_inpaint as balloons_lama_large_inpaint
+from .balloons import patchmatch_inpaint as balloons_patchmatch_inpaint
 from .models import NonBubbleInpaintResult
 
 
@@ -13,6 +15,7 @@ def inpaint_nonbubble_text(
     bbox: tuple[int, int, int, int],
     output_dir: str | Path,
     record_id: str,
+    method: str = "local_diffusion",
     dark_threshold: int = 185,
     mask_dilate_px: int = 5,
     iterations: int = 80,
@@ -23,7 +26,7 @@ def inpaint_nonbubble_text(
         crop = image.convert("RGB").crop(bbox)
 
     text_mask = build_text_mask(crop, dark_threshold, mask_dilate_px)
-    cleaned = diffuse_inpaint(crop, text_mask, iterations)
+    method_name, cleaned = inpaint_crop(crop, text_mask, method, iterations)
     gpt_mask = build_gpt_edit_mask(text_mask)
 
     input_path = output_root / "input" / f"{safe_id}.png"
@@ -39,7 +42,7 @@ def inpaint_nonbubble_text(
 
     return NonBubbleInpaintResult(
         record_id=record_id,
-        method="local_diffusion_inpaint",
+        method=method_name,
         bbox=bbox,
         input_crop_path=input_path,
         text_mask_path=text_mask_path,
@@ -48,6 +51,23 @@ def inpaint_nonbubble_text(
         before_after_path=before_after_path,
         dark_pixel_count=int(np.array(text_mask).sum() // 255),
     )
+
+
+def inpaint_crop(
+    crop: Image.Image,
+    text_mask: Image.Image,
+    method: str = "local_diffusion",
+    iterations: int = 80,
+) -> tuple[str, Image.Image]:
+    if method == "local_diffusion":
+        return "local_diffusion_inpaint", diffuse_inpaint(crop, text_mask, iterations)
+    if method in {"opencv_telea", "opencv_ns"}:
+        return f"{method}_inpaint", opencv_inpaint(crop, text_mask, method)
+    if method == "bt_lama_large":
+        return "bt_lama_large_inpaint", balloons_lama_large_inpaint(crop, text_mask)
+    if method == "bt_patchmatch":
+        return "bt_patchmatch_inpaint", balloons_patchmatch_inpaint(crop, text_mask)
+    raise ValueError(f"unsupported_inpaint_method:{method}")
 
 
 def build_text_mask(crop: Image.Image, dark_threshold: int = 185, dilate_px: int = 5) -> Image.Image:
@@ -75,6 +95,16 @@ def diffuse_inpaint(crop: Image.Image, text_mask: Image.Image, iterations: int =
     return Image.fromarray(np.clip(array, 0, 255).astype(np.uint8), mode="RGB")
 
 
+def opencv_inpaint(crop: Image.Image, text_mask: Image.Image, method: str = "opencv_telea") -> Image.Image:
+    cv2 = _require_cv2()
+
+    flags = cv2.INPAINT_TELEA if method == "opencv_telea" else cv2.INPAINT_NS
+    image_array = np.array(crop.convert("RGB"), dtype=np.uint8)
+    mask_array = np.array(text_mask.convert("L"), dtype=np.uint8)
+    result = cv2.inpaint(image_array, mask_array, 3, flags)
+    return Image.fromarray(result, mode="RGB")
+
+
 def _initial_fill(array: np.ndarray, mask: np.ndarray) -> np.ndarray:
     known = array[~mask]
     if known.size == 0:
@@ -90,6 +120,14 @@ def _neighbor_average(array: np.ndarray) -> np.ndarray:
         + padded[1:-1, :-2]
         + padded[1:-1, 2:]
     ) / 4.0
+
+
+def _require_cv2():
+    try:
+        import cv2
+    except ModuleNotFoundError as exc:
+        raise RuntimeError("opencv_inpaint_requires_cv2") from exc
+    return cv2
 
 
 def _save(image: Image.Image, path: Path) -> None:

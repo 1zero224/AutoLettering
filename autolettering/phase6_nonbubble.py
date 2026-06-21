@@ -21,12 +21,13 @@ def run_phase6_nonbubble_cleanup(
     sample_limit: int = 5,
     gpt_config: GptImageConfig | None = None,
     call_gpt_image: bool = False,
+    inpaint_method: str = "local_diffusion",
 ) -> Path:
     run_dir = Path(output_root) / (run_id or "phase6-nonbubble-cleanup")
     run_dir.mkdir(parents=True, exist_ok=True)
     detections = _load_nonbubble_detections(Path(detection_run_dir) / "detections.jsonl", sample_limit)
     client = GptImageEditClient(gpt_config) if call_gpt_image and gpt_config else None
-    rows = [_cleanup_one(run_dir, detection, gpt_config, client) for detection in detections]
+    rows = [_cleanup_one(run_dir, detection, gpt_config, client, inpaint_method) for detection in detections]
     _write_jsonl(run_dir / "cleanup-results.jsonl", rows)
     _write_report(run_dir / "reports" / "phase6-nonbubble-report.md", detection_run_dir, rows)
     return run_dir
@@ -44,12 +45,19 @@ def _load_nonbubble_detections(path: Path, sample_limit: int) -> list[dict]:
     return rows
 
 
-def _cleanup_one(run_dir: Path, detection: dict, config: GptImageConfig | None, client: GptImageEditClient | None) -> dict:
+def _cleanup_one(
+    run_dir: Path,
+    detection: dict,
+    config: GptImageConfig | None,
+    client: GptImageEditClient | None,
+    inpaint_method: str,
+) -> dict:
     result = inpaint_nonbubble_text(
         image_path=detection["image_path"],
         bbox=tuple(detection["selected_text_box_xyxy"]),
         output_dir=run_dir / "crops",
         record_id=detection["record_id"],
+        method=inpaint_method,
     )
     prompt = gpt_image_edit_prompt(detection.get("translated_text", ""))
     cleanup = _cleanup_payload(result)
@@ -127,6 +135,7 @@ def _write_report(output_path: Path, detection_run_dir: str | Path, rows: list[d
         "",
         f"- Records processed: {len(rows)}",
         f"- Local inpainted: {sum(1 for row in rows if row['status'] == 'cleaned')}",
+        f"- Local methods: {_method_summary(rows)}",
         f"- GPT image calls: {called}",
         f"- GPT dry runs: {sum(1 for row in rows if row['gpt_image2_edit']['status'] == 'dry_run')}",
         f"- GPT failures: {sum(1 for row in rows if row['gpt_image2_edit']['status'] == 'failed')}",
@@ -142,6 +151,14 @@ def _write_report(output_path: Path, detection_run_dir: str | Path, rows: list[d
     ]
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _method_summary(rows: list[dict]) -> str:
+    methods: dict[str, int] = {}
+    for row in rows:
+        method = row.get("cleanup", {}).get("method") or "unknown"
+        methods[method] = methods.get(method, 0) + 1
+    return ", ".join(f"{name}={count}" for name, count in sorted(methods.items())) or "none"
 
 
 def _safe_name(value: str) -> str:

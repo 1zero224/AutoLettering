@@ -1,9 +1,11 @@
 import json
+import importlib.util
 from pathlib import Path
 
+import pytest
 from PIL import Image, ImageChops, ImageDraw
 
-from autolettering.inpaint.nonbubble import build_gpt_edit_mask, build_text_mask, inpaint_nonbubble_text
+from autolettering.inpaint.nonbubble import build_gpt_edit_mask, build_text_mask, inpaint_crop, inpaint_nonbubble_text
 from autolettering.models.gpt_image import GptImageConfig, normalize_gpt_output_to_crop, normalize_openai_base_url
 from autolettering.phase6_nonbubble import run_phase6_nonbubble_cleanup
 
@@ -39,6 +41,55 @@ def test_inpaint_nonbubble_text_writes_artifacts_and_reduces_dark_text(tmp_path:
         assert after.convert("L").getpixel((35, 25)) > before.convert("L").getpixel((35, 25))
 
 
+def test_inpaint_nonbubble_text_supports_opencv_telea_method(tmp_path: Path):
+    if importlib.util.find_spec("cv2") is None:
+        pytest.skip("opencv-python-headless is optional for local inpaint experiments")
+    image_path = _write_nonbubble_image(tmp_path / "page.png")
+
+    result = inpaint_nonbubble_text(
+        image_path=image_path,
+        bbox=(20, 15, 90, 75),
+        output_dir=tmp_path / "nonbubble",
+        record_id="page.png#2",
+        method="opencv_telea",
+    )
+
+    assert result.method == "opencv_telea_inpaint"
+    assert result.cleaned_crop_path.exists()
+    with Image.open(result.input_crop_path) as before, Image.open(result.cleaned_crop_path) as after:
+        assert ImageChops.difference(before.convert("RGB"), after.convert("RGB")).getbbox() is not None
+
+
+def test_inpaint_crop_routes_balloon_lama_large_method(monkeypatch):
+    crop = Image.new("RGB", (12, 10), "black")
+    mask = Image.new("L", crop.size, 255)
+
+    monkeypatch.setattr(
+        "autolettering.inpaint.nonbubble.balloons_lama_large_inpaint",
+        lambda crop_arg, mask_arg: Image.new("RGB", crop_arg.size, "white"),
+    )
+
+    method, result = inpaint_crop(crop, mask, "bt_lama_large")
+
+    assert method == "bt_lama_large_inpaint"
+    assert result.getpixel((0, 0)) == (255, 255, 255)
+
+
+def test_inpaint_crop_routes_balloon_patchmatch_method(monkeypatch):
+    crop = Image.new("RGB", (12, 10), "black")
+    mask = Image.new("L", crop.size, 255)
+
+    monkeypatch.setattr(
+        "autolettering.inpaint.nonbubble.balloons_patchmatch_inpaint",
+        lambda crop_arg, mask_arg: Image.new("RGB", crop_arg.size, "white"),
+    )
+
+    method, result = inpaint_crop(crop, mask, "bt_patchmatch")
+
+    assert method == "bt_patchmatch_inpaint"
+    assert result.getpixel((0, 0)) == (255, 255, 255)
+
+
 def test_run_phase6_nonbubble_cleanup_writes_local_and_gpt_dry_run(tmp_path: Path):
     image_path = _write_nonbubble_image(tmp_path / "page.png")
     detection_run = tmp_path / "phase2"
@@ -50,12 +101,13 @@ def test_run_phase6_nonbubble_cleanup_writes_local_and_gpt_dry_run(tmp_path: Pat
         output_root=tmp_path / "outputs",
         run_id="phase6-nonbubble-test",
         sample_limit=1,
+        inpaint_method="opencv_telea",
     )
 
     rows = _read_jsonl(run_dir / "cleanup-results.jsonl")
     assert rows[0]["record_id"] == "page.png#2"
     assert rows[0]["status"] == "cleaned"
-    assert rows[0]["cleanup"]["method"] == "local_diffusion_inpaint"
+    assert rows[0]["cleanup"]["method"] == "opencv_telea_inpaint"
     assert rows[0]["gpt_image2_edit"]["status"] == "dry_run"
     assert rows[0]["gpt_image2_edit"]["request"]["kind"] == "gpt_image_2_masked_edit"
     assert Path(rows[0]["cleanup"]["gpt_mask_path"]).exists()

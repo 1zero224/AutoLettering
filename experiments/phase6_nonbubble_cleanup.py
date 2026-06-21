@@ -21,6 +21,11 @@ def main() -> None:
     parser.add_argument("--sample-limit", type=int, default=1)
     parser.add_argument("--env-file", default=".env")
     parser.add_argument("--call-gpt-image", action="store_true")
+    parser.add_argument(
+        "--inpaint-method",
+        default="local_diffusion",
+        choices=["local_diffusion", "opencv_telea", "opencv_ns", "bt_lama_large", "bt_patchmatch"],
+    )
     args = parser.parse_args()
 
     _load_env_file(Path(args.env_file))
@@ -31,6 +36,7 @@ def main() -> None:
         sample_limit=args.sample_limit,
         gpt_config=_gpt_config_from_env() if args.call_gpt_image else None,
         call_gpt_image=args.call_gpt_image,
+        inpaint_method=args.inpaint_method,
     )
     print(run_dir)
 

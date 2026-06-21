@@ -3,8 +3,9 @@ from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw
 
-from autolettering.inpaint.bubble_fill import fill_text_box, sample_border_color
+from autolettering.inpaint.bubble_fill import fill_text_box, mask_fill_text_pixels, sample_border_color
 from autolettering.phase6 import run_phase6_bubble_cleanup
+from autolettering.phase6 import _text_bbox
 
 
 def test_sample_border_color_uses_pixels_around_bbox(tmp_path: Path):
@@ -38,6 +39,27 @@ def test_fill_text_box_writes_cleaned_crop_and_before_after(tmp_path: Path):
         assert ImageChops.difference(cleaned.convert("RGB"), Image.new("RGB", cleaned.size, "white")).getbbox() is None
 
 
+def test_mask_fill_text_pixels_preserves_dark_art_outside_text_mask(tmp_path: Path):
+    image = Image.new("RGB", (120, 90), "white")
+    draw = ImageDraw.Draw(image)
+    draw.line((10, 10, 110, 10), fill="black", width=3)
+    draw.rectangle((48, 35, 72, 60), fill="black")
+    image_path = tmp_path / "page.png"
+    image.save(image_path)
+
+    result = mask_fill_text_pixels(
+        image_path=image_path,
+        bbox=(0, 0, 120, 90),
+        text_bbox=(45, 30, 75, 65),
+        output_dir=tmp_path / "cleanup",
+        record_id="page.png#1",
+    )
+
+    with Image.open(result.cleaned_crop_path) as cleaned:
+        assert cleaned.convert("L").getpixel((60, 45)) > 240
+        assert cleaned.convert("L").getpixel((30, 10)) < 40
+
+
 def test_run_phase6_bubble_cleanup_writes_results_and_artifacts(tmp_path: Path):
     image_path = _write_sample_image(tmp_path / "page.png")
     detection_run = tmp_path / "phase2"
@@ -58,10 +80,23 @@ def test_run_phase6_bubble_cleanup_writes_results_and_artifacts(tmp_path: Path):
     rows = _read_jsonl(run_dir / "cleanup-results.jsonl")
     assert rows[0]["record_id"] == "page.png#1"
     assert rows[0]["status"] == "cleaned"
-    assert rows[0]["cleanup"]["method"] == "bubble_fill"
+    assert rows[0]["cleanup"]["method"] == "bubble_mask_fill"
     assert Path(rows[0]["cleanup"]["cleaned_crop_path"]).exists()
     assert Path(rows[0]["cleanup"]["before_after_path"]).exists()
     assert (run_dir / "reports" / "phase6-report.md").exists()
+
+
+def test_text_bbox_unions_small_text_candidates_inside_large_detection():
+    detection = {
+        "selected_text_box_xyxy": [0, 0, 200, 200],
+        "candidate_boxes": [
+            {"xyxy": [0, 0, 200, 200], "area": 40000},
+            {"xyxy": [60, 40, 90, 160], "area": 3600},
+            {"xyxy": [105, 42, 135, 155], "area": 3390},
+        ],
+    }
+
+    assert _text_bbox(detection) == (60, 40, 135, 160)
 
 
 def _write_sample_image(path: Path) -> Path:
@@ -79,6 +114,10 @@ def _write_detection(path: Path, image_path: Path) -> None:
         "image_path": str(image_path),
         "group_name": "框内",
         "selected_text_box_xyxy": [35, 25, 80, 90],
+        "candidate_boxes": [
+            {"xyxy": [42, 35, 72, 85], "area": 1500, "dark_pixel_count": 600},
+            {"xyxy": [35, 25, 80, 90], "area": 2925, "dark_pixel_count": 700},
+        ],
     }
     path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
 
