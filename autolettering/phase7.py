@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import csv
 import json
 from pathlib import Path
 
@@ -8,7 +7,8 @@ from PIL import Image
 
 from .cleanup_runs import CleanupRunInput, format_cleanup_run_dirs, load_cleanup_rows_by_id
 from .phase7_manifest import write_phase7_manifest
-from .rendering.compose import compose_page_records
+from .phase7_review import write_phase7_manual_review_csv
+from .rendering.compose import compose_page_stages
 
 
 def run_phase7_preview(
@@ -26,7 +26,7 @@ def run_phase7_preview(
     layouts = _load_jsonl_by_id(Path(layout_run_dir) / "layout-results.jsonl", "layout_generated")
     rows = _preview_rows(run_dir, detections, cleanups, layouts, sample_limit)
     _write_jsonl(run_dir / "preview-results.jsonl", rows)
-    _write_manual_review_csv(run_dir / "reports" / "manual-review.csv", rows)
+    write_phase7_manual_review_csv(run_dir / "reports" / "manual-review.csv", rows)
     write_phase7_manifest(
         run_dir / "manifest.json",
         run_dir,
@@ -112,15 +112,23 @@ def _preview_record(detection: dict, cleanup: dict, layout: dict) -> dict:
 
 
 def _preview_page(run_dir: Path, image_name: str, records: list[dict]) -> dict:
-    preview_path = run_dir / "pages" / f"{_safe_name(image_name)}.png"
-    compose_page_records(records[0]["image_path"], records, preview_path)
-    _write_record_before_after_crops(run_dir, preview_path, records)
+    page_name = f"{_safe_name(image_name)}.png"
+    stage_paths = compose_page_stages(
+        records[0]["image_path"],
+        records,
+        run_dir / "pages" / "original" / page_name,
+        run_dir / "pages" / "cleaned" / page_name,
+        run_dir / "pages" / page_name,
+    )
+    _write_record_before_after_crops(run_dir, stage_paths["page_preview_path"], records)
     return {
         "image_name": image_name,
         "status": "page_preview_generated",
         "records": [_record_summary(record) for record in records],
         "preview": {
-            "page_preview_path": str(preview_path),
+            "original_page_path": str(stage_paths["original_page_path"]),
+            "cleaned_page_path": str(stage_paths["cleaned_page_path"]),
+            "page_preview_path": str(stage_paths["page_preview_path"]),
             "record_count": len(records),
         },
     }
@@ -189,76 +197,6 @@ def _save_before_after_crop(original: Image.Image, preview: Image.Image, bbox: t
     comparison.save(path)
 
 
-def _write_manual_review_csv(output_path: Path, rows: list[dict]) -> None:
-    fieldnames = [
-        "record_id",
-        "status",
-        "image_name",
-        "translated_text",
-        "bbox",
-        "cleanup_method",
-        "cleanup_crop_path",
-        "layout_preview_path",
-        "page_preview_path",
-        "preview_before_after_path",
-        "failure_reason",
-        "manual_decision",
-        "review_notes",
-    ]
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in rows:
-            for review_row in _manual_review_rows(row):
-                writer.writerow(review_row)
-
-
-def _manual_review_rows(row: dict) -> list[dict]:
-    if row["status"] == "skipped":
-        return [_skipped_review_row(row)]
-    return [
-        _generated_review_row(row, record)
-        for record in row.get("records", [])
-    ]
-
-
-def _generated_review_row(row: dict, record: dict) -> dict:
-    return {
-        "record_id": record["record_id"],
-        "status": row["status"],
-        "image_name": row.get("image_name", ""),
-        "translated_text": record.get("translated_text", ""),
-        "bbox": json.dumps(record.get("bbox"), ensure_ascii=False),
-        "cleanup_method": record.get("cleanup_method") or "",
-        "cleanup_crop_path": record.get("cleanup_crop_path", ""),
-        "layout_preview_path": record.get("layout_preview_path", ""),
-        "page_preview_path": row.get("preview", {}).get("page_preview_path", ""),
-        "preview_before_after_path": record.get("preview_before_after_path", ""),
-        "failure_reason": "",
-        "manual_decision": "",
-        "review_notes": "",
-    }
-
-
-def _skipped_review_row(row: dict) -> dict:
-    return {
-        "record_id": row["record_id"],
-        "status": row["status"],
-        "image_name": "",
-        "translated_text": "",
-        "bbox": "",
-        "cleanup_method": "",
-        "cleanup_crop_path": "",
-        "layout_preview_path": "",
-        "page_preview_path": "",
-        "preview_before_after_path": "",
-        "failure_reason": row.get("preview", {}).get("failure_reason", ""),
-        "manual_decision": "",
-        "review_notes": "",
-    }
-
-
 def _write_report(
     output_path: Path,
     detection_run_dir: str | Path,
@@ -286,6 +224,8 @@ def _write_report(
         "",
         "- `manifest.json`",
         "- `preview-results.jsonl`",
+        "- `pages/original/*.png`",
+        "- `pages/cleaned/*.png`",
         "- `pages/*.png`",
         "- `crops/before_after/*.png`",
         "- `reports/manual-review.csv`",

@@ -18,6 +18,8 @@ Generated artifacts:
 
 - `manifest.json`
 - `preview-results.jsonl`
+- `pages/original/*.png`
+- `pages/cleaned/*.png`
 - `pages/*.png`
 - `crops/before_after/*.png`
 - `reports/phase7-report.md`
@@ -33,8 +35,14 @@ Generated artifacts:
 - Skipped: 0
 - Image: `GBC06_01.png`
 - Records on page: `GBC06_01.png#1`
+- Original page copy: `outputs/runs/phase7-gbc06-page-group-preview-smoke/pages/original/GBC06-01-png.png`
+- Cleaned page: `outputs/runs/phase7-gbc06-page-group-preview-smoke/pages/cleaned/GBC06-01-png.png`
 - Page preview: `outputs/runs/phase7-gbc06-page-group-preview-smoke/pages/GBC06-01-png.png`
-- Preview image size: `1440 x 2048`
+- Original page image size: `1440 x 2048`, size `3144189` bytes
+- Cleaned page image size: `1440 x 2048`, size `2982730` bytes
+- Preview image size: `1440 x 2048`, size `2991572` bytes
+- Original vs cleaned changed: `true`
+- Cleaned vs final preview changed: `true`
 - Text bbox: `[674, 0, 1049, 342]`
 - Cleanup method: `bubble_fill`
 - Preview before/after crop: `outputs/runs/phase7-gbc06-page-group-preview-smoke/crops/before_after/GBC06-01-png-1.png`
@@ -42,7 +50,7 @@ Generated artifacts:
 - Manifest schema: `autolettering.phase7.preview.v1`
 - Manifest summary: `record_count=1`, `page_count=1`, `skipped_count=0`
 - Manifest artifact keys: `manual_review_csv`, `phase7_report`, `preview_results_jsonl`
-- Manifest size: `1684` bytes
+- Manifest size: `1922` bytes
 - Manual review CSV rows: `1`
 - Manual review CSV size: `613` bytes
 - Layout preview: `outputs/runs/phase4-gbc06-layout-smoke/debug/layout_candidates/GBC06-01-png-1.png`
@@ -65,6 +73,8 @@ The page-level JSONL row is now grouped by image:
     }
   ],
   "preview": {
+    "original_page_path": "outputs\\runs\\phase7-gbc06-page-group-preview-smoke\\pages\\original\\GBC06-01-png.png",
+    "cleaned_page_path": "outputs\\runs\\phase7-gbc06-page-group-preview-smoke\\pages\\cleaned\\GBC06-01-png.png",
     "page_preview_path": "outputs\\runs\\phase7-gbc06-page-group-preview-smoke\\pages\\GBC06-01-png.png",
     "record_count": 1
   }
@@ -84,6 +94,7 @@ This is the first complete local preview chain:
 This creates one inspectable full-page preview per processed source image. Synthetic tests cover multiple records on the same page; the current GBC06 smoke still uses one real record because the upstream Phase 3/4/6 runs only contain one aligned record.
 Records missing matching detection or layout rows are kept as `skipped` rows with a failure reason instead of being silently dropped.
 `manifest.json` is the run-level traceability index. It records the Phase 2/6/4 input run directories, summary counts, artifact paths, generated page records, and skipped records.
+`pages/original/*.png`, `pages/cleaned/*.png`, and `pages/*.png` now preserve the page-level preview stages: source page copy, cleanup-only page, and final translated preview.
 `crops/before_after/*.png` stores per-record side-by-side crops: the left half is the original page crop for the detected bbox, and the right half is the same bbox from the final composed page preview.
 `reports/manual-review.csv` now provides the Phase 7 human review queue. Each row includes the record, translated text, bbox, cleanup method/crop, layout preview, page preview, preview before/after crop, failure reason, and blank `manual_decision` / `review_notes` columns.
 
@@ -104,7 +115,7 @@ python -m pytest -q
 Recorded full-suite result during this report refresh:
 
 ```text
-59 passed in 3.24s
+61 passed in 2.61s
 ```
 
 ## Notes
