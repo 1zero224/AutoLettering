@@ -7,6 +7,7 @@ from pathlib import Path
 from PIL import Image
 
 from .cleanup_runs import CleanupRunInput, format_cleanup_run_dirs, load_cleanup_rows_by_id
+from .phase7_manifest import write_phase7_manifest
 from .rendering.compose import compose_page_records
 
 
@@ -26,6 +27,14 @@ def run_phase7_preview(
     rows = _preview_rows(run_dir, detections, cleanups, layouts, sample_limit)
     _write_jsonl(run_dir / "preview-results.jsonl", rows)
     _write_manual_review_csv(run_dir / "reports" / "manual-review.csv", rows)
+    write_phase7_manifest(
+        run_dir / "manifest.json",
+        run_dir,
+        detection_run_dir,
+        cleanup_run_dir,
+        layout_run_dir,
+        rows,
+    )
     _write_report(run_dir / "reports" / "phase7-report.md", detection_run_dir, cleanup_run_dir, layout_run_dir, rows)
     return run_dir
 
@@ -275,6 +284,7 @@ def _write_report(
         "",
         "## Generated Artifacts",
         "",
+        "- `manifest.json`",
         "- `preview-results.jsonl`",
         "- `pages/*.png`",
         "- `crops/before_after/*.png`",

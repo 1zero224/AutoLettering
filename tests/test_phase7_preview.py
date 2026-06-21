@@ -73,6 +73,44 @@ def test_run_phase7_preview_groups_multiple_records_on_one_page(tmp_path: Path):
     assert (run_dir / "reports" / "phase7-report.md").exists()
 
 
+def test_run_phase7_preview_writes_run_manifest(tmp_path: Path):
+    page_path = _write_page(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    cleanup_run = tmp_path / "phase6"
+    layout_run = tmp_path / "phase4"
+    detection_run.mkdir()
+    cleanup_run.mkdir()
+    layout_run.mkdir()
+    _write_detections(detection_run / "detections.jsonl", page_path)
+    _write_cleanups(cleanup_run / "cleanup-results.jsonl", tmp_path)
+    _write_layouts(layout_run / "layout-results.jsonl", tmp_path)
+
+    run_dir = run_phase7_preview(
+        detection_run_dir=detection_run,
+        cleanup_run_dir=cleanup_run,
+        layout_run_dir=layout_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase7-manifest",
+        sample_limit=2,
+    )
+
+    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["schema_version"] == "autolettering.phase7.preview.v1"
+    assert manifest["run_id"] == "phase7-manifest"
+    assert manifest["inputs"]["detection_run_dir"] == str(detection_run)
+    assert manifest["inputs"]["cleanup_run_dirs"] == [str(cleanup_run)]
+    assert manifest["inputs"]["layout_run_dir"] == str(layout_run)
+    assert manifest["summary"] == {"record_count": 2, "page_count": 1, "skipped_count": 0}
+    assert manifest["artifacts"]["preview_results_jsonl"] == str(run_dir / "preview-results.jsonl")
+    assert manifest["artifacts"]["manual_review_csv"] == str(run_dir / "reports" / "manual-review.csv")
+    assert manifest["artifacts"]["phase7_report"] == str(run_dir / "reports" / "phase7-report.md")
+    assert manifest["pages"][0]["image_name"] == "page.png"
+    assert manifest["pages"][0]["page_preview_path"] == str(run_dir / "pages" / "page-png.png")
+    assert [record["record_id"] for record in manifest["pages"][0]["records"]] == ["page.png#1", "page.png#2"]
+    report = (run_dir / "reports" / "phase7-report.md").read_text(encoding="utf-8")
+    assert "- `manifest.json`" in report
+
+
 def test_run_phase7_preview_writes_manual_review_csv(tmp_path: Path):
     page_path = _write_page(tmp_path / "page.png")
     detection_run = tmp_path / "phase2"
@@ -216,6 +254,10 @@ def test_run_phase7_preview_records_missing_layout_as_skipped(tmp_path: Path):
     assert "- Records processed: 1" in report
     assert "- Page previews generated: 0" in report
     assert "- Skipped: 1" in report
+    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["summary"] == {"record_count": 0, "page_count": 0, "skipped_count": 1}
+    assert manifest["pages"] == []
+    assert manifest["skipped_records"] == [_skipped_payload("page.png#1", "missing_layout")]
 
 
 def test_run_phase7_preview_prefers_replacement_crop_when_available(tmp_path: Path):
