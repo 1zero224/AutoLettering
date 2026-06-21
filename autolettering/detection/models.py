@@ -10,6 +10,7 @@ class CandidateBox:
     dark_pixel_count: int
     center_distance: float
     score: float
+    polarity: str = "dark_on_light"
 
 
 @dataclass(frozen=True)

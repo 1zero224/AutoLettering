@@ -19,12 +19,13 @@ def main() -> None:
     parser.add_argument("--output-root", default="outputs/runs")
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--sample-limit", type=int, default=1)
+    parser.add_argument("--record-id", action="append", dest="record_ids", default=None)
     parser.add_argument("--env-file", default=".env")
     parser.add_argument("--call-gpt-image", action="store_true")
     parser.add_argument(
         "--inpaint-method",
         default="local_diffusion",
-        choices=["local_diffusion", "opencv_telea", "opencv_ns", "bt_lama_large", "bt_patchmatch"],
+        choices=["local_diffusion", "opencv_telea", "opencv_ns", "dark_panel_fill", "bt_lama_large", "bt_patchmatch"],
     )
     args = parser.parse_args()
 
@@ -34,6 +35,7 @@ def main() -> None:
         output_root=Path(args.output_root),
         run_id=args.run_id,
         sample_limit=args.sample_limit,
+        record_ids=args.record_ids,
         gpt_config=_gpt_config_from_env() if args.call_gpt_image else None,
         call_gpt_image=args.call_gpt_image,
         inpaint_method=args.inpaint_method,

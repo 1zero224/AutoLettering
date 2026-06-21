@@ -8,6 +8,7 @@ result. It covers:
 - BallonsTranslator inpainting methods and tradeoffs.
 - Bubble text cleanup optimization for `GBC06_01.png#2` to `#6`.
 - Non-bubble inpainting comparison for `GBC06_01.png#16`.
+- Dark-panel non-bubble cleanup for `GBC06_01.png#17`.
 - `mimo-v2.5` evaluation results, including the `gpt-image-2` masked-edit result.
 
 Generated images remain under `outputs/` and are intentionally not committed.
@@ -170,6 +171,84 @@ Decision:
   translated lettering. It may still be useful as a background cleanup or
   exploratory generative path, but not as an end-to-end lettering replacement
   for this sample.
+
+## Dark-Panel Text Cleanup
+
+Test record:
+
+- `GBC06_01.png#17`
+- Group: `框外`
+- Translation: `已成功预约`
+
+Root cause of the bad cleanup:
+
+- The old non-bubble text mask assumed dark glyphs on a light background.
+- This record is the opposite: white UI text on a dark phone screen.
+- The previous bbox selection bridged the selected text to a separate bright
+  region above the target, so cleanup touched too much art.
+- Phase 4 rendered black translated text by default, making the result
+  unreadable on the dark phone screen even when inpainting was acceptable.
+
+Implemented behavior:
+
+- Phase 2 now records candidate polarity and can detect `light_on_dark` text.
+- `selected_text_bbox()` filters candidate clusters by polarity and avoids
+  bridging the #17 white UI text to unrelated upper bright art.
+- Phase 6 passes the selected polarity into non-bubble mask generation, so
+  `light_on_dark` masks target bright glyph pixels constrained by a dark local
+  background.
+- Phase 4 renders `light_on_dark` records in white and stores
+  `layout.text_color`.
+- Phase 8 exports `layout.text_color`; the generated JSX converts it to a
+  Photoshop `SolidColor` before creating the editable text layer.
+
+Key cleanup bbox after the fix:
+
+```text
+record_id=GBC06_01.png#17
+cleanup_bbox=[286, 277, 393, 361]
+polarity=light_on_dark
+mask_pixels=3594
+crop_size=107x84
+```
+
+Dark-panel experiment artifacts:
+
+- Cleanup comparison sheet: `outputs/runs/phase6-gbc06-batch-17-inpaint-polarity-comparison/GBC06-01-png-17-cleanup-comparison-v4-dark-fill.png`
+- Corrected LaMa cleanup: `outputs/runs/phase6-gbc06-batch-17-nonbubble-lama-large-polarity-v3/crops/before_after/GBC06-01-png-17.png`
+- Corrected layout: `outputs/runs/phase4-gbc06-batch-17-layout-polarity-white-v1/layout-results.jsonl`
+- Corrected preview/evaluation: `outputs/runs/phase7-8-gbc06-batch-17-lama-white-preview-v1`
+- Photoshop export with white text color: `outputs/runs/phase8-gbc06-batch-17-lama-white-text-export-v1/photoshop-manifest.json`
+
+`mimo-v2.5` results for #17:
+
+| Method | Final preview cleanup method | Score | Usable | Main issue |
+| --- | --- | ---: | --- | --- |
+| LaMa large + polarity mask + white text | `bt_lama_large_inpaint` | 8 | true | Translated lettering is slightly oversized |
+| Median dark-panel fill + white text | `dark_panel_fill` | 6 | true | Original removed, but the solid dark fill patch is visible |
+| `gpt-image-2` masked edit + white text | `gpt_image2_masked_edit` | 4 | false | Generated lettering is oversized and covers surrounding artwork |
+
+`gpt-image-2` call status:
+
+```json
+{
+  "status": "ok",
+  "model": "gpt-image-2",
+  "input_tokens": 56,
+  "output_tokens": 1584,
+  "total_tokens": 1640,
+  "normalized_size": [107, 84]
+}
+```
+
+Decision:
+
+- Keep `bt_lama_large` as the default non-bubble cleanup method.
+- Keep `dark_panel_fill` as a narrow fallback for dark UI/panel backgrounds
+  when deep inpainting leaves visible residue.
+- Do not use `gpt-image-2` as the default exact-lettering path. On #17 it
+  removed the source text, but it also generated its own oversized text inside
+  the replacement crop, which made the final programmatic overlay cluttered.
 
 ## Verification
 

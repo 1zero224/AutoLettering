@@ -16,7 +16,9 @@ def inpaint_nonbubble_text(
     output_dir: str | Path,
     record_id: str,
     method: str = "local_diffusion",
+    polarity: str = "dark_on_light",
     dark_threshold: int = 185,
+    light_threshold: int = 210,
     mask_dilate_px: int = 5,
     iterations: int = 80,
 ) -> NonBubbleInpaintResult:
@@ -25,7 +27,7 @@ def inpaint_nonbubble_text(
     with Image.open(image_path) as image:
         crop = image.convert("RGB").crop(bbox)
 
-    text_mask = build_text_mask(crop, dark_threshold, mask_dilate_px)
+    text_mask = build_text_mask(crop, dark_threshold, mask_dilate_px, polarity=polarity, light_threshold=light_threshold)
     method_name, cleaned = inpaint_crop(crop, text_mask, method, iterations)
     gpt_mask = build_gpt_edit_mask(text_mask)
 
@@ -63,6 +65,8 @@ def inpaint_crop(
         return "local_diffusion_inpaint", diffuse_inpaint(crop, text_mask, iterations)
     if method in {"opencv_telea", "opencv_ns"}:
         return f"{method}_inpaint", opencv_inpaint(crop, text_mask, method)
+    if method == "dark_panel_fill":
+        return "dark_panel_fill", dark_panel_fill(crop, text_mask)
     if method == "bt_lama_large":
         return "bt_lama_large_inpaint", balloons_lama_large_inpaint(crop, text_mask)
     if method == "bt_patchmatch":
@@ -70,11 +74,23 @@ def inpaint_crop(
     raise ValueError(f"unsupported_inpaint_method:{method}")
 
 
-def build_text_mask(crop: Image.Image, dark_threshold: int = 185, dilate_px: int = 5) -> Image.Image:
+def build_text_mask(
+    crop: Image.Image,
+    dark_threshold: int = 185,
+    dilate_px: int = 5,
+    polarity: str = "dark_on_light",
+    light_threshold: int = 210,
+) -> Image.Image:
     gray = crop.convert("L")
-    dark = gray.point(lambda value: 255 if value < dark_threshold else 0, mode="L")
+    if polarity == "light_on_dark":
+        bright = gray.point(lambda value: 255 if value > light_threshold else 0, mode="L")
+        dark_context = gray.point(lambda value: 255 if value < dark_threshold else 0, mode="L").filter(ImageFilter.MaxFilter(13))
+        text = ImageChops.multiply(bright, dark_context).filter(ImageFilter.MaxFilter(13))
+        text = ImageChops.multiply(bright, text)
+    else:
+        text = gray.point(lambda value: 255 if value < dark_threshold else 0, mode="L")
     filter_size = max(3, dilate_px if dilate_px % 2 == 1 else dilate_px + 1)
-    return dark.filter(ImageFilter.MaxFilter(filter_size))
+    return text.filter(ImageFilter.MaxFilter(filter_size))
 
 
 def build_gpt_edit_mask(text_mask: Image.Image) -> Image.Image:
@@ -102,6 +118,22 @@ def opencv_inpaint(crop: Image.Image, text_mask: Image.Image, method: str = "ope
     image_array = np.array(crop.convert("RGB"), dtype=np.uint8)
     mask_array = np.array(text_mask.convert("L"), dtype=np.uint8)
     result = cv2.inpaint(image_array, mask_array, 3, flags)
+    return Image.fromarray(result, mode="RGB")
+
+
+def dark_panel_fill(crop: Image.Image, text_mask: Image.Image) -> Image.Image:
+    array = np.array(crop.convert("RGB"), dtype=np.uint8)
+    mask = np.array(text_mask.convert("L")) > 0
+    if not bool(mask.any()):
+        return crop.convert("RGB")
+
+    gray = np.array(crop.convert("L"), dtype=np.uint8)
+    background = (~mask) & (gray < 140)
+    if not bool(background.any()):
+        background = ~mask
+    fill_color = np.median(array[background], axis=0).astype(np.uint8)
+    result = array.copy()
+    result[mask] = fill_color
     return Image.fromarray(result, mode="RGB")
 
 

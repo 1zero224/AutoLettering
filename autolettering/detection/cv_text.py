@@ -25,9 +25,12 @@ def detect_text_region(
     min_dark_pixels: int = 10,
 ) -> DetectionResult:
     search_region = build_search_region(label.x_px, label.y_px, image_width, image_height, radius_x, radius_y)
-    dark_mask = _load_dark_mask(image_path, search_region, dark_threshold)
+    gray = _load_gray_crop(image_path, search_region)
+    dark_mask = gray < dark_threshold
+    light_mask = _light_text_mask(gray, label.x_px - search_region[0], label.y_px - search_region[1])
     if not bool(dark_mask.any()):
-        return _failed_result(label.id, search_region, "no_dark_pixels")
+        if not bool(light_mask.any()):
+            return _failed_result(label.id, search_region, "no_dark_pixels")
 
     candidates = _connected_components(
         _build_component_mask(dark_mask),
@@ -37,7 +40,23 @@ def detect_text_region(
         label.y_px,
         min_area=min_area,
         min_dark_pixels=min_dark_pixels,
+        polarity="dark_on_light",
+        max_area_ratio=0.35,
     )
+    candidates.extend(
+        _connected_components(
+            _build_component_mask(light_mask),
+            light_mask,
+            search_region,
+            label.x_px,
+            label.y_px,
+            min_area=min_area,
+            min_dark_pixels=min_dark_pixels,
+            polarity="light_on_dark",
+            max_area_ratio=0.25,
+        )
+    )
+    candidates = sorted(candidates, key=lambda item: item.score, reverse=True)
 
     if not candidates:
         return _failed_result(label.id, search_region, "no_candidate_box")
@@ -45,14 +64,20 @@ def detect_text_region(
     return _success_result(label.id, search_region, candidates)
 
 
-def _load_dark_mask(
+def _load_gray_crop(
     image_path: str | Path,
     search_region: tuple[int, int, int, int],
-    dark_threshold: int,
 ) -> np.ndarray:
     with Image.open(image_path) as image:
         crop = image.convert("RGB").crop(search_region)
-    return np.array(crop.convert("L")) < dark_threshold
+    return np.array(crop.convert("L"))
+
+
+def _light_text_mask(gray: np.ndarray, label_x: int, label_y: int, bright_threshold: int = 220) -> np.ndarray:
+    if _local_dark_ratio(gray, label_x, label_y) < 0.35:
+        return np.zeros_like(gray, dtype=bool)
+    dark_context = np.array(Image.fromarray(((gray < 95).astype(np.uint8) * 255), mode="L").filter(ImageFilter.MaxFilter(13))) > 0
+    return (gray > bright_threshold) & dark_context
 
 
 def _build_component_mask(dark_mask: np.ndarray) -> np.ndarray:
@@ -152,6 +177,8 @@ def _connected_components(
     label_y: int,
     min_area: int,
     min_dark_pixels: int,
+    polarity: str = "dark_on_light",
+    max_area_ratio: float | None = None,
 ) -> list[CandidateBox]:
     height, width = component_mask.shape
     visited = np.zeros_like(component_mask, dtype=bool)
@@ -165,6 +192,8 @@ def _connected_components(
                 continue
             min_x, min_y, max_x, max_y, area = _flood_fill(component_mask, visited, x, y)
             if area < min_area:
+                continue
+            if max_area_ratio is not None and area > component_mask.size * max_area_ratio:
                 continue
 
             dark_crop = dark_mask[min_y : max_y + 1, min_x : max_x + 1]
@@ -189,10 +218,22 @@ def _connected_components(
                     dark_pixel_count=dark_count,
                     center_distance=round(distance, 3),
                     score=round(score, 4),
+                    polarity=polarity,
                 )
             )
 
     return sorted(candidates, key=lambda item: item.score, reverse=True)
+
+
+def _local_dark_ratio(gray: np.ndarray, x: int, y: int, radius: int = 36) -> float:
+    height, width = gray.shape
+    x1 = max(0, x - radius)
+    y1 = max(0, y - radius)
+    x2 = min(width, x + radius + 1)
+    y2 = min(height, y + radius + 1)
+    if x1 >= x2 or y1 >= y2:
+        return 0.0
+    return float((gray[y1:y2, x1:x2] < 100).mean())
 
 
 def _flood_fill(mask: np.ndarray, visited: np.ndarray, start_x: int, start_y: int) -> tuple[int, int, int, int, int]:

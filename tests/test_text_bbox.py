@@ -92,3 +92,17 @@ def test_selected_text_bbox_does_not_bridge_wide_gap_into_neighbor_bubble():
     }
 
     assert selected_text_bbox(detection) == (577, 1367, 653, 1555)
+
+
+def test_selected_text_bbox_does_not_bridge_light_text_to_separate_upper_art():
+    detection = {
+        "selected_text_box_xyxy": [286, 277, 393, 361],
+        "candidate_boxes": [
+            {"xyxy": [286, 277, 393, 361], "score": 0.9165, "polarity": "light_on_dark"},
+            {"xyxy": [276, 219, 357, 268], "score": 0.8132, "polarity": "light_on_dark"},
+            {"xyxy": [366, 344, 387, 358], "score": 0.7312, "polarity": "light_on_dark"},
+            {"xyxy": [281, 224, 352, 264], "score": 0.8138, "polarity": "dark_on_light"},
+        ],
+    }
+
+    assert selected_text_bbox(detection) == (286, 277, 393, 361)

@@ -10,7 +10,7 @@ from PIL import Image
 from .layout.measure import search_fitting_layout
 from .layout.render_text import measure_preview_alignment, render_layout_preview
 from .record_selection import normalize_record_ids, row_matches_record_ids
-from .text_bbox import selected_text_bbox
+from .text_bbox import selected_text_bbox, selected_text_polarity
 
 
 def run_phase4(
@@ -81,8 +81,9 @@ def _layout_record(
     font_path = Path(row["selected_font"]["path"])
     angle = angle_rows.get(row["record_id"])
     layout, target_bbox, target_size = _search_layout_for_record(row, font_path, angle, detection_rows)
+    text_color = _text_color_for_record(row["record_id"], detection_rows, target_bbox)
     preview_path = run_dir / "debug" / "layout_candidates" / f"{_safe_name(row['record_id'])}.png"
-    render_layout_preview(layout, font_path, preview_path, canvas_size=target_size)
+    render_layout_preview(layout, font_path, preview_path, canvas_size=target_size, text_color=text_color)
     alignment = measure_preview_alignment(preview_path)
     return {
         "record_id": row["record_id"],
@@ -90,35 +91,45 @@ def _layout_record(
         "translated_text": row.get("translated_text", ""),
         "status": "layout_generated" if layout.status == "ok" else "layout_failed",
         "selected_font_id": row.get("selected_font_id"),
-        "layout": _layout_payload(layout, preview_path, alignment, target_bbox),
+        "layout": _layout_payload(layout, preview_path, alignment, target_bbox, text_color),
     }
 
 
 def _search_layout_for_record(row: dict, font_path: Path, angle: dict | None, detection_rows: dict[str, dict]):
+    detection = detection_rows.get(row["record_id"])
     target_bboxes = _layout_target_bboxes(row, detection_rows)
     if not target_bboxes:
         target_size = _target_size_from_comparison(row)
-        return _search_layout(row, font_path, target_size, angle), None, target_size
+        return _search_layout(row, font_path, target_size, angle, None, None), None, target_size
 
     fallback = None
     for target_bbox in target_bboxes:
         target_size = _bbox_size(target_bbox)
-        layout = _search_layout(row, font_path, target_size, angle)
+        layout = _search_layout(row, font_path, target_size, angle, detection, target_bbox)
         fallback = layout, target_bbox, target_size
         if layout.status == "ok":
             return fallback
     return fallback
 
 
-def _search_layout(row: dict, font_path: Path, target_size: tuple[int, int], angle: dict | None):
+def _search_layout(
+    row: dict,
+    font_path: Path,
+    target_size: tuple[int, int],
+    angle: dict | None,
+    detection: dict | None,
+    target_bbox: list[int] | None,
+):
     orientation = _selected_orientation(target_size, angle)
-    angle_degrees = _angle_override(angle) if orientation == _orientation_override(angle) else 0.0
+    angle_degrees = _selected_angle_degrees(orientation, angle)
+    max_font_size = _max_font_size(orientation, detection, target_bbox)
     return search_fitting_layout(
         row.get("translated_text", ""),
         font_path,
         target_size,
         orientation=orientation,
         angle_degrees=angle_degrees,
+        max_font_size=max_font_size,
     )
 
 
@@ -155,9 +166,58 @@ def _text_bbox(detection: dict) -> tuple[int, int, int, int]:
     return selected_text_bbox(detection)
 
 
+def _text_color_for_record(
+    record_id: str,
+    detection_rows: dict[str, dict],
+    target_bbox: list[int] | None,
+) -> tuple[int, int, int, int]:
+    detection = detection_rows.get(record_id)
+    if detection is None:
+        return (0, 0, 0, 255)
+    bbox = tuple(target_bbox) if target_bbox else None
+    if selected_text_polarity(detection, bbox) == "light_on_dark":
+        return (255, 255, 255, 255)
+    return (0, 0, 0, 255)
+
+
 def _bbox_size(bbox: list[int]) -> tuple[int, int]:
     x1, y1, x2, y2 = bbox
     return x2 - x1, y2 - y1
+
+
+def _max_font_size(orientation: str, detection: dict | None, target_bbox: list[int] | None) -> int:
+    if orientation != "vertical" or detection is None or target_bbox is None:
+        return 72
+    column_width = _source_column_width(detection, tuple(target_bbox))
+    if column_width is None:
+        return 72
+    return max(12, min(72, int(round(column_width * 1.18))))
+
+
+def _source_column_width(detection: dict, target_bbox: tuple[int, int, int, int]) -> int | None:
+    widths = [
+        _width(bbox)
+        for bbox in (_candidate_bbox(item) for item in detection.get("candidate_boxes") or [])
+        if bbox and _inside(bbox, target_bbox) and _area(bbox) <= _area(target_bbox) * 0.8
+    ]
+    return max(widths) if widths else None
+
+
+def _candidate_bbox(item: dict) -> tuple[int, int, int, int] | None:
+    xyxy = item.get("xyxy")
+    if not isinstance(xyxy, list) or len(xyxy) != 4:
+        return None
+    return tuple(int(value) for value in xyxy)
+
+
+def _inside(inner: tuple[int, int, int, int], outer: tuple[int, int, int, int]) -> bool:
+    ix1, iy1, ix2, iy2 = inner
+    ox1, oy1, ox2, oy2 = outer
+    return ox1 <= ix1 < ix2 <= ox2 and oy1 <= iy1 < iy2 <= oy2
+
+
+def _width(bbox: tuple[int, int, int, int]) -> int:
+    return max(0, bbox[2] - bbox[0])
 
 
 def _expand_target_bboxes(
@@ -217,10 +277,17 @@ def _target_orientation(target_size: tuple[int, int]) -> str | None:
     return None
 
 
-def _layout_payload(layout, preview_path: Path, alignment: dict, target_bbox: list[int] | None = None) -> dict:
+def _layout_payload(
+    layout,
+    preview_path: Path,
+    alignment: dict,
+    target_bbox: list[int] | None = None,
+    text_color: tuple[int, int, int, int] = (0, 0, 0, 255),
+) -> dict:
     payload = asdict(layout)
     payload["preview_path"] = str(preview_path)
     payload["target_bbox"] = target_bbox
+    payload["text_color"] = list(text_color)
     payload["alignment"] = alignment
     payload["validation"] = {
         "status": "deterministic_only",
@@ -258,6 +325,12 @@ def _angle_override(angle: dict | None) -> float:
     if not angle:
         return 0.0
     return float(angle.get("selected_angle_degrees") or 0.0)
+
+
+def _selected_angle_degrees(orientation: str, angle: dict | None) -> float:
+    if orientation != _orientation_override(angle) or _angle_confidence(angle) < 0.8:
+        return 0.0
+    return _angle_override(angle)
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:

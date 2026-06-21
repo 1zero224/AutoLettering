@@ -63,6 +63,35 @@ def test_detect_text_region_selects_dark_cluster_near_label_point(tmp_path: Path
     assert result.failure_reason is None
 
 
+def test_detect_text_region_selects_light_text_on_dark_background_near_label_point(tmp_path: Path):
+    image_path = tmp_path / "dark-panel.png"
+    image = Image.new("RGB", (240, 240), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((45, 45, 175, 170), fill=(20, 20, 20))
+    draw.rectangle((88, 70, 108, 125), fill="white")
+    draw.rectangle((116, 70, 136, 125), fill="white")
+    draw.rectangle((170, 20, 205, 55), fill="black")
+    image.save(image_path)
+
+    result = detect_text_region(
+        image_path=image_path,
+        label=_label(image_name="dark-panel.png", x_px=112, y_px=105),
+        image_width=240,
+        image_height=240,
+        radius_x=90,
+        radius_y=90,
+    )
+
+    assert result.status == "ok"
+    assert result.selected_text_box_xyxy is not None
+    x1, y1, x2, y2 = result.selected_text_box_xyxy
+    assert x1 <= 88
+    assert y1 <= 70
+    assert x2 >= 136
+    assert y2 >= 125
+    assert result.candidate_boxes[0].polarity == "light_on_dark"
+
+
 def test_detect_text_region_reports_no_dark_pixels_on_blank_image(tmp_path: Path):
     image_path = tmp_path / "blank.png"
     Image.new("RGB", (120, 120), "white").save(image_path)

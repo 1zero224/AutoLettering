@@ -30,6 +30,21 @@ JSX_SOURCE = """#target photoshop
             textItem.direction = (orientation == 'vertical') ? Direction.VERTICAL : Direction.HORIZONTAL;
         } catch (err) {}
     }
+    function clampRgb(value) {
+        value = Number(value);
+        if (isNaN(value)) { return 0; }
+        return Math.max(0, Math.min(255, value));
+    }
+    function setTextColor(textItem, rgba) {
+        if (!rgba || rgba.length < 3) { return; }
+        try {
+            var color = new SolidColor();
+            color.rgb.red = clampRgb(rgba[0]);
+            color.rgb.green = clampRgb(rgba[1]);
+            color.rgb.blue = clampRgb(rgba[2]);
+            textItem.color = color;
+        } catch (err) {}
+    }
     function setTextSpacing(textItem, layout) {
         if (layout.line_spacing !== null && layout.line_spacing !== undefined) {
             textItem.leading = UnitValue((layout.font_size || 24) + layout.line_spacing, 'px');
@@ -71,6 +86,7 @@ JSX_SOURCE = """#target photoshop
         item.size = UnitValue(layerData.layout.font_size || 24, 'px');
         setTextFont(item, layerData.font.photoshop_font_name || layerData.font.family_name);
         setTextDirection(item, layerData.layout.orientation);
+        setTextColor(item, layerData.layout.text_color);
         setTextSpacing(item, layerData.layout);
         item.position = [UnitValue(layerData.text_position.x_px, 'px'), UnitValue(layerData.text_position.y_px, 'px')];
         if (layerData.layout.angle_degrees) { layer.rotate(layerData.layout.angle_degrees); }
@@ -254,7 +270,23 @@ def _layout_payload(layout: dict) -> dict:
         "target_width": layout.get("target_width"),
         "target_height": layout.get("target_height"),
         "overflow_ratio": layout.get("overflow_ratio"),
+        "text_color": _text_color_payload(layout.get("text_color")),
     }
+
+
+def _text_color_payload(value: object) -> list[int]:
+    if not isinstance(value, (list, tuple)) or len(value) < 3:
+        return [0, 0, 0, 255]
+    alpha = value[3] if len(value) >= 4 else 255
+    return [_clamp_color(value[0]), _clamp_color(value[1]), _clamp_color(value[2]), _clamp_color(alpha)]
+
+
+def _clamp_color(value: object) -> int:
+    try:
+        number = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(255, number))
 
 
 def _cleanup_payload(cleanup_row: dict | None) -> dict:

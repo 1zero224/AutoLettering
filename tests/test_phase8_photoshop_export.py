@@ -22,6 +22,7 @@ def test_run_phase8_photoshop_export_writes_manifest_and_jsx(tmp_path: Path):
     assert layer["font"]["photoshop_font_name"] == "TestFontPS"
     assert layer["font"]["font_name_candidates"] == ["TestFontPS", "TestFont"]
     assert layer["layout"]["angle_degrees"] == -10.5
+    assert layer["layout"]["text_color"] == [255, 255, 255, 255]
     assert layer["cleanup"]["method"] == "bubble_fill"
     assert layer["cleanup"]["effective_method"] == "bubble_fill"
     assert layer["cleanup"]["effective_crop_path"] == str(tmp_path / "cleaned.png")
@@ -33,6 +34,7 @@ def test_run_phase8_photoshop_export_writes_manifest_and_jsx(tmp_path: Path):
     assert "Places `cleanup.effective_crop_path` as a bitmap patch layer" in report
     assert "paragraph text layer" in report
     assert "layout.line_spacing" in report
+    assert "layout.text_color" in report
     assert "font.photoshop_font_name" in report
     assert "JSON font mapping file" in report
     checklist = (run_dir / "reports" / "photoshop-validation-checklist.md").read_text(encoding="utf-8")
@@ -172,6 +174,9 @@ def _assert_rich_jsx_importer(jsx: str) -> None:
         "item.height = UnitValue(layerData.text_bbox.height, 'px')",
         "layerData.text_position.x_px",
         "function setTextSpacing",
+        "function setTextColor",
+        "var color = new SolidColor()",
+        "textItem.color = color",
         "textItem.leading",
         "textItem.tracking",
         "layerData.font.photoshop_font_name || layerData.font.family_name",
@@ -221,6 +226,7 @@ def _layout_payload() -> dict:
             "target_width": 70,
             "target_height": 70,
             "target_bbox": [30, 40, 60, 85],
+            "text_color": [255, 255, 255, 255],
             "overflow_ratio": 0.0,
             "validation": {"status": "deterministic_only"},
         },

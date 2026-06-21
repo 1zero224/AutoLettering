@@ -23,6 +23,29 @@ def test_build_text_mask_and_gpt_mask_use_expected_alpha_convention():
     assert gpt_mask.getpixel((2, 2))[3] == 255
 
 
+def test_build_text_mask_can_select_light_text_on_dark_background():
+    crop = Image.new("RGB", (40, 30), (20, 20, 20))
+    ImageDraw.Draw(crop).rectangle((15, 8, 25, 22), fill="white")
+
+    text_mask = build_text_mask(crop, dilate_px=3, polarity="light_on_dark", light_threshold=210)
+
+    assert text_mask.getpixel((20, 15)) == 255
+    assert text_mask.getpixel((2, 2)) == 0
+
+
+def test_build_text_mask_does_not_select_light_art_on_light_background_for_light_text():
+    crop = Image.new("RGB", (80, 40), (240, 240, 240))
+    draw = ImageDraw.Draw(crop)
+    draw.rectangle((8, 8, 25, 25), fill="white")
+    draw.rectangle((45, 6, 75, 34), fill=(20, 20, 20))
+    draw.rectangle((55, 14, 65, 26), fill="white")
+
+    text_mask = build_text_mask(crop, dilate_px=3, polarity="light_on_dark", light_threshold=210)
+
+    assert text_mask.getpixel((16, 16)) == 0
+    assert text_mask.getpixel((60, 20)) == 255
+
+
 def test_inpaint_nonbubble_text_writes_artifacts_and_reduces_dark_text(tmp_path: Path):
     image_path = _write_nonbubble_image(tmp_path / "page.png")
 
@@ -90,6 +113,19 @@ def test_inpaint_crop_routes_balloon_patchmatch_method(monkeypatch):
     assert result.getpixel((0, 0)) == (255, 255, 255)
 
 
+def test_inpaint_crop_supports_dark_panel_fill_method():
+    crop = Image.new("RGB", (30, 20), (18, 18, 18))
+    ImageDraw.Draw(crop).rectangle((10, 6, 18, 14), fill="white")
+    mask = Image.new("L", crop.size, 0)
+    ImageDraw.Draw(mask).rectangle((10, 6, 18, 14), fill=255)
+
+    method, result = inpaint_crop(crop, mask, "dark_panel_fill")
+
+    assert method == "dark_panel_fill"
+    assert result.convert("L").getpixel((14, 10)) < 80
+    assert result.getpixel((2, 2)) == (18, 18, 18)
+
+
 def test_run_phase6_nonbubble_cleanup_writes_local_and_gpt_dry_run(tmp_path: Path):
     image_path = _write_nonbubble_image(tmp_path / "page.png")
     detection_run = tmp_path / "phase2"
@@ -112,6 +148,101 @@ def test_run_phase6_nonbubble_cleanup_writes_local_and_gpt_dry_run(tmp_path: Pat
     assert rows[0]["gpt_image2_edit"]["request"]["kind"] == "gpt_image_2_masked_edit"
     assert Path(rows[0]["cleanup"]["gpt_mask_path"]).exists()
     assert (run_dir / "reports" / "phase6-nonbubble-report.md").exists()
+
+
+def test_run_phase6_nonbubble_cleanup_can_filter_record_ids(tmp_path: Path):
+    image_path = _write_nonbubble_image(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(
+        detection_run / "detections.jsonl",
+        image_path,
+        rows=[
+            {"record_id": "page.png#1", "group_name": "框外", "selected_text_box_xyxy": [20, 15, 90, 75]},
+            {"record_id": "page.png#2", "group_name": "框外", "selected_text_box_xyxy": [22, 18, 92, 78]},
+        ],
+    )
+
+    run_dir = run_phase6_nonbubble_cleanup(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-nonbubble-filtered",
+        sample_limit=5,
+        record_ids=["page.png#2"],
+        inpaint_method="opencv_telea",
+    )
+
+    rows = _read_jsonl(run_dir / "cleanup-results.jsonl")
+    assert [row["record_id"] for row in rows] == ["page.png#2"]
+
+
+def test_run_phase6_nonbubble_cleanup_uses_tight_text_bbox(tmp_path: Path):
+    image_path = _write_nonbubble_image(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(
+        detection_run / "detections.jsonl",
+        image_path,
+        rows=[
+            {
+                "record_id": "page.png#2",
+                "group_name": "框外",
+                "selected_text_box_xyxy": [10, 10, 110, 90],
+                "candidate_boxes": [
+                    {"xyxy": [10, 10, 110, 90], "score": 1.0},
+                    {"xyxy": [35, 25, 62, 55], "score": 0.95},
+                ],
+            },
+        ],
+    )
+
+    run_dir = run_phase6_nonbubble_cleanup(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-nonbubble-tight-bbox",
+        sample_limit=1,
+        inpaint_method="opencv_telea",
+    )
+
+    rows = _read_jsonl(run_dir / "cleanup-results.jsonl")
+    assert rows[0]["cleanup"]["bbox"] == [35, 25, 62, 55]
+
+
+def test_run_phase6_nonbubble_cleanup_uses_selected_candidate_polarity(tmp_path: Path):
+    image_path = _write_light_nonbubble_image(tmp_path / "dark-panel.png")
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(
+        detection_run / "detections.jsonl",
+        image_path,
+        rows=[
+            {
+                "record_id": "dark-panel.png#2",
+                "group_name": "框外",
+                "selected_text_box_xyxy": [30, 20, 80, 60],
+                "candidate_boxes": [
+                    {
+                        "xyxy": [30, 20, 80, 60],
+                        "score": 0.95,
+                        "polarity": "light_on_dark",
+                    }
+                ],
+            },
+        ],
+    )
+
+    run_dir = run_phase6_nonbubble_cleanup(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-nonbubble-light-mask",
+        sample_limit=1,
+    )
+
+    rows = _read_jsonl(run_dir / "cleanup-results.jsonl")
+    mask_path = Path(rows[0]["cleanup"]["text_mask_path"])
+    with Image.open(mask_path) as mask:
+        assert mask.getpixel((20, 20)) == 255
+        assert mask.getpixel((2, 2)) == 0
 
 
 def test_run_phase6_nonbubble_cleanup_records_gpt_success_with_fake_client(tmp_path: Path, monkeypatch):
@@ -176,17 +307,29 @@ def _write_nonbubble_image(path: Path) -> Path:
     return path
 
 
-def _write_detection(path: Path, image_path: Path) -> None:
-    payload = {
-        "record_id": "page.png#2",
-        "status": "ok",
-        "image_name": "page.png",
-        "image_path": str(image_path),
-        "group_name": "框外",
-        "translated_text": "背景文字",
-        "selected_text_box_xyxy": [20, 15, 90, 75],
-    }
-    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+def _write_light_nonbubble_image(path: Path) -> Path:
+    image = Image.new("RGB", (120, 100), (20, 20, 20))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((40, 30, 70, 50), fill="white")
+    image.save(path)
+    return path
+
+
+def _write_detection(path: Path, image_path: Path, rows: list[dict] | None = None) -> None:
+    payloads = rows or [
+        {"record_id": "page.png#2", "group_name": "框外", "selected_text_box_xyxy": [20, 15, 90, 75]},
+    ]
+    lines = []
+    for payload in payloads:
+        row = {
+            "status": "ok",
+            "image_name": "page.png",
+            "image_path": str(image_path),
+            "translated_text": "背景文字",
+            **payload,
+        }
+        lines.append(json.dumps(row, ensure_ascii=False))
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _read_jsonl(path: Path) -> list[dict]:

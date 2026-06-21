@@ -304,6 +304,33 @@ def test_run_phase4_prefers_tight_target_orientation_over_stale_angle(tmp_path: 
     assert layout["angle_degrees"] == 0.0
 
 
+def test_run_phase4_ignores_low_confidence_rotation_angle(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+    source_crop_path = tmp_path / "source-crop.png"
+    Image.new("RGB", (375, 342), "white").save(source_crop_path)
+    phase2_run = tmp_path / "phase2-detection"
+    phase3_run = tmp_path / "phase3-selection"
+    phase5_run = tmp_path / "phase5-angle"
+    for path in [phase2_run, phase3_run, phase5_run]:
+        path.mkdir()
+    _write_font_selection(phase3_run / "font-selections.jsonl", font_path, source_crop_path)
+    _write_detection_with_tight_candidates(phase2_run / "detections.jsonl")
+    _write_low_confidence_vertical_angle_result(phase5_run / "angle-results.jsonl")
+
+    run_dir = run_phase4(
+        selection_run_dir=phase3_run,
+        angle_run_dir=phase5_run,
+        detection_run_dir=phase2_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase4-low-confidence-angle",
+        sample_limit=1,
+    )
+
+    layout = _read_jsonl(run_dir / "layout-results.jsonl")[0]["layout"]
+    assert layout["orientation"] == "vertical"
+    assert layout["angle_degrees"] == 0.0
+
+
 def test_run_phase4_prefers_high_confidence_angle_orientation_for_wide_multicolumn_text(tmp_path: Path):
     font_path = _copy_font(tmp_path)
     source_crop_path = tmp_path / "source-crop.png"
@@ -367,6 +394,65 @@ def test_run_phase4_expands_tight_target_inside_selected_box_when_layout_overflo
     assert layout["target_bbox"][0] >= 20
     assert layout["target_bbox"][2] <= 230
     assert layout["orientation"] == "vertical"
+
+
+def test_run_phase4_caps_short_vertical_text_to_source_column_width(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+    source_crop_path = tmp_path / "source-crop.png"
+    Image.new("RGB", (375, 342), "white").save(source_crop_path)
+    phase2_run = tmp_path / "phase2-detection"
+    phase3_run = tmp_path / "phase3-selection"
+    for path in [phase2_run, phase3_run]:
+        path.mkdir()
+    _write_font_selection(
+        phase3_run / "font-selections.jsonl",
+        font_path,
+        source_crop_path,
+        translated_text="锵~锵",
+    )
+    _write_detection_with_tight_candidates(phase2_run / "detections.jsonl")
+
+    run_dir = run_phase4(
+        selection_run_dir=phase3_run,
+        detection_run_dir=phase2_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase4-short-vertical-cap",
+        sample_limit=1,
+    )
+
+    layout = _read_jsonl(run_dir / "layout-results.jsonl")[0]["layout"]
+    assert layout["target_bbox"] == [799, 145, 874, 300]
+    assert layout["orientation"] == "vertical"
+    assert layout["font_size"] <= 48
+
+
+def test_run_phase4_renders_light_text_for_light_on_dark_detection(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+    source_crop_path = tmp_path / "source-crop.png"
+    Image.new("RGB", (120, 90), "black").save(source_crop_path)
+    phase2_run = tmp_path / "phase2-detection"
+    phase3_run = tmp_path / "phase3-selection"
+    phase2_run.mkdir()
+    phase3_run.mkdir()
+    _write_font_selection(phase3_run / "font-selections.jsonl", font_path, source_crop_path)
+    _write_light_on_dark_detection(phase2_run / "detections.jsonl")
+
+    run_dir = run_phase4(
+        selection_run_dir=phase3_run,
+        detection_run_dir=phase2_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase4-light-text",
+        sample_limit=1,
+    )
+
+    layout = _read_jsonl(run_dir / "layout-results.jsonl")[0]["layout"]
+    assert layout["text_color"] == [255, 255, 255, 255]
+    with Image.open(layout["preview_path"]).convert("RGBA") as preview:
+        bbox = preview.getchannel("A").getbbox()
+        assert bbox is not None
+        x = (bbox[0] + bbox[2]) // 2
+        y = (bbox[1] + bbox[3]) // 2
+        assert preview.getpixel((x, y))[:3] == (255, 255, 255)
 
 
 def test_run_phase4_filters_selected_fonts_by_record_id_before_sample_limit(tmp_path: Path):
@@ -447,6 +533,7 @@ def _write_angle_result(path: Path) -> None:
         "orientation": {
             "detected_orientation": "vertical",
             "selected_angle_degrees": -12.5,
+            "confidence": 0.9,
         },
     }
     path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -472,6 +559,19 @@ def _write_high_confidence_vertical_angle_result(path: Path) -> None:
             "detected_orientation": "vertical",
             "selected_angle_degrees": 1.5,
             "confidence": 0.86,
+        },
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _write_low_confidence_vertical_angle_result(path: Path) -> None:
+    payload = {
+        "record_id": "page.png#1",
+        "status": "angle_estimated",
+        "orientation": {
+            "detected_orientation": "vertical",
+            "selected_angle_degrees": -22.7,
+            "confidence": 0.67,
         },
     }
     path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -514,6 +614,18 @@ def _write_detection_with_short_tight_target(path: Path) -> None:
             {"xyxy": [20, 20, 230, 220], "area": 42000, "score": 0.99},
             {"xyxy": [80, 40, 105, 160], "area": 3000, "score": 0.95},
             {"xyxy": [125, 40, 150, 160], "area": 3000, "score": 0.94},
+        ],
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _write_light_on_dark_detection(path: Path) -> None:
+    payload = {
+        "record_id": "page.png#1",
+        "status": "ok",
+        "selected_text_box_xyxy": [10, 10, 110, 90],
+        "candidate_boxes": [
+            {"xyxy": [10, 10, 110, 90], "area": 8000, "score": 0.95, "polarity": "light_on_dark"},
         ],
     }
     path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")

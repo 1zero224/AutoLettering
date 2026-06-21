@@ -12,6 +12,7 @@ from .models.gpt_image import (
     gpt_image_request_summary,
     normalize_gpt_output_to_crop,
 )
+from .text_bbox import selected_text_bbox, selected_text_polarity
 
 
 def run_phase6_nonbubble_cleanup(
@@ -19,13 +20,14 @@ def run_phase6_nonbubble_cleanup(
     output_root: str | Path = "outputs/runs",
     run_id: str | None = None,
     sample_limit: int = 5,
+    record_ids: list[str] | None = None,
     gpt_config: GptImageConfig | None = None,
     call_gpt_image: bool = False,
     inpaint_method: str = "local_diffusion",
 ) -> Path:
     run_dir = Path(output_root) / (run_id or "phase6-nonbubble-cleanup")
     run_dir.mkdir(parents=True, exist_ok=True)
-    detections = _load_nonbubble_detections(Path(detection_run_dir) / "detections.jsonl", sample_limit)
+    detections = _load_nonbubble_detections(Path(detection_run_dir) / "detections.jsonl", sample_limit, record_ids)
     client = GptImageEditClient(gpt_config) if call_gpt_image and gpt_config else None
     rows = [_cleanup_one(run_dir, detection, gpt_config, client, inpaint_method) for detection in detections]
     _write_jsonl(run_dir / "cleanup-results.jsonl", rows)
@@ -33,13 +35,16 @@ def run_phase6_nonbubble_cleanup(
     return run_dir
 
 
-def _load_nonbubble_detections(path: Path, sample_limit: int) -> list[dict]:
+def _load_nonbubble_detections(path: Path, sample_limit: int, record_ids: list[str] | None = None) -> list[dict]:
+    wanted = set(record_ids or [])
     rows: list[dict] = []
     with path.open("r", encoding="utf-8") as handle:
         for line in handle:
             if len(rows) >= sample_limit:
                 break
             payload = json.loads(line)
+            if wanted and payload.get("record_id") not in wanted:
+                continue
             if payload.get("status") == "ok" and payload.get("group_name") != "框内":
                 rows.append(payload)
     return rows
@@ -52,12 +57,14 @@ def _cleanup_one(
     client: GptImageEditClient | None,
     inpaint_method: str,
 ) -> dict:
+    bbox = selected_text_bbox(detection)
     result = inpaint_nonbubble_text(
         image_path=detection["image_path"],
-        bbox=tuple(detection["selected_text_box_xyxy"]),
+        bbox=bbox,
         output_dir=run_dir / "crops",
         record_id=detection["record_id"],
         method=inpaint_method,
+        polarity=selected_text_polarity(detection, bbox),
     )
     prompt = gpt_image_edit_prompt(detection.get("translated_text", ""))
     cleanup = _cleanup_payload(result)
