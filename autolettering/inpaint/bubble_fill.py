@@ -97,6 +97,46 @@ def mask_fill_text_pixels(
     )
 
 
+def region_fill_text_area(
+    image_path: str | Path,
+    bbox: tuple[int, int, int, int],
+    text_bbox: tuple[int, int, int, int],
+    output_dir: str | Path,
+    record_id: str,
+    padding_px: int = 4,
+) -> BubbleFillResult:
+    output_root = Path(output_dir)
+    safe_id = _safe_name(record_id)
+
+    with Image.open(image_path) as image:
+        source = image.convert("RGB")
+        region = _expand_bbox(text_bbox, source.size, padding_px)
+        fill_color = sample_border_color(image_path, region)
+        clean = source.copy()
+        before_crop = source.crop(bbox)
+        cleaned_crop = before_crop.copy()
+        local_region = _offset_bbox(region, bbox)
+        ImageDraw.Draw(cleaned_crop).rectangle(local_region, fill=fill_color)
+        clean.paste(cleaned_crop, bbox[:2])
+
+    before_path = output_root / "before" / f"{safe_id}.png"
+    cleaned_path = output_root / "cleaned" / f"{safe_id}.png"
+    before_after_path = output_root / "before_after" / f"{safe_id}.png"
+    _save_crop(before_crop, before_path)
+    _save_crop(cleaned_crop, cleaned_path)
+    _save_before_after(before_crop, cleaned_crop, before_after_path)
+
+    return BubbleFillResult(
+        record_id=record_id,
+        method="bubble_region_fill",
+        bbox=bbox,
+        fill_color=fill_color,
+        before_crop_path=before_path,
+        cleaned_crop_path=cleaned_path,
+        before_after_path=before_after_path,
+    )
+
+
 def _text_mask(
     source: Image.Image,
     bbox: tuple[int, int, int, int],

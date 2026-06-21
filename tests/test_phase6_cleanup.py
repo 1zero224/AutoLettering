@@ -3,7 +3,7 @@ from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw
 
-from autolettering.inpaint.bubble_fill import fill_text_box, mask_fill_text_pixels, sample_border_color
+from autolettering.inpaint.bubble_fill import fill_text_box, mask_fill_text_pixels, region_fill_text_area, sample_border_color
 from autolettering.phase6 import run_phase6_bubble_cleanup
 from autolettering.phase6 import _text_bbox
 
@@ -60,6 +60,30 @@ def test_mask_fill_text_pixels_preserves_dark_art_outside_text_mask(tmp_path: Pa
         assert cleaned.convert("L").getpixel((30, 10)) < 40
 
 
+def test_region_fill_text_area_removes_light_glyph_ghosts(tmp_path: Path):
+    image = Image.new("RGB", (120, 90), "white")
+    draw = ImageDraw.Draw(image)
+    draw.line((10, 10, 110, 10), fill="black", width=3)
+    draw.rectangle((48, 35, 72, 60), fill=(40, 40, 40))
+    draw.rectangle((50, 62, 70, 68), fill=(226, 226, 226))
+    image_path = tmp_path / "page.png"
+    image.save(image_path)
+
+    result = region_fill_text_area(
+        image_path=image_path,
+        bbox=(0, 0, 120, 90),
+        text_bbox=(45, 30, 75, 72),
+        output_dir=tmp_path / "cleanup",
+        record_id="page.png#1",
+        padding_px=2,
+    )
+
+    with Image.open(result.cleaned_crop_path) as cleaned:
+        assert result.method == "bubble_region_fill"
+        assert cleaned.convert("L").getpixel((60, 65)) > 245
+        assert cleaned.convert("L").getpixel((30, 10)) < 40
+
+
 def test_run_phase6_bubble_cleanup_writes_results_and_artifacts(tmp_path: Path):
     image_path = _write_sample_image(tmp_path / "page.png")
     detection_run = tmp_path / "phase2"
@@ -80,10 +104,32 @@ def test_run_phase6_bubble_cleanup_writes_results_and_artifacts(tmp_path: Path):
     rows = _read_jsonl(run_dir / "cleanup-results.jsonl")
     assert rows[0]["record_id"] == "page.png#1"
     assert rows[0]["status"] == "cleaned"
-    assert rows[0]["cleanup"]["method"] == "bubble_mask_fill"
+    assert rows[0]["cleanup"]["method"] == "bubble_region_fill"
     assert Path(rows[0]["cleanup"]["cleaned_crop_path"]).exists()
     assert Path(rows[0]["cleanup"]["before_after_path"]).exists()
     assert (run_dir / "reports" / "phase6-report.md").exists()
+
+
+def test_run_phase6_bubble_cleanup_can_keep_mask_fill_for_comparison(tmp_path: Path):
+    image_path = _write_sample_image(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    layout_run = tmp_path / "phase4"
+    detection_run.mkdir()
+    layout_run.mkdir()
+    _write_detection(detection_run / "detections.jsonl", image_path)
+    _write_layout(layout_run / "layout-results.jsonl")
+
+    run_dir = run_phase6_bubble_cleanup(
+        detection_run_dir=detection_run,
+        layout_run_dir=layout_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-mask-test",
+        sample_limit=1,
+        cleanup_method="mask_fill",
+    )
+
+    rows = _read_jsonl(run_dir / "cleanup-results.jsonl")
+    assert rows[0]["cleanup"]["method"] == "bubble_mask_fill"
 
 
 def test_text_bbox_unions_small_text_candidates_inside_large_detection():

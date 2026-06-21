@@ -18,6 +18,7 @@ def main() -> None:
     parser.add_argument("--output-root", default="outputs/runs")
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--sample-limit", type=int, default=5)
+    parser.add_argument("--cleanup-method", default="region_fill", choices=["region_fill", "mask_fill"])
     args = parser.parse_args()
 
     run_dir = run_phase6_bubble_cleanup(
@@ -26,6 +27,7 @@ def main() -> None:
         output_root=Path(args.output_root),
         run_id=args.run_id,
         sample_limit=args.sample_limit,
+        cleanup_method=args.cleanup_method,
     )
     print(run_dir)
 

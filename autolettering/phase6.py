@@ -4,7 +4,7 @@ from dataclasses import asdict
 import json
 from pathlib import Path
 
-from .inpaint.bubble_fill import mask_fill_text_pixels
+from .inpaint.bubble_fill import mask_fill_text_pixels, region_fill_text_area
 
 
 def run_phase6_bubble_cleanup(
@@ -13,12 +13,13 @@ def run_phase6_bubble_cleanup(
     output_root: str | Path = "outputs/runs",
     run_id: str | None = None,
     sample_limit: int = 5,
+    cleanup_method: str = "region_fill",
 ) -> Path:
     run_dir = Path(output_root) / (run_id or "phase6-bubble-cleanup")
     run_dir.mkdir(parents=True, exist_ok=True)
     detections = _load_detection_rows(Path(detection_run_dir) / "detections.jsonl")
     layouts = _load_layout_rows(Path(layout_run_dir) / "layout-results.jsonl")
-    rows = _cleanup_rows(run_dir, detections, layouts, sample_limit)
+    rows = _cleanup_rows(run_dir, detections, layouts, sample_limit, cleanup_method)
     _write_jsonl(run_dir / "cleanup-results.jsonl", rows)
     _write_report(run_dir / "reports" / "phase6-report.md", detection_run_dir, layout_run_dir, rows)
     return run_dir
@@ -44,7 +45,13 @@ def _load_layout_rows(path: Path) -> list[dict]:
     return rows
 
 
-def _cleanup_rows(run_dir: Path, detections: dict[str, dict], layouts: list[dict], sample_limit: int) -> list[dict]:
+def _cleanup_rows(
+    run_dir: Path,
+    detections: dict[str, dict],
+    layouts: list[dict],
+    sample_limit: int,
+    cleanup_method: str,
+) -> list[dict]:
     rows: list[dict] = []
     for layout in layouts:
         if len(rows) >= sample_limit:
@@ -53,20 +60,21 @@ def _cleanup_rows(run_dir: Path, detections: dict[str, dict], layouts: list[dict
         if detection is None:
             rows.append(_skipped_row(layout, "missing_detection"))
             continue
-        rows.append(_cleanup_one(run_dir, detection, layout))
+        rows.append(_cleanup_one(run_dir, detection, layout, cleanup_method))
     return rows
 
 
-def _cleanup_one(run_dir: Path, detection: dict, layout: dict) -> dict:
+def _cleanup_one(run_dir: Path, detection: dict, layout: dict, cleanup_method: str) -> dict:
     if detection.get("group_name") != "框内":
         return _skipped_row(layout, "not_bubble_group")
 
-    result = mask_fill_text_pixels(
+    result = _clean_bubble_crop(
         image_path=detection["image_path"],
         bbox=tuple(detection["selected_text_box_xyxy"]),
         text_bbox=_text_bbox(detection),
         output_dir=run_dir / "crops",
         record_id=detection["record_id"],
+        cleanup_method=cleanup_method,
     )
     return {
         "record_id": detection["record_id"],
@@ -75,6 +83,21 @@ def _cleanup_one(run_dir: Path, detection: dict, layout: dict) -> dict:
         "status": "cleaned",
         "cleanup": _cleanup_payload(result),
     }
+
+
+def _clean_bubble_crop(
+    image_path: str | Path,
+    bbox: tuple[int, int, int, int],
+    text_bbox: tuple[int, int, int, int],
+    output_dir: Path,
+    record_id: str,
+    cleanup_method: str,
+):
+    if cleanup_method == "region_fill":
+        return region_fill_text_area(image_path, bbox, text_bbox, output_dir, record_id)
+    if cleanup_method == "mask_fill":
+        return mask_fill_text_pixels(image_path, bbox, text_bbox, output_dir, record_id)
+    raise ValueError(f"unsupported_bubble_cleanup_method:{cleanup_method}")
 
 
 def _text_bbox(detection: dict) -> tuple[int, int, int, int]:

@@ -11,7 +11,19 @@ python experiments/phase6_bubble_cleanup.py --detection-run-dir outputs/runs/pha
 Mask-limited fill:
 
 ```powershell
-python experiments/phase6_bubble_cleanup.py --detection-run-dir outputs/runs/phase2-gbc06-smoke --layout-run-dir outputs/runs/phase4-gbc06-layout-smoke --run-id phase6-gbc06-bubble-mask-smoke --sample-limit 1
+python experiments/phase6_bubble_cleanup.py --detection-run-dir outputs/runs/phase2-gbc06-smoke --layout-run-dir outputs/runs/phase4-gbc06-layout-smoke --run-id phase6-gbc06-bubble-mask-smoke --sample-limit 1 --cleanup-method mask_fill
+```
+
+Region-limited fill, current default:
+
+```powershell
+python experiments/phase6_bubble_cleanup.py --detection-run-dir outputs/runs/phase2-gbc06-smoke --layout-run-dir outputs/runs/phase4-gbc06-tight-text-layout-smoke --run-id phase6-gbc06-bubble-region-fill-experiment --sample-limit 1 --cleanup-method region_fill
+```
+
+Integrated preview/export with new bubble cleanup and LaMa non-bubble cleanup:
+
+```powershell
+python experiments/phase7_8_integrated_smoke.py --detection-run-dir outputs/runs/phase2-gbc06-smoke --cleanup-run-dir outputs/runs/phase6-gbc06-bubble-region-fill-experiment --cleanup-run-dir outputs/runs/phase6-gbc06-nonbubble-lama-large-compare --layout-run-dir outputs/runs/phase4-gbc06-tight-text-layout-smoke --font-selection-run-dir outputs/runs/phase3-gbc06-nonbubble-mimo-font-smoke --run-id phase7-8-gbc06-region-fill-layout-smoke --sample-limit 2
 ```
 
 ## Output
@@ -28,10 +40,21 @@ Mask-fill run:
 outputs/runs/phase6-gbc06-bubble-mask-smoke
 ```
 
+Region-fill run:
+
+```text
+outputs/runs/phase6-gbc06-bubble-region-fill-experiment
+```
+
 Comparison and MIMO evaluation:
 
 - `outputs/runs/phase6-gbc06-bubble-mask-smoke/reports/bubble-cleanup-comparison.png`
 - `outputs/runs/phase6-gbc06-bubble-mask-smoke/reports/mimo-bubble-cleanup-evaluation.json`
+- `outputs/runs/phase6-gbc06-bubble-region-fill-experiment/reports/bubble-region-fill-comparison.png`
+- `outputs/runs/phase6-gbc06-bubble-region-fill-experiment/reports/mimo-bubble-region-fill-evaluation.json`
+- `outputs/runs/phase6-gbc06-bubble-region-fill-experiment/reports/mimo-gpt-image2-reevaluation.json`
+- `outputs/runs/phase7-8-gbc06-region-fill-layout-smoke/runs/phase7-preview/debug/evaluation_contact_sheets/GBC06-01-png.png`
+- `outputs/runs/phase7-8-gbc06-region-fill-layout-smoke/runs/phase7-evaluation/preview-evaluation.jsonl`
 
 ## Result Summary
 
@@ -42,9 +65,10 @@ Comparison and MIMO evaluation:
 - Translation: `街头演出？`
 - Phase 2 selected bbox: `[674, 0, 1049, 342]`
 - Baseline method: `bubble_fill`
-- New method: `bubble_mask_fill`
-- New cleaned crop: `outputs/runs/phase6-gbc06-bubble-mask-smoke/crops/cleaned/GBC06-01-png-1.png`
-- New before/after crop: `outputs/runs/phase6-gbc06-bubble-mask-smoke/crops/before_after/GBC06-01-png-1.png`
+- Previous method: `bubble_mask_fill`
+- Current default method: `bubble_region_fill`
+- Region-fill cleaned crop: `outputs/runs/phase6-gbc06-bubble-region-fill-experiment/crops/cleaned/GBC06-01-png-1.png`
+- Region-fill before/after crop: `outputs/runs/phase6-gbc06-bubble-region-fill-experiment/crops/before_after/GBC06-01-png-1.png`
 
 ## Root Cause
 
@@ -52,18 +76,51 @@ The previous cleanup filled the entire Phase 2 selected bbox. On `GBC06_01.png#1
 
 The better approach follows the BallonsTranslator inpainting pattern: use the large detection region as crop context, but restrict actual cleanup to a text mask / text candidate area.
 
+## BallonsTranslator Inpainting Survey
+
+Files inspected:
+
+- `BallonsTranslator/ballontranslator/modules/inpaint/base.py`
+- `BallonsTranslator/ballontranslator/modules/inpaint/inpaint_default.py`
+- `BallonsTranslator/ballontranslator/modules/inpaint/lama.py`
+- `BallonsTranslator/ballontranslator/modules/inpaint/aot.py`
+- `BallonsTranslator/ballontranslator/modules/inpaint/patch_match.py`
+- `BallonsTranslator/ballontranslator/utils/textblock_mask.py`
+
+Relevant design points:
+
+- BallonsTranslator separates a large contextual crop from the actual edited mask. This prevents losing surrounding manga art while still giving the inpaint/fill method enough context.
+- `InpainterBase` has a flat balloon shortcut: if the non-text background is uniform, it fills the balloon/text region with sampled background color instead of always running a heavy model.
+- For non-bubble content, BallonsTranslator's current default family is `lama_large_512px`; it also exposes OpenCV, PatchMatch, AOT, LaMa MPE, and Flux options.
+
+Method options and tradeoffs:
+
+- OpenCV Telea/NS: fastest and dependency-light, but previous MIMO evaluation marked both unacceptable on the GBC06 non-bubble sample because of visible ghosting/smearing.
+- PatchMatch: fast native repair and very clean on flat/near-white areas; risk is native DLL dependency and weaker generalization on complex screentone/art textures.
+- AOT: manga-image-translator style model path, but local weights were not present and LaMa was already BallonsTranslator's manga default.
+- LaMa large 512px: heavier PyTorch path but best prior MIMO score on non-bubble cleanup; kept as preferred non-bubble method.
+- Flux2-klein: potentially stronger generative inpaint path, but much heavier diffusers/transformer/GGUF stack and not suitable for this minimal local experiment.
+- gpt-image-2 masked edit: real result was re-evaluated by MIMO in this run and scored `0`, unusable for direct replacement because text length/layout/style broke the composition and overlapped nearby art. It remains an experimental path, not the default cleanup.
+
 ## Current Algorithm
 
-`bubble_mask_fill`:
+`bubble_region_fill`, current default:
 
 1. Reads Phase 2 `candidate_boxes`.
 2. Filters out candidates that are effectively the large selected region.
 3. Unions the smaller candidate boxes inside the selected bbox, so multiple vertical text columns are handled together.
-4. Builds a dark-pixel mask only inside that union text bbox.
-5. Dilates the text mask and fills only masked pixels with the local sampled background color.
-6. Saves before, cleaned, and before/after crop artifacts.
+4. Expands the union text bbox by a small padding.
+5. Samples the surrounding local background color.
+6. Fills the whole padded text region inside the larger crop.
+7. Saves before, cleaned, and before/after crop artifacts.
 
-This fixes the prior over-fill while still avoiding heavyweight inpainting for flat white speech bubbles.
+`bubble_mask_fill` is still available through `--cleanup-method mask_fill` for comparison and fallback. It fills only thresholded dark glyph pixels:
+
+1. Builds a dark-pixel mask only inside the union text bbox.
+2. Dilates the text mask and fills only masked pixels with the local sampled background color.
+3. Saves before, cleaned, and before/after crop artifacts.
+
+The switch to region fill fixes the remaining faint source-text ghosts from the mask-fill method while still avoiding heavyweight inpainting for flat white speech bubbles.
 
 ## MIMO Evaluation
 
@@ -91,26 +148,78 @@ Returned ranking:
 
 MIMO summary: the old full-rectangle fill destroys the speech bubble, outline, screentone, and nearby art. The new mask fill isolates the text, preserves the bubble border and surrounding background, and leaves a clean area for later Chinese lettering. Remaining issue: a faint artifact can still be visible near the bubble edge.
 
+Second evaluation, comparing `old_mask_fill` against `new_region_fill`:
+
+```json
+{
+  "best_method": "new_region_fill",
+  "ranking": ["new_region_fill", "old_mask_fill"],
+  "scores": {
+    "old_mask_fill": 9,
+    "new_region_fill": 10
+  },
+  "unacceptable_methods": []
+}
+```
+
+MIMO summary: both methods remove the main Japanese text and preserve nearby art, but `old_mask_fill` leaves very faint ghost-like remnants. `new_region_fill` produces a cleaner, more uniform white fill.
+
+Integrated Phase 7/8 MIMO evaluation with `bubble_region_fill` plus `bt_lama_large_inpaint`:
+
+```json
+{
+  "score": 9,
+  "usable": true,
+  "original_text_removed": true,
+  "art_preserved": true,
+  "lettering_readable": true,
+  "issues": []
+}
+```
+
+The integrated smoke manifest confirms the effective cleanup methods:
+
+```json
+{
+  "bubble_region_fill": 1,
+  "bt_lama_large_inpaint": 1
+}
+```
+
+gpt-image-2 direct replacement MIMO re-evaluation:
+
+```json
+{
+  "method": "gpt_image2_direct_replacement",
+  "score": 0,
+  "usable": false
+}
+```
+
+MIMO summary: the translation semantics are acceptable, but the generated replacement text is much too long, uses the wrong style, breaks the vertical composition, and overlaps the top diamond mark.
+
 ## Limitations
 
-- The mask still depends on Phase 2 candidate boxes. If detection misses a text column, cleanup can miss it too.
-- Very light gray source text or highly decorative text may require a better mask builder than the current dark-pixel threshold.
+- The region still depends on Phase 2 candidate boxes. If detection misses a text column, cleanup can miss it too.
+- Region fill is intentionally for flat/light bubble interiors. It can erase decorative in-bubble art if the candidate text union includes non-text art.
 - This method is intended for flat/light bubble interiors. For complex non-bubble backgrounds, use the non-bubble inpaint methods.
 
 ## Verification
 
-Fresh targeted verification after the mask-union fix:
+Fresh targeted verification after the region-fill change:
 
 ```powershell
 python -m pytest tests/test_phase6_cleanup.py -q
 python -m pytest tests/test_phase6_nonbubble_cleanup.py tests/test_phase6_cleanup.py -q
+python -m pytest -q
 ```
 
 Observed results:
 
 ```text
-5 passed in 0.18s
-14 passed in 1.29s
+7 passed in 0.25s
+16 passed in 1.46s
+89 passed in 3.31s
 ```
 
 ## Notes
