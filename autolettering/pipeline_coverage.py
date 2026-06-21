@@ -5,6 +5,9 @@ from pathlib import Path
 from typing import Iterable
 
 
+RunDirInput = str | Path | Iterable[str | Path] | None
+
+
 STAGE_ORDER = [
     "phase1_labelplus",
     "phase2_detection",
@@ -20,12 +23,12 @@ STAGE_ORDER = [
 def build_pipeline_coverage(
     phase1_run_dir: str | Path | None = None,
     detection_run_dir: str | Path | None = None,
-    font_selection_run_dir: str | Path | None = None,
-    layout_run_dir: str | Path | None = None,
-    angle_run_dir: str | Path | None = None,
+    font_selection_run_dir: RunDirInput = None,
+    layout_run_dir: RunDirInput = None,
+    angle_run_dir: RunDirInput = None,
     cleanup_run_dirs: Iterable[str | Path] | None = None,
-    preview_run_dir: str | Path | None = None,
-    export_run_dir: str | Path | None = None,
+    preview_run_dir: RunDirInput = None,
+    export_run_dir: RunDirInput = None,
     next_limit: int = 10,
 ) -> dict:
     meta, phase1_ids = _phase1_records(phase1_run_dir)
@@ -70,19 +73,19 @@ def write_pipeline_coverage_report(
 def _stage_records(
     phase1_ids: list[str],
     detection_ok: list[str],
-    font_selection_run_dir: str | Path | None,
-    layout_run_dir: str | Path | None,
-    angle_run_dir: str | Path | None,
+    font_selection_run_dir: RunDirInput,
+    layout_run_dir: RunDirInput,
+    angle_run_dir: RunDirInput,
     cleanup_run_dirs: Iterable[str | Path] | None,
-    preview_run_dir: str | Path | None,
-    export_run_dir: str | Path | None,
+    preview_run_dir: RunDirInput,
+    export_run_dir: RunDirInput,
 ) -> dict[str, list[str]]:
     return {
         "phase1_labelplus": phase1_ids,
         "phase2_detection": detection_ok,
-        "phase3_font_selection": _status_ids(_jsonl_at(font_selection_run_dir, "font-selections.jsonl"), "selected"),
-        "phase4_layout": _status_ids(_jsonl_at(layout_run_dir, "layout-results.jsonl"), "layout_generated"),
-        "phase5_angle": _status_ids(_jsonl_at(angle_run_dir, "angle-results.jsonl"), "angle_estimated"),
+        "phase3_font_selection": _status_ids(_jsonl_at_many(font_selection_run_dir, "font-selections.jsonl"), "selected"),
+        "phase4_layout": _status_ids(_jsonl_at_many(layout_run_dir, "layout-results.jsonl"), "layout_generated"),
+        "phase5_angle": _status_ids(_jsonl_at_many(angle_run_dir, "angle-results.jsonl"), "angle_estimated"),
         "phase6_cleanup": _cleanup_ids(cleanup_run_dirs),
         "phase7_preview": _preview_ids(preview_run_dir),
         "phase8_export": _export_ids(export_run_dir),
@@ -194,21 +197,40 @@ def _cleanup_ids(run_dirs: Iterable[str | Path] | None) -> list[str]:
     return _unique(ids)
 
 
-def _preview_ids(run_dir: str | Path | None) -> list[str]:
+def _preview_ids(run_dir: RunDirInput) -> list[str]:
     ids: list[str] = []
-    for row in _jsonl_at(run_dir, "preview-results.jsonl"):
-        if row.get("status") != "page_preview_generated":
-            continue
-        ids.extend(str(record.get("record_id")) for record in row.get("records", []) if record.get("record_id"))
+    for item in _run_dirs(run_dir):
+        for row in _jsonl_at(item, "preview-results.jsonl"):
+            if row.get("status") != "page_preview_generated":
+                continue
+            ids.extend(str(record.get("record_id")) for record in row.get("records", []) if record.get("record_id"))
     return _unique(ids)
 
 
-def _export_ids(run_dir: str | Path | None) -> list[str]:
-    path = _maybe_path(run_dir, "photoshop-manifest.json")
-    if path is None or not path.exists():
+def _export_ids(run_dir: RunDirInput) -> list[str]:
+    ids: list[str] = []
+    for item in _run_dirs(run_dir):
+        path = _maybe_path(item, "photoshop-manifest.json")
+        if path is None or not path.exists():
+            continue
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        ids.extend(str(layer["record_id"]) for page in payload.get("pages", []) for layer in page.get("layers", []))
+    return _unique(ids)
+
+
+def _jsonl_at_many(run_dir: RunDirInput, name: str) -> list[dict]:
+    rows: list[dict] = []
+    for item in _run_dirs(run_dir):
+        rows.extend(_jsonl_at(item, name))
+    return rows
+
+
+def _run_dirs(run_dir: RunDirInput) -> list[str | Path]:
+    if run_dir is None:
         return []
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    return _unique(str(layer["record_id"]) for page in payload.get("pages", []) for layer in page.get("layers", []))
+    if isinstance(run_dir, str | Path):
+        return [run_dir]
+    return list(run_dir)
 
 
 def _jsonl_at(run_dir: str | Path | None, name: str) -> list[dict]:

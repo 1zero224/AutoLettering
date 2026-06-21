@@ -50,6 +50,59 @@ def test_build_pipeline_coverage_reports_stage_gaps_and_next_records(tmp_path: P
     ]
 
 
+def test_build_pipeline_coverage_merges_multiple_runs_per_stage(tmp_path: Path):
+    phase1 = tmp_path / "phase1"
+    phase2 = tmp_path / "phase2"
+    phase3a = tmp_path / "phase3a"
+    phase3b = tmp_path / "phase3b"
+    phase4a = tmp_path / "phase4a"
+    phase4b = tmp_path / "phase4b"
+    phase5a = tmp_path / "phase5a"
+    phase5b = tmp_path / "phase5b"
+    phase6a = tmp_path / "phase6a"
+    phase6b = tmp_path / "phase6b"
+    phase7a = tmp_path / "phase7a"
+    phase7b = tmp_path / "phase7b"
+    phase8a = tmp_path / "phase8a"
+    phase8b = tmp_path / "phase8b"
+    _write_phase1_manifest(phase1 / "manifest.json")
+    _write_jsonl(phase2 / "detections.jsonl", [_row("r1", "ok"), _row("r2", "ok"), _row("r3", "ok")])
+    _write_jsonl(phase3a / "font-selections.jsonl", [_row("r1", "selected")])
+    _write_jsonl(phase3b / "font-selections.jsonl", [_row("r2", "selected")])
+    _write_jsonl(phase4a / "layout-results.jsonl", [_row("r1", "layout_generated")])
+    _write_jsonl(phase4b / "layout-results.jsonl", [_row("r2", "layout_generated")])
+    _write_jsonl(phase5a / "angle-results.jsonl", [_row("r1", "angle_estimated")])
+    _write_jsonl(phase5b / "angle-results.jsonl", [_row("r2", "angle_estimated")])
+    _write_jsonl(phase6a / "cleanup-results.jsonl", [_cleanup_row("r1", "bubble_region_fill")])
+    _write_jsonl(phase6b / "cleanup-results.jsonl", [_cleanup_row("r2", "bubble_region_fill")])
+    _write_phase7_preview(phase7a / "preview-results.jsonl", ["r1"])
+    _write_phase7_preview(phase7b / "preview-results.jsonl", ["r2"])
+    _write_phase8_manifest(phase8a / "photoshop-manifest.json", ["r1"])
+    _write_phase8_manifest(phase8b / "photoshop-manifest.json", ["r2"])
+
+    report = build_pipeline_coverage(
+        phase1_run_dir=phase1,
+        detection_run_dir=phase2,
+        font_selection_run_dir=[phase3a, phase3b],
+        layout_run_dir=[phase4a, phase4b],
+        angle_run_dir=[phase5a, phase5b],
+        cleanup_run_dirs=[phase6a, phase6b],
+        preview_run_dir=[phase7a, phase7b],
+        export_run_dir=[phase8a, phase8b],
+        next_limit=3,
+    )
+
+    assert report["summary"]["complete_record_count"] == 2
+    assert report["summary"]["incomplete_record_count"] == 1
+    assert report["stages"]["phase3_font_selection"]["covered_record_ids"] == ["r1", "r2"]
+    assert report["stages"]["phase4_layout"]["covered_record_ids"] == ["r1", "r2"]
+    assert report["stages"]["phase7_preview"]["covered_record_ids"] == ["r1", "r2"]
+    assert report["stages"]["phase8_export"]["covered_record_ids"] == ["r1", "r2"]
+    assert report["next_records"] == [
+        {"record_id": "r3", "group_name": "框内", "first_missing_stage": "phase3_font_selection"}
+    ]
+
+
 def test_write_pipeline_coverage_report_writes_json_and_markdown(tmp_path: Path):
     phase1 = tmp_path / "phase1"
     phase2 = tmp_path / "phase2"
@@ -93,12 +146,12 @@ def _write_phase1_manifest(path: Path) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
-def _write_phase7_preview(path: Path) -> None:
-    rows = [{"status": "page_preview_generated", "records": [{"record_id": "r1"}]}]
+def _write_phase7_preview(path: Path, record_ids: list[str] | None = None) -> None:
+    rows = [{"status": "page_preview_generated", "records": [{"record_id": record_id} for record_id in record_ids or ["r1"]]}]
     _write_jsonl(path, rows)
 
 
-def _write_phase8_manifest(path: Path) -> None:
-    payload = {"pages": [{"layers": [{"record_id": "r1"}, {"record_id": "r2"}]}]}
+def _write_phase8_manifest(path: Path, record_ids: list[str] | None = None) -> None:
+    payload = {"pages": [{"layers": [{"record_id": record_id} for record_id in record_ids or ["r1", "r2"]]}]}
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload), encoding="utf-8")
