@@ -16,6 +16,8 @@ def test_run_phase8_photoshop_export_writes_manifest_and_jsx(tmp_path: Path):
     assert layer["record_id"] == "page.png#1"
     assert layer["bbox"]["xyxy"] == [10, 20, 80, 90]
     assert layer["font"]["family_name"] == "TestFont"
+    assert layer["font"]["photoshop_font_name"] == "TestFontPS"
+    assert layer["font"]["font_name_candidates"] == ["TestFontPS", "TestFont"]
     assert layer["layout"]["angle_degrees"] == -10.5
     assert layer["cleanup"]["method"] == "bubble_fill"
     assert layer["cleanup"]["effective_method"] == "bubble_fill"
@@ -28,6 +30,7 @@ def test_run_phase8_photoshop_export_writes_manifest_and_jsx(tmp_path: Path):
     assert "Places `cleanup.effective_crop_path` as a bitmap patch layer" in report
     assert "paragraph text layer" in report
     assert "layout.line_spacing" in report
+    assert "font.photoshop_font_name" in report
 
 
 def test_run_phase8_photoshop_export_preserves_replacement_cleanup(tmp_path: Path):
@@ -127,6 +130,7 @@ def _assert_rich_jsx_importer(jsx: str) -> None:
         "function setTextSpacing",
         "textItem.leading",
         "textItem.tracking",
+        "layerData.font.photoshop_font_name || layerData.font.family_name",
     ]:
         assert expected in jsx
 
@@ -153,6 +157,7 @@ def _font_payload(font_path: Path) -> dict:
             "path": str(font_path),
             "filename": "font.ttf",
             "family_name": "TestFont",
+            "postscript_name": "TestFontPS",
         },
         "confidence": 0.9,
     }

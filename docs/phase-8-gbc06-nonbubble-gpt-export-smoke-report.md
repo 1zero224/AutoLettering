@@ -29,8 +29,8 @@ Generated artifacts:
 - Schema: `autolettering.photoshop.v1`
 - Pages exported: 1
 - Text layers exported: 2
-- Manifest size: `5333` bytes
-- JSX size: `4065` bytes
+- Manifest size: `5772` bytes
+- JSX size: `4103` bytes
 - Missing cleanup layers: 1
 - Effective cleanup methods: `gpt_image2_masked_edit=1`
 
@@ -73,6 +73,7 @@ For the non-bubble record, `effective_*` points at the GPT replacement crop beca
 - Missing cleanup rows now still emit a stable cleanup object with all cleanup path/method fields set to `null`.
 - `photoshop-import.jsx` attempts to place `cleanup.effective_crop_path` as a bitmap patch layer named `AL cleanup <record_id>` before adding editable text.
 - `photoshop-import.jsx` maps `layout.line_spacing` to Photoshop leading and `layout.letter_spacing` to best-effort tracking.
+- Font metadata now includes `postscript_name`, `photoshop_font_name`, and `font_name_candidates`; JSX tries `photoshop_font_name` before falling back to `family_name`.
 
 ## Limitations
 
@@ -90,6 +91,6 @@ python -m pytest -q
 Fresh result before this report was written:
 
 ```text
-3 passed in 0.21s
-54 passed in 3.79s
+3 passed in 0.19s
+55 passed in 2.88s
 ```

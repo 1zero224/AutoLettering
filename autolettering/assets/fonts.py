@@ -14,6 +14,7 @@ class FontRecord:
     path: Path
     filename: str
     family_name: str
+    postscript_name: str
     style_hints: list[str]
     supports_sample_text: bool
     unsupported_chars: list[str]
@@ -60,6 +61,7 @@ def font_record_to_dict(record: FontRecord) -> dict:
         "path": str(record.path),
         "filename": record.filename,
         "family_name": record.family_name,
+        "postscript_name": record.postscript_name,
         "style_hints": record.style_hints,
         "supports_sample_text": record.supports_sample_text,
         "unsupported_chars": record.unsupported_chars,
@@ -74,6 +76,7 @@ def _build_font_record(path: Path, sample_text: str) -> FontRecord:
         path=path,
         filename=path.name,
         family_name=_read_family_name(path),
+        postscript_name=_read_postscript_name(path),
         style_hints=_style_hints(path.stem),
         supports_sample_text=len(unsupported) == 0,
         unsupported_chars=unsupported,
@@ -101,6 +104,14 @@ def _read_family_name(path: Path) -> str:
     finally:
         font.close()
     return path.stem
+
+
+def _read_postscript_name(path: Path) -> str:
+    font = TTFont(path, lazy=True)
+    try:
+        return _first_name(font, 6) or path.stem
+    finally:
+        font.close()
 
 
 def _first_name(font: TTFont, name_id: int) -> str:

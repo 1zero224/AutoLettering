@@ -7,7 +7,7 @@ from PIL import Image, ImageChops, ImageDraw
 
 from autolettering.assets.font_comparison import build_font_comparison_grid
 from autolettering.assets.font_render import render_text_preview
-from autolettering.assets.fonts import FontRecord, scan_font_directory, select_font_candidates
+from autolettering.assets.fonts import FontRecord, font_record_to_dict, scan_font_directory, select_font_candidates
 from autolettering.phase3 import run_phase3
 
 
@@ -34,6 +34,7 @@ def _font_record(font_id: str, style_hints: list[str], tmp_path: Path) -> FontRe
         path=tmp_path / f"{font_id}.ttf",
         filename=f"{font_id}.ttf",
         family_name=font_id,
+        postscript_name=f"{font_id}-PS",
         style_hints=style_hints,
         supports_sample_text=True,
         unsupported_chars=[],
@@ -51,6 +52,8 @@ def test_scan_font_directory_reads_metadata_and_sample_coverage(tmp_path: Path):
     assert record.path == font_path.resolve()
     assert record.filename == font_path.name
     assert record.family_name
+    assert record.postscript_name
+    assert font_record_to_dict(record)["postscript_name"] == record.postscript_name
     assert record.supports_sample_text is True
     assert record.unsupported_chars == []
 

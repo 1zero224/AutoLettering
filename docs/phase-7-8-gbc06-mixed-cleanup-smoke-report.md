@@ -87,8 +87,8 @@ Manifest summary:
 
 - Pages exported: 1
 - Text layers exported: 2
-- Manifest size: `5578` bytes
-- JSX size: `4065` bytes
+- Manifest size: `6017` bytes
+- JSX size: `4103` bytes
 - Missing cleanup layers: 0
 - Effective cleanup methods: `bubble_fill=1`, `gpt_image2_masked_edit=1`
 
@@ -117,6 +117,12 @@ The exported cleanup paths are:
 - The Photoshop JSX now attempts to place each layer's `cleanup.effective_crop_path` as a bitmap patch layer named `AL cleanup <record_id>` before adding the editable text layer.
 - The editable text layer is now `TextType.PARAGRAPHTEXT` with `item.width` and `item.height` set from the detected bbox dimensions.
 - The JSX maps `layout.line_spacing` to Photoshop `leading` and maps `layout.letter_spacing` to best-effort `tracking`.
+- The manifest now exports `font.postscript_name`, `font.photoshop_font_name`, and `font.font_name_candidates`; JSX tries `photoshop_font_name` before falling back to `family_name`.
+
+## Font Mapping Notes
+
+The refreshed real MIMO font selection run selected `[toolbox]POP1GB-JF-W5` with PostScript name `toolboxPOP1GBJF-W5`.
+For `GBC06_01.png#16`, MIMO returned invalid JSON and the existing deterministic fallback selected the first candidate while preserving `failure_reason = "invalid_json"`.
 
 ## Limitations
 
@@ -127,6 +133,7 @@ The exported cleanup paths are:
 ## Verification
 
 ```powershell
+python -m pytest tests/test_phase3_fonts.py -q
 python -m pytest tests/test_phase7_preview.py -q
 python -m pytest tests/test_phase8_photoshop_export.py -q
 python -m pytest -q
@@ -135,7 +142,8 @@ python -m pytest -q
 Fresh result before this report was written:
 
 ```text
-5 passed in 0.35s
-3 passed in 0.27s
-55 passed in 3.13s
+5 passed in 0.44s
+5 passed in 0.25s
+3 passed in 0.19s
+55 passed in 2.88s
 ```

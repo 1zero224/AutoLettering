@@ -69,7 +69,7 @@ JSX_SOURCE = """#target photoshop
         item.height = UnitValue(layerData.bbox.height, 'px');
         item.contents = textContents(layerData.text);
         item.size = UnitValue(layerData.layout.font_size || 24, 'px');
-        setTextFont(item, layerData.font.family_name);
+        setTextFont(item, layerData.font.photoshop_font_name || layerData.font.family_name);
         setTextDirection(item, layerData.layout.orientation);
         setTextSpacing(item, layerData.layout);
         item.position = [UnitValue(layerData.position.x_px, 'px'), UnitValue(layerData.position.y_px, 'px')];
@@ -200,13 +200,26 @@ def _position_payload(bbox: list[int], image_size: tuple[int, int]) -> dict:
 
 def _font_payload(font_row: dict) -> dict:
     selected = font_row.get("selected_font") or {}
+    postscript_name = selected.get("postscript_name")
+    family_name = selected.get("family_name")
     return {
         "font_id": font_row.get("selected_font_id"),
-        "family_name": selected.get("family_name"),
+        "family_name": family_name,
+        "postscript_name": postscript_name,
+        "photoshop_font_name": postscript_name or family_name,
+        "font_name_candidates": _font_name_candidates(postscript_name, family_name),
         "filename": selected.get("filename"),
         "path": selected.get("path"),
         "model_confidence": font_row.get("confidence"),
     }
+
+
+def _font_name_candidates(*names: str | None) -> list[str]:
+    candidates: list[str] = []
+    for name in names:
+        if name and name not in candidates:
+            candidates.append(name)
+    return candidates
 
 
 def _layout_payload(layout: dict) -> dict:

@@ -29,8 +29,8 @@ Generated artifacts:
 - Schema: `autolettering.photoshop.v1`
 - Pages exported: 1
 - Text layers exported: 1
-- Manifest size: `2842` bytes
-- JSX size: `4065` bytes
+- Manifest size: `3039` bytes
+- JSX size: `4103` bytes
 - Missing cleanup layers: 0
 - Effective cleanup methods: `bubble_fill=1`
 
@@ -100,14 +100,15 @@ The manifest layer stores the Photoshop-relevant fields:
 5. Place `cleanup.effective_crop_path` as a best-effort bitmap patch layer named `AL cleanup <record_id>` when the path exists.
 6. Use paragraph text with bbox width and height for the editable text layer.
 7. Map `layout.line_spacing` to Photoshop leading and `layout.letter_spacing` to best-effort tracking.
-8. Save PSD files under a sibling `psd/` folder.
+8. Try `font.photoshop_font_name` before falling back to `font.family_name`.
+9. Save PSD files under a sibling `psd/` folder.
 
 This follows the existing `PS-Script/src/importer.ts` model of creating Photoshop `LayerKind.TEXT` layers, but uses a richer project manifest instead of the old LabelPlus txt format.
 
 ## Limitations
 
 - Photoshop is not available in this environment, so the JSX was not executed inside Photoshop.
-- Photoshop font lookup uses `family_name` and may require manual font mapping if Photoshop expects a different PostScript font name.
+- Photoshop font lookup now prefers `photoshop_font_name`; this smoke uses an older font-selection run without PostScript metadata, so it falls back to `family_name`.
 - The script now attempts to place `cleanup.effective_crop_path` as a bitmap patch layer before creating each editable paragraph text layer. Photoshop execution is still unverified in this environment.
 - Text position uses the detected bbox top-left as the initial anchor. Photoshop text baseline behavior may require manual adjustment for production use.
 - The export covers one real aligned record because upstream font/layout/cleanup runs currently cover one record.
@@ -122,8 +123,8 @@ python -m pytest -q
 Fresh result before this report was written:
 
 ```text
-3 passed in 0.21s
-54 passed in 3.79s
+3 passed in 0.19s
+55 passed in 2.88s
 ```
 
 ## Notes
