@@ -15,15 +15,18 @@ def run_phase8_photoshop_export(
     output_root: str | Path = "outputs/runs",
     run_id: str | None = None,
     sample_limit: int = 5,
+    font_mapping_path: str | Path | None = None,
 ) -> Path:
     run_dir = Path(output_root) / (run_id or "phase8-photoshop-export")
     run_dir.mkdir(parents=True, exist_ok=True)
+    font_mapping = _load_font_mapping(font_mapping_path)
     manifest = build_photoshop_manifest(
         detection_rows=_load_jsonl_by_id(Path(detection_run_dir) / "detections.jsonl", "ok"),
         font_rows=_load_jsonl_by_id(Path(font_selection_run_dir) / "font-selections.jsonl", "selected"),
         layout_rows=_load_jsonl(Path(layout_run_dir) / "layout-results.jsonl", "layout_generated"),
         cleanup_rows=load_cleanup_rows_by_id(cleanup_run_dir),
         sample_limit=sample_limit,
+        font_mapping=font_mapping,
     )
     write_json(run_dir / "photoshop-manifest.json", manifest)
     write_photoshop_import_jsx(run_dir / "photoshop-import.jsx")
@@ -34,8 +37,16 @@ def run_phase8_photoshop_export(
         layout_run_dir,
         cleanup_run_dir,
         manifest,
+        font_mapping_path,
     )
     return run_dir
+
+
+def _load_font_mapping(path: str | Path | None) -> dict[str, str]:
+    if path is None:
+        return {}
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    return {str(key): str(value) for key, value in payload.items() if value}
 
 
 def _load_jsonl(path: Path, status: str) -> list[dict]:
@@ -62,6 +73,7 @@ def _write_report(
     layout_run_dir: str | Path,
     cleanup_run_dir: CleanupRunInput,
     manifest: dict,
+    font_mapping_path: str | Path | None,
 ) -> None:
     cleanup_summary = _cleanup_summary(manifest)
     lines = [
@@ -71,6 +83,7 @@ def _write_report(
         f"Font selection run directory: `{font_selection_run_dir}`",
         f"Layout run directory: `{layout_run_dir}`",
         f"Cleanup run directories: {format_cleanup_run_dirs(cleanup_run_dir)}",
+        f"Font mapping file: `{font_mapping_path}`" if font_mapping_path else "Font mapping file: none",
         "",
         "## Summary",
         "",
@@ -88,6 +101,7 @@ def _write_report(
         "- Creates one editable Photoshop paragraph text layer per exported layer using the bbox width and height.",
         "- Maps `layout.line_spacing` to Photoshop leading and `layout.letter_spacing` to best-effort tracking.",
         "- Uses `font.photoshop_font_name` before falling back to `font.family_name`.",
+        "- Can apply an optional JSON font mapping file before writing `font.photoshop_font_name`.",
         "",
         "## Generated Artifacts",
         "",

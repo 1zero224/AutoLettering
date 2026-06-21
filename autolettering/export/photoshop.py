@@ -103,8 +103,9 @@ def build_photoshop_manifest(
     layout_rows: list[dict],
     cleanup_rows: dict[str, dict],
     sample_limit: int,
+    font_mapping: dict[str, str] | None = None,
 ) -> dict:
-    layers = _manifest_layers(detection_rows, font_rows, layout_rows, cleanup_rows, sample_limit)
+    layers = _manifest_layers(detection_rows, font_rows, layout_rows, cleanup_rows, sample_limit, font_mapping or {})
     return {
         "schema_version": SCHEMA_VERSION,
         "pages": _group_layers_by_page(layers),
@@ -128,6 +129,7 @@ def _manifest_layers(
     layout_rows: list[dict],
     cleanup_rows: dict[str, dict],
     sample_limit: int,
+    font_mapping: dict[str, str],
 ) -> list[dict]:
     layers: list[dict] = []
     for layout in layout_rows[:sample_limit]:
@@ -136,11 +138,17 @@ def _manifest_layers(
         font_row = font_rows.get(record_id)
         if detection is None or font_row is None:
             continue
-        layers.append(_layer_record(detection, font_row, layout, cleanup_rows.get(record_id)))
+        layers.append(_layer_record(detection, font_row, layout, cleanup_rows.get(record_id), font_mapping))
     return layers
 
 
-def _layer_record(detection: dict, font_row: dict, layout_row: dict, cleanup_row: dict | None) -> dict:
+def _layer_record(
+    detection: dict,
+    font_row: dict,
+    layout_row: dict,
+    cleanup_row: dict | None,
+    font_mapping: dict[str, str],
+) -> dict:
     bbox = detection["selected_text_box_xyxy"]
     layout = layout_row["layout"]
     image_size = _image_size(detection["image_path"])
@@ -154,7 +162,7 @@ def _layer_record(detection: dict, font_row: dict, layout_row: dict, cleanup_row
         "group_name": detection.get("group_name"),
         "bbox": _bbox_payload(bbox),
         "position": _position_payload(bbox, image_size),
-        "font": _font_payload(font_row),
+        "font": _font_payload(font_row, font_mapping),
         "layout": _layout_payload(layout),
         "cleanup": _cleanup_payload(cleanup_row),
         "validation": layout.get("validation", {}),
@@ -198,20 +206,30 @@ def _position_payload(bbox: list[int], image_size: tuple[int, int]) -> dict:
     }
 
 
-def _font_payload(font_row: dict) -> dict:
+def _font_payload(font_row: dict, font_mapping: dict[str, str]) -> dict:
     selected = font_row.get("selected_font") or {}
     postscript_name = selected.get("postscript_name")
     family_name = selected.get("family_name")
+    mapped_from = _mapped_font_source(font_mapping, postscript_name, family_name)
+    photoshop_font_name = font_mapping.get(mapped_from) if mapped_from else postscript_name or family_name
     return {
         "font_id": font_row.get("selected_font_id"),
         "family_name": family_name,
         "postscript_name": postscript_name,
-        "photoshop_font_name": postscript_name or family_name,
-        "font_name_candidates": _font_name_candidates(postscript_name, family_name),
+        "photoshop_font_name": photoshop_font_name,
+        "font_name_candidates": _font_name_candidates(photoshop_font_name, postscript_name, family_name),
+        "mapped_from": mapped_from,
         "filename": selected.get("filename"),
         "path": selected.get("path"),
         "model_confidence": font_row.get("confidence"),
     }
+
+
+def _mapped_font_source(font_mapping: dict[str, str], *names: str | None) -> str | None:
+    for name in names:
+        if name and name in font_mapping:
+            return name
+    return None
 
 
 def _font_name_candidates(*names: str | None) -> list[str]:

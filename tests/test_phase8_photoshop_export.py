@@ -31,6 +31,7 @@ def test_run_phase8_photoshop_export_writes_manifest_and_jsx(tmp_path: Path):
     assert "paragraph text layer" in report
     assert "layout.line_spacing" in report
     assert "font.photoshop_font_name" in report
+    assert "JSON font mapping file" in report
 
 
 def test_run_phase8_photoshop_export_preserves_replacement_cleanup(tmp_path: Path):
@@ -68,6 +69,39 @@ def test_run_phase8_photoshop_export_preserves_replacement_cleanup(tmp_path: Pat
     assert str(cleanup_run_a) in report
     assert str(cleanup_run_b) in report
     assert "`gpt_image2_masked_edit=1`" in report
+
+
+def test_run_phase8_photoshop_export_applies_font_mapping_file(tmp_path: Path):
+    image_path = tmp_path / "page.png"
+    Image.new("RGB", (120, 160), "white").save(image_path)
+    detection_run = _mkdir(tmp_path / "phase2")
+    font_run = _mkdir(tmp_path / "phase3")
+    layout_run = _mkdir(tmp_path / "phase4")
+    cleanup_run = _mkdir(tmp_path / "phase6")
+    mapping_path = tmp_path / "font-map.json"
+    _write_jsonl(detection_run / "detections.jsonl", [_detection_payload(image_path)])
+    _write_jsonl(font_run / "font-selections.jsonl", [_font_payload(tmp_path / "font.ttf")])
+    _write_jsonl(layout_run / "layout-results.jsonl", [_layout_payload()])
+    _write_jsonl(cleanup_run / "cleanup-results.jsonl", [_cleanup_payload(tmp_path / "cleaned.png")])
+    mapping_path.write_text(json.dumps({"TestFontPS": "InstalledTestFont-Regular"}), encoding="utf-8")
+
+    run_dir = run_phase8_photoshop_export(
+        detection_run,
+        font_run,
+        layout_run,
+        cleanup_run,
+        tmp_path / "outputs",
+        sample_limit=1,
+        font_mapping_path=mapping_path,
+    )
+
+    manifest = json.loads((run_dir / "photoshop-manifest.json").read_text(encoding="utf-8"))
+    font = manifest["pages"][0]["layers"][0]["font"]
+    assert font["photoshop_font_name"] == "InstalledTestFont-Regular"
+    assert font["font_name_candidates"] == ["InstalledTestFont-Regular", "TestFontPS", "TestFont"]
+    assert font["mapped_from"] == "TestFontPS"
+    report = (run_dir / "reports" / "phase8-report.md").read_text(encoding="utf-8")
+    assert f"Font mapping file: `{mapping_path}`" in report
 
 
 def test_run_phase8_photoshop_export_skips_records_without_font_selection(tmp_path: Path):

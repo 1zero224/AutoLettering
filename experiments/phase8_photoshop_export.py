@@ -20,6 +20,7 @@ def main() -> None:
     parser.add_argument("--output-root", default="outputs/runs")
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--sample-limit", type=int, default=5)
+    parser.add_argument("--font-mapping", default=None)
     args = parser.parse_args()
     cleanup_run_dirs = args.cleanup_run_dir or ["outputs/runs/phase6-gbc06-bubble-smoke"]
 
@@ -31,6 +32,7 @@ def main() -> None:
         output_root=Path(args.output_root),
         run_id=args.run_id,
         sample_limit=args.sample_limit,
+        font_mapping_path=Path(args.font_mapping) if args.font_mapping else None,
     )
     print(run_dir)
 
