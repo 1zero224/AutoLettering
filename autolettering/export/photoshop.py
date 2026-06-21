@@ -189,13 +189,30 @@ def _layout_payload(layout: dict) -> dict:
 
 def _cleanup_payload(cleanup_row: dict | None) -> dict:
     if cleanup_row is None:
-        return {"status": "missing", "method": None}
+        return {
+            "status": "missing",
+            "method": None,
+            "cleaned_crop_path": None,
+            "before_after_path": None,
+            "replacement_method": None,
+            "replacement_crop_path": None,
+            "effective_method": None,
+            "effective_crop_path": None,
+        }
     cleanup = cleanup_row.get("cleanup", {})
+    replacement_crop_path = cleanup.get("replacement_crop_path")
+    cleaned_crop_path = cleanup.get("cleaned_crop_path")
+    replacement_method = cleanup.get("replacement_method")
+    method = cleanup.get("method")
     return {
         "status": cleanup_row.get("status"),
-        "method": cleanup.get("method"),
-        "cleaned_crop_path": cleanup.get("cleaned_crop_path"),
+        "method": method,
+        "cleaned_crop_path": cleaned_crop_path,
         "before_after_path": cleanup.get("before_after_path"),
+        "replacement_method": replacement_method,
+        "replacement_crop_path": replacement_crop_path,
+        "effective_method": replacement_method or method,
+        "effective_crop_path": replacement_crop_path or cleaned_crop_path,
     }
 
 

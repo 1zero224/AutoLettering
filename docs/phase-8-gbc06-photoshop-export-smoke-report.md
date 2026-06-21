@@ -29,8 +29,10 @@ Generated artifacts:
 - Schema: `autolettering.photoshop.v1`
 - Pages exported: 1
 - Text layers exported: 1
-- Manifest size: `2593` bytes
+- Manifest size: `2842` bytes
 - JSX size: `2418` bytes
+- Missing cleanup layers: 0
+- Effective cleanup methods: `bubble_fill=1`
 
 Exported page and layer:
 
@@ -74,7 +76,12 @@ The manifest layer stores the Photoshop-relevant fields:
   },
   "cleanup": {
     "status": "cleaned",
-    "method": "bubble_fill"
+    "method": "bubble_fill",
+    "cleaned_crop_path": "outputs\\runs\\phase6-gbc06-bubble-smoke\\crops\\cleaned\\GBC06-01-png-1.png",
+    "replacement_method": null,
+    "replacement_crop_path": null,
+    "effective_method": "bubble_fill",
+    "effective_crop_path": "outputs\\runs\\phase6-gbc06-bubble-smoke\\crops\\cleaned\\GBC06-01-png-1.png"
   },
   "validation": {
     "status": "deterministic_only"
@@ -98,7 +105,7 @@ This follows the existing `PS-Script/src/importer.ts` model of creating Photosho
 
 - Photoshop is not available in this environment, so the JSX was not executed inside Photoshop.
 - Photoshop font lookup uses `family_name` and may require manual font mapping if Photoshop expects a different PostScript font name.
-- The script currently creates editable text layers only; it does not yet recreate cleaned bitmap patches as separate Photoshop layers.
+- The script currently creates editable text layers only. The manifest records cleaned/replacement crop paths, but the JSX does not yet recreate bitmap patches as separate Photoshop layers.
 - Text position uses the detected bbox top-left as the initial anchor. Photoshop text baseline behavior may require manual adjustment for production use.
 - The export covers one real aligned record because upstream font/layout/cleanup runs currently cover one record.
 
@@ -112,8 +119,8 @@ python -m pytest -q
 Fresh result before this report was written:
 
 ```text
-2 passed in 0.18s
-45 passed in 2.62s
+3 passed in 0.21s
+54 passed in 3.79s
 ```
 
 ## Notes

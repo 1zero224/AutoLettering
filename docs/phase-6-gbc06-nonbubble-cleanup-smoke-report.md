@@ -119,7 +119,7 @@ The first real call initially exposed a base URL compatibility issue: the config
 - The gpt-image-2 output size changed from the input crop size `58 x 257` to `837 x 1879`; the current code center-fits it back to `58 x 257` for page composition. This is usable for smoke preview but may crop useful generated detail.
 - The prompt asks the model to edit the masked text area and preserve surrounding art, but the result still requires manual visual review.
 - The current runner uses Phase 2 detection boxes directly; poor text boxes will produce poor masks and poor edits.
-- This path is now integrated into Phase 7 page preview through `replacement_crop_path`; Phase 8 Photoshop export selection still needs follow-up metadata support for replacement crops.
+- This path is now integrated into Phase 7 page preview through `replacement_crop_path`; Phase 8 Photoshop export metadata also preserves `replacement_crop_path`, `replacement_method`, and the preferred `effective_*` cleanup fields.
 
 ## Verification
 

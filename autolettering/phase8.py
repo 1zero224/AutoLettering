@@ -62,6 +62,7 @@ def _write_report(
     cleanup_run_dir: str | Path,
     manifest: dict,
 ) -> None:
+    cleanup_summary = _cleanup_summary(manifest)
     lines = [
         "# Phase 8 Photoshop Export Report",
         "",
@@ -75,6 +76,11 @@ def _write_report(
         f"- Pages exported: {manifest['summary']['page_count']}",
         f"- Text layers exported: {manifest['summary']['record_count']}",
         "",
+        "## Cleanup Summary",
+        "",
+        f"- Missing cleanup layers: {cleanup_summary['missing_count']}",
+        f"- Effective cleanup methods: {_format_counts(cleanup_summary['effective_methods'])}",
+        "",
         "## Generated Artifacts",
         "",
         "- `photoshop-manifest.json`",
@@ -83,3 +89,23 @@ def _write_report(
     ]
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _cleanup_summary(manifest: dict) -> dict:
+    missing_count = 0
+    effective_methods: dict[str, int] = {}
+    for page in manifest.get("pages", []):
+        for layer in page.get("layers", []):
+            cleanup = layer.get("cleanup", {})
+            if cleanup.get("status") == "missing":
+                missing_count += 1
+            method = cleanup.get("effective_method")
+            if method:
+                effective_methods[method] = effective_methods.get(method, 0) + 1
+    return {"missing_count": missing_count, "effective_methods": effective_methods}
+
+
+def _format_counts(counts: dict[str, int]) -> str:
+    if not counts:
+        return "none"
+    return ", ".join(f"`{key}={counts[key]}`" for key in sorted(counts))
