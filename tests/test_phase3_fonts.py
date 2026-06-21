@@ -140,6 +140,33 @@ def test_run_phase3_writes_font_index_comparisons_and_report(tmp_path: Path):
     assert (run_dir / "reports" / "phase3-report.md").exists()
 
 
+def test_run_phase3_filters_detections_by_record_id_before_sample_limit(tmp_path: Path):
+    font_dir = tmp_path / "fonts"
+    font_dir.mkdir()
+    _copy_test_font(font_dir)
+    labelplus_file, detection_run = _write_phase3_fixture(tmp_path)
+    image_path = tmp_path / "sample_project" / "page.png"
+    _write_sample_detection_file(
+        detection_run / "detections.jsonl",
+        image_path,
+        record_ids=["page.png#1", "page.png#2"],
+    )
+
+    run_dir = run_phase3(
+        labelplus_file,
+        detection_run_dir=detection_run,
+        font_dir=font_dir,
+        output_root=tmp_path / "outputs",
+        run_id="phase3-filter-test",
+        sample_limit=1,
+        font_limit=1,
+        record_ids=["page.png#2"],
+    )
+
+    rows = [json.loads(line) for line in (run_dir / "font-comparisons.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [row["record_id"] for row in rows] == ["page.png#2"]
+
+
 def _write_phase3_fixture(tmp_path: Path) -> tuple[Path, Path]:
     project_dir = tmp_path / "sample_project"
     project_dir.mkdir()
@@ -176,14 +203,21 @@ ABC
     )
 
 
-def _write_sample_detection_file(path: Path, image_path: Path) -> None:
-    payload = {
-        "record_id": "page.png#1",
-        "status": "ok",
-        "image_name": "page.png",
-        "image_path": str(image_path),
-        "translated_text": "ABC",
-        "group_name": "框内",
-        "selected_text_box_xyxy": [88, 70, 118, 154],
-    }
-    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+def _write_sample_detection_file(path: Path, image_path: Path, record_ids: list[str] | None = None) -> None:
+    rows = []
+    for record_id in record_ids or ["page.png#1"]:
+        rows.append(
+            {
+                "record_id": record_id,
+                "status": "ok",
+                "image_name": "page.png",
+                "image_path": str(image_path),
+                "translated_text": "ABC",
+                "group_name": "框内",
+                "selected_text_box_xyxy": [88, 70, 118, 154],
+            }
+        )
+    path.write_text(
+        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+        encoding="utf-8",
+    )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from pathlib import Path
 
 from PIL import Image
@@ -9,6 +10,7 @@ from .assets.font_comparison import build_font_comparison_grid
 from .assets.font_render import render_text_preview
 from .assets.fonts import FontRecord, font_record_to_dict, scan_font_directory, select_font_candidates
 from .labelplus.parser import parse_labelplus_project
+from .record_selection import normalize_record_ids, row_matches_record_ids
 
 
 def run_phase3(
@@ -19,12 +21,13 @@ def run_phase3(
     run_id: str | None = None,
     sample_limit: int = 10,
     font_limit: int = 12,
+    record_ids: Iterable[str] | None = None,
 ) -> Path:
     parse_labelplus_project(labelplus_file)
     run_dir = Path(output_root) / (run_id or "phase3-font-comparison")
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    detections = _load_detections(Path(detection_run_dir) / "detections.jsonl", sample_limit)
+    detections = _load_detections(Path(detection_run_dir) / "detections.jsonl", sample_limit, record_ids)
     fonts = scan_font_directory(font_dir, sample_text=_sample_text(detections))
     candidate_fonts = select_font_candidates(fonts, font_limit)
     _write_font_index(run_dir / "font-index.jsonl", fonts)
@@ -40,14 +43,19 @@ def run_phase3(
     return run_dir
 
 
-def _load_detections(path: Path, sample_limit: int) -> list[dict]:
+def _load_detections(path: Path, sample_limit: int, record_ids: Iterable[str] | None = None) -> list[dict]:
+    wanted = normalize_record_ids(record_ids)
     rows: list[dict] = []
     with path.open("r", encoding="utf-8") as handle:
         for line in handle:
             if len(rows) >= sample_limit:
                 break
             payload = json.loads(line)
-            if payload.get("status") == "ok" and payload.get("selected_text_box_xyxy"):
+            if (
+                row_matches_record_ids(payload, wanted)
+                and payload.get("status") == "ok"
+                and payload.get("selected_text_box_xyxy")
+            ):
                 rows.append(payload)
     return rows
 

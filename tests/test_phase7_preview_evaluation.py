@@ -24,7 +24,7 @@ class FakePreviewEvaluationClient:
         assert image_path.parent.name == "evaluation_contact_sheets"
         assert image_path.name == "page-png.png"
         assert kind == "phase7_preview_evaluation"
-        assert max_completion_tokens == 512
+        assert max_completion_tokens == 1024
         assert "bubble_mask_fill" in prompt
         assert "bt_lama_large_inpaint" in prompt
         assert "contact sheet" in prompt

@@ -16,7 +16,7 @@ class FakePreviewEvaluationClient:
     ) -> dict:
         assert Path(image_path).exists()
         assert kind == "phase7_preview_evaluation"
-        assert max_completion_tokens == 512
+        assert max_completion_tokens == 1024
         return {
             "raw_text": json.dumps(
                 {

@@ -19,6 +19,7 @@ def main() -> None:
     parser.add_argument("--output-root", default="outputs/runs")
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--sample-limit", type=int, default=1)
+    parser.add_argument("--record-id", action="append", dest="record_ids", default=None)
     parser.add_argument("--env-file", default=".env")
     args = parser.parse_args()
 
@@ -30,6 +31,7 @@ def main() -> None:
         run_id=args.run_id,
         sample_limit=args.sample_limit,
         client=client,
+        record_ids=args.record_ids,
     )
     print(run_dir)
 

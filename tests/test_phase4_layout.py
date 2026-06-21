@@ -38,6 +38,33 @@ def test_search_fitting_layout_selects_largest_font_with_bounded_overflow(tmp_pa
     assert measured.height <= int(80 * 1.05)
 
 
+def test_search_fitting_layout_accounts_for_rotation_footprint(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+
+    unrotated = search_fitting_layout(
+        text="那个当然也要做哦",
+        font_path=font_path,
+        target_size=(190, 80),
+        min_font_size=12,
+        max_font_size=72,
+        orientation="horizontal",
+        angle_degrees=0.0,
+    )
+    rotated = search_fitting_layout(
+        text="那个当然也要做哦",
+        font_path=font_path,
+        target_size=(190, 80),
+        min_font_size=12,
+        max_font_size=72,
+        orientation="horizontal",
+        angle_degrees=35.0,
+    )
+
+    assert rotated.font_size < unrotated.font_size
+    assert rotated.measured_width <= 190
+    assert rotated.measured_height <= 80
+
+
 def test_search_fitting_layout_uses_vertical_for_tall_narrow_targets(tmp_path: Path):
     font_path = _copy_font(tmp_path)
 
@@ -53,6 +80,23 @@ def test_search_fitting_layout_uses_vertical_for_tall_narrow_targets(tmp_path: P
     assert result.orientation == "vertical"
     assert measured.height > measured.width
     assert result.overflow_ratio <= 0.08
+
+
+def test_search_fitting_layout_preserves_vertical_line_breaks_as_columns(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+
+    result = search_fitting_layout(
+        text="是的\n我想刚开始还是这样比较好",
+        font_path=font_path,
+        target_size=(48, 188),
+        min_font_size=12,
+        max_font_size=18,
+        orientation="vertical",
+    )
+
+    assert "\n" in result.line_breaks
+    assert result.status == "ok"
+    assert result.measured_height <= 188
 
 
 def test_render_layout_preview_writes_non_empty_transparent_png(tmp_path: Path):
@@ -115,6 +159,26 @@ def test_render_layout_preview_supports_vertical_text(tmp_path: Path):
         assert image.mode == "RGBA"
         assert image.getbbox() is not None
         assert layout.orientation == "vertical"
+
+
+def test_render_layout_preview_supports_vertical_text_columns(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+    output_path = tmp_path / "vertical-columns.png"
+    layout = search_fitting_layout(
+        "是的\n我想刚开始还是这样比较好",
+        font_path,
+        (48, 188),
+        min_font_size=12,
+        max_font_size=18,
+        orientation="vertical",
+    )
+
+    render_layout_preview(layout, font_path, output_path, canvas_size=(48, 188))
+    alignment = measure_preview_alignment(output_path)
+
+    assert alignment["ink_bbox"] is not None
+    assert alignment["ink_width"] > 12
+    assert alignment["ink_height"] <= 188
 
 
 def test_render_layout_preview_applies_layout_angle(tmp_path: Path):
@@ -240,6 +304,96 @@ def test_run_phase4_prefers_tight_target_orientation_over_stale_angle(tmp_path: 
     assert layout["angle_degrees"] == 0.0
 
 
+def test_run_phase4_prefers_high_confidence_angle_orientation_for_wide_multicolumn_text(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+    source_crop_path = tmp_path / "source-crop.png"
+    Image.new("RGB", (260, 160), "white").save(source_crop_path)
+    phase2_run = tmp_path / "phase2-detection"
+    phase3_run = tmp_path / "phase3-selection"
+    phase5_run = tmp_path / "phase5-angle"
+    for path in [phase2_run, phase3_run, phase5_run]:
+        path.mkdir()
+    _write_font_selection(phase3_run / "font-selections.jsonl", font_path, source_crop_path)
+    _write_detection_with_wide_multicolumn_target(phase2_run / "detections.jsonl")
+    _write_high_confidence_vertical_angle_result(phase5_run / "angle-results.jsonl")
+
+    run_dir = run_phase4(
+        selection_run_dir=phase3_run,
+        angle_run_dir=phase5_run,
+        detection_run_dir=phase2_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase4-angle-orientation-priority",
+        sample_limit=1,
+    )
+
+    layout = _read_jsonl(run_dir / "layout-results.jsonl")[0]["layout"]
+    assert layout["target_bbox"] == [50, 40, 250, 170]
+    assert layout["orientation"] == "vertical"
+    assert layout["angle_degrees"] == 1.5
+
+
+def test_run_phase4_expands_tight_target_inside_selected_box_when_layout_overflows(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+    source_crop_path = tmp_path / "source-crop.png"
+    Image.new("RGB", (260, 240), "white").save(source_crop_path)
+    phase2_run = tmp_path / "phase2-detection"
+    phase3_run = tmp_path / "phase3-selection"
+    phase5_run = tmp_path / "phase5-angle"
+    for path in [phase2_run, phase3_run, phase5_run]:
+        path.mkdir()
+    _write_font_selection(
+        phase3_run / "font-selections.jsonl",
+        font_path,
+        source_crop_path,
+        translated_text="这是一段很长的测试文字\n这也是另一段很长文字",
+    )
+    _write_detection_with_short_tight_target(phase2_run / "detections.jsonl")
+    _write_high_confidence_vertical_angle_result(phase5_run / "angle-results.jsonl")
+
+    run_dir = run_phase4(
+        selection_run_dir=phase3_run,
+        angle_run_dir=phase5_run,
+        detection_run_dir=phase2_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase4-expand-tight-target",
+        sample_limit=1,
+    )
+
+    row = _read_jsonl(run_dir / "layout-results.jsonl")[0]
+    layout = row["layout"]
+    assert row["status"] == "layout_generated"
+    assert layout["target_bbox"][3] > 160
+    assert layout["target_bbox"][3] <= 220
+    assert layout["target_bbox"][0] >= 20
+    assert layout["target_bbox"][2] <= 230
+    assert layout["orientation"] == "vertical"
+
+
+def test_run_phase4_filters_selected_fonts_by_record_id_before_sample_limit(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+    source_crop_path = tmp_path / "source-crop.png"
+    Image.new("RGB", (90, 44), "white").save(source_crop_path)
+    phase3_run = tmp_path / "phase3-selection"
+    phase3_run.mkdir()
+    _write_font_selection(
+        phase3_run / "font-selections.jsonl",
+        font_path,
+        source_crop_path,
+        record_ids=["page.png#1", "page.png#2"],
+    )
+
+    run_dir = run_phase4(
+        selection_run_dir=phase3_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase4-filter-test",
+        sample_limit=1,
+        record_ids=["page.png#2"],
+    )
+
+    rows = _read_jsonl(run_dir / "layout-results.jsonl")
+    assert [row["record_id"] for row in rows] == ["page.png#2"]
+
+
 def _copy_font(tmp_path: Path) -> Path:
     source = sorted(Path("C:/Windows/Fonts").glob("*.ttf"))[0]
     target = tmp_path / source.name
@@ -259,18 +413,31 @@ def _find_font_with_visible_ink_offset() -> Path:
     return sorted(Path("C:/Windows/Fonts").glob("*.ttf"))[0]
 
 
-def _write_font_selection(path: Path, font_path: Path, source_crop_path: Path) -> None:
-    payload = {
-        "record_id": "page.png#1",
-        "image_name": "page.png",
-        "translated_text": "街头演出？",
-        "status": "selected",
-        "selected_font_id": "font-test",
-        "selected_font": {"font_id": "font-test", "path": str(font_path), "family_name": "Test"},
-        "source_crop_path": str(source_crop_path),
-        "comparison_image_path": str(path.parent / "comparison.png"),
-    }
-    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+def _write_font_selection(
+    path: Path,
+    font_path: Path,
+    source_crop_path: Path,
+    record_ids: list[str] | None = None,
+    translated_text: str = "街头演出？",
+) -> None:
+    rows = []
+    for record_id in record_ids or ["page.png#1"]:
+        rows.append(
+            {
+                "record_id": record_id,
+                "image_name": "page.png",
+                "translated_text": translated_text,
+                "status": "selected",
+                "selected_font_id": "font-test",
+                "selected_font": {"font_id": "font-test", "path": str(font_path), "family_name": "Test"},
+                "source_crop_path": str(source_crop_path),
+                "comparison_image_path": str(path.parent / "comparison.png"),
+            }
+        )
+    path.write_text(
+        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+        encoding="utf-8",
+    )
 
 
 def _write_angle_result(path: Path) -> None:
@@ -297,6 +464,19 @@ def _write_horizontal_angle_result(path: Path) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def _write_high_confidence_vertical_angle_result(path: Path) -> None:
+    payload = {
+        "record_id": "page.png#1",
+        "status": "angle_estimated",
+        "orientation": {
+            "detected_orientation": "vertical",
+            "selected_angle_degrees": 1.5,
+            "confidence": 0.86,
+        },
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
 def _write_detection_with_tight_candidates(path: Path) -> None:
     payload = {
         "record_id": "page.png#1",
@@ -306,6 +486,34 @@ def _write_detection_with_tight_candidates(path: Path) -> None:
             {"xyxy": [674, 0, 1049, 342], "area": 87035},
             {"xyxy": [840, 145, 874, 300], "area": 3858},
             {"xyxy": [799, 145, 837, 271], "area": 3481},
+        ],
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _write_detection_with_wide_multicolumn_target(path: Path) -> None:
+    payload = {
+        "record_id": "page.png#1",
+        "status": "ok",
+        "selected_text_box_xyxy": [0, 0, 280, 200],
+        "candidate_boxes": [
+            {"xyxy": [50, 40, 75, 170], "area": 3250},
+            {"xyxy": [105, 40, 130, 170], "area": 3250},
+            {"xyxy": [225, 40, 250, 170], "area": 3250},
+        ],
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _write_detection_with_short_tight_target(path: Path) -> None:
+    payload = {
+        "record_id": "page.png#1",
+        "status": "ok",
+        "selected_text_box_xyxy": [20, 20, 230, 220],
+        "candidate_boxes": [
+            {"xyxy": [20, 20, 230, 220], "area": 42000, "score": 0.99},
+            {"xyxy": [80, 40, 105, 160], "area": 3000, "score": 0.95},
+            {"xyxy": [125, 40, 150, 160], "area": 3000, "score": 0.94},
         ],
     }
     path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")

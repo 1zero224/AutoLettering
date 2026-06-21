@@ -17,6 +17,7 @@ def main() -> None:
     parser.add_argument("--output-root", default="outputs/runs")
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--sample-limit", type=int, default=5)
+    parser.add_argument("--record-id", action="append", dest="record_ids", default=None)
     args = parser.parse_args()
 
     run_dir = run_phase5_orientation(
@@ -24,6 +25,7 @@ def main() -> None:
         output_root=Path(args.output_root),
         run_id=args.run_id,
         sample_limit=args.sample_limit,
+        record_ids=args.record_ids,
     )
     print(run_dir)
 

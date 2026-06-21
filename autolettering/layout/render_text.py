@@ -117,15 +117,48 @@ def _draw_vertical(
     font: ImageFont.FreeTypeFont,
     size: tuple[int, int],
 ) -> None:
-    chars = [char for char in layout.line_breaks if char != "\n"]
+    columns = [[char for char in column if char.strip()] for column in layout.line_breaks.splitlines()]
+    columns = [column for column in columns if column]
+    column_metrics = [_vertical_column_metrics(draw, column, font, layout.line_spacing) for column in columns]
+    total_width = sum(item["width"] for item in column_metrics) + layout.line_spacing * max(0, len(column_metrics) - 1)
+    x = max(0, (size[0] - total_width) // 2 + total_width)
+
+    for column, metrics in zip(columns, column_metrics):
+        x -= metrics["width"]
+        _draw_vertical_column(draw, column, metrics, font, layout.line_spacing, x, size[1])
+        x -= layout.line_spacing
+
+
+def _vertical_column_metrics(
+    draw: ImageDraw.ImageDraw,
+    chars: list[str],
+    font: ImageFont.FreeTypeFont,
+    line_spacing: int,
+) -> dict:
     boxes = [draw.textbbox((0, 0), char, font=font) for char in chars]
     widths = [box[2] - box[0] for box in boxes]
     heights = [box[3] - box[1] for box in boxes]
-    total_height = sum(heights) + layout.line_spacing * max(0, len(chars) - 1)
-    y = max(0, (size[1] - total_height) // 2)
-    center_x = size[0] // 2
+    return {
+        "boxes": boxes,
+        "widths": widths,
+        "heights": heights,
+        "width": max(widths),
+        "height": sum(heights) + line_spacing * max(0, len(chars) - 1),
+    }
 
-    for char, box, width, height in zip(chars, boxes, widths, heights):
+
+def _draw_vertical_column(
+    draw: ImageDraw.ImageDraw,
+    chars: list[str],
+    metrics: dict,
+    font: ImageFont.FreeTypeFont,
+    line_spacing: int,
+    x_left: int,
+    canvas_height: int,
+) -> None:
+    y = max(0, (canvas_height - metrics["height"]) // 2)
+    center_x = x_left + metrics["width"] // 2
+    for char, box, width, height in zip(chars, metrics["boxes"], metrics["widths"], metrics["heights"]):
         x = max(0, center_x - width // 2 - box[0])
         draw.text((x, y - box[1]), char, fill=(0, 0, 0, 255), font=font)
-        y += height + layout.line_spacing
+        y += height + line_spacing

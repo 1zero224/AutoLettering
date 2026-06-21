@@ -157,7 +157,7 @@ def _evaluate_one(row: dict, client: PreviewEvaluationClient) -> tuple[dict, dic
             image_path,
             prompt,
             kind="phase7_preview_evaluation",
-            max_completion_tokens=512,
+            max_completion_tokens=1024,
         )
         result = parse_preview_evaluation_response(response["raw_text"])
         return _evaluation_row(row, result, response["raw_text"]), _api_call_row(row, response)

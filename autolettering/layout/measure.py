@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from math import cos, radians, sin
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -47,6 +48,7 @@ def search_fitting_layout(
         min_font_size,
         max_font_size,
         selected_orientation,
+        angle_degrees,
     )
     if best is None:
         return _fallback_layout(text, font_path, target_width, target_height, min_font_size, selected_orientation, angle_degrees)
@@ -73,14 +75,16 @@ def _search_best_candidate(
     min_font_size: int,
     max_font_size: int,
     orientation: str,
+    angle_degrees: float,
 ) -> tuple[str, int, TextMeasurement] | None:
     best: tuple[str, int, TextMeasurement] | None = None
     for line_breaks in candidates:
         for font_size in range(max_font_size, min_font_size - 1, -1):
             measured = measure_text_layout(line_breaks, font_path, font_size, orientation=orientation)
-            if measured.width <= target_width and measured.height <= target_height:
+            footprint = _rotation_footprint(measured, angle_degrees)
+            if footprint.width <= target_width and footprint.height <= target_height:
                 if best is None or font_size > best[1]:
-                    best = (line_breaks, font_size, measured)
+                    best = (line_breaks, font_size, footprint)
                 break
     return best
 
@@ -147,23 +151,48 @@ def _overflow_ratio(width: int, height: int, target_width: int, target_height: i
     return max(width_over, height_over)
 
 
+def _rotation_footprint(measured: TextMeasurement, angle_degrees: float) -> TextMeasurement:
+    if abs(angle_degrees) < 0.1:
+        return measured
+    angle = radians(abs(angle_degrees))
+    width = measured.width * cos(angle) + measured.height * sin(angle)
+    height = measured.width * sin(angle) + measured.height * cos(angle)
+    return TextMeasurement(width=int(round(width)), height=int(round(height)))
+
+
 def _choose_orientation(target_width: int, target_height: int) -> str:
     return "vertical" if target_height >= target_width * 1.35 else "horizontal"
 
 
 def _candidate_texts(text: str, max_lines: int, orientation: str) -> list[str]:
     if orientation == "vertical":
+        stripped = "\n".join(part.strip() for part in text.splitlines() if part.strip())
+        if stripped:
+            return [stripped]
         return ["".join(text.split())]
     return generate_line_break_candidates(text, max_lines=max_lines)
 
 
 def _measure_vertical_text(text: str, font: ImageFont.FreeTypeFont, line_spacing: int) -> TextMeasurement:
-    chars = [char for char in text if char != "\n"]
-    if not chars:
+    columns = [[char for char in column if char.strip()] for column in text.splitlines()]
+    columns = [column for column in columns if column]
+    if not columns:
         return TextMeasurement(width=0, height=0)
 
     scratch = Image.new("RGB", (1, 1), "white")
     draw = ImageDraw.Draw(scratch)
+    column_sizes = [_measure_vertical_column(draw, column, font, line_spacing) for column in columns]
+    width = sum(size.width for size in column_sizes) + line_spacing * max(0, len(column_sizes) - 1)
+    height = max(size.height for size in column_sizes)
+    return TextMeasurement(width=width, height=height)
+
+
+def _measure_vertical_column(
+    draw: ImageDraw.ImageDraw,
+    chars: list[str],
+    font: ImageFont.FreeTypeFont,
+    line_spacing: int,
+) -> TextMeasurement:
     boxes = [draw.textbbox((0, 0), char, font=font) for char in chars]
     width = max(box[2] - box[0] for box in boxes)
     height = sum(box[3] - box[1] for box in boxes) + line_spacing * max(0, len(chars) - 1)

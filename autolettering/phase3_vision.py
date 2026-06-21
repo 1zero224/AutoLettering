@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Protocol
 
 from .models.mimo import MimoVisionClient, build_font_selection_prompt, parse_font_selection_response
+from .record_selection import normalize_record_ids, row_matches_record_ids
 
 
 class FontSelectionClient(Protocol):
@@ -18,13 +20,14 @@ def run_phase3_vision_selection(
     run_id: str | None = None,
     sample_limit: int = 1,
     client: FontSelectionClient | None = None,
+    record_ids: Iterable[str] | None = None,
 ) -> Path:
     run_dir = Path(output_root) / (run_id or "phase3-mimo-font-selection")
     run_dir.mkdir(parents=True, exist_ok=True)
     if client is None:
         raise ValueError("client is required unless experiment script builds one from environment")
 
-    rows = _load_comparison_rows(Path(input_run_dir) / "font-comparisons.jsonl", sample_limit)
+    rows = _load_comparison_rows(Path(input_run_dir) / "font-comparisons.jsonl", sample_limit, record_ids)
     selections, api_calls = _select_fonts(rows, client)
     _write_jsonl(run_dir / "font-selections.jsonl", selections)
     _write_jsonl(run_dir / "reports" / "api-calls.jsonl", api_calls)
@@ -32,14 +35,15 @@ def run_phase3_vision_selection(
     return run_dir
 
 
-def _load_comparison_rows(path: Path, sample_limit: int) -> list[dict]:
+def _load_comparison_rows(path: Path, sample_limit: int, record_ids: Iterable[str] | None = None) -> list[dict]:
+    wanted = normalize_record_ids(record_ids)
     rows: list[dict] = []
     with path.open("r", encoding="utf-8") as handle:
         for line in handle:
             if len(rows) >= sample_limit:
                 break
             payload = json.loads(line)
-            if payload.get("status") == "candidates_generated":
+            if row_matches_record_ids(payload, wanted) and payload.get("status") == "candidates_generated":
                 rows.append(payload)
     return rows
 

@@ -170,6 +170,30 @@ def test_run_phase3_vision_selection_falls_back_when_model_returns_invalid_json(
     assert selections[0]["failure_reason"] == "invalid_json"
 
 
+def test_run_phase3_vision_selection_filters_by_record_id_before_sample_limit(tmp_path: Path):
+    comparison_path = tmp_path / "comparison.png"
+    Image.new("RGB", (32, 32), "white").save(comparison_path)
+    input_run = tmp_path / "phase3"
+    input_run.mkdir()
+    _write_comparison_jsonl(
+        input_run / "font-comparisons.jsonl",
+        comparison_path,
+        record_ids=["page.png#1", "page.png#2"],
+    )
+
+    run_dir = run_phase3_vision_selection(
+        input_run_dir=input_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase3-vision-filter-test",
+        sample_limit=1,
+        record_ids=["page.png#2"],
+        client=FakeMimoVisionClient(),
+    )
+
+    selections = _read_jsonl(run_dir / "font-selections.jsonl")
+    assert [row["record_id"] for row in selections] == ["page.png#2"]
+
+
 def test_build_font_selection_prompt_lists_candidate_ids():
     prompt = build_font_selection_prompt(
         translated_text="测试",
@@ -184,21 +208,28 @@ def test_build_font_selection_prompt_lists_candidate_ids():
     assert "JSON" in prompt
 
 
-def _write_comparison_jsonl(path: Path, comparison_path: Path) -> None:
-    payload = {
-        "record_id": "page.png#1",
-        "image_name": "page.png",
-        "translated_text": "测试",
-        "group_name": "框内",
-        "status": "candidates_generated",
-        "source_crop_path": str(comparison_path),
-        "comparison_image_path": str(comparison_path),
-        "candidate_fonts": [
-            {"font_id": "font-a", "family_name": "Font A", "style_hints": ["黑体"]},
-            {"font_id": "font-b", "family_name": "Font B", "style_hints": ["楷体"]},
-        ],
-    }
-    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+def _write_comparison_jsonl(path: Path, comparison_path: Path, record_ids: list[str] | None = None) -> None:
+    rows = []
+    for record_id in record_ids or ["page.png#1"]:
+        rows.append(
+            {
+                "record_id": record_id,
+                "image_name": "page.png",
+                "translated_text": "测试",
+                "group_name": "框内",
+                "status": "candidates_generated",
+                "source_crop_path": str(comparison_path),
+                "comparison_image_path": str(comparison_path),
+                "candidate_fonts": [
+                    {"font_id": "font-a", "family_name": "Font A", "style_hints": ["黑体"]},
+                    {"font_id": "font-b", "family_name": "Font B", "style_hints": ["楷体"]},
+                ],
+            }
+        )
+    path.write_text(
+        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+        encoding="utf-8",
+    )
 
 
 def _read_jsonl(path: Path) -> list[dict]:

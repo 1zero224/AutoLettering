@@ -85,7 +85,15 @@ def test_run_phase5_orientation_writes_results_and_report(tmp_path: Path):
     assert (run_dir / "reports" / "phase5-report.md").exists()
 
 
-def _write_detection(path: Path, image_path: Path) -> None:
+def test_run_phase5_orientation_estimates_angle_from_tight_text_candidates(tmp_path: Path):
+    image_path = tmp_path / "page.png"
+    image = Image.new("RGB", (240, 200), "white")
+    draw = ImageDraw.Draw(image)
+    draw.line((0, 20, 220, 190), fill="black", width=8)
+    draw.rectangle((42, 82, 148, 94), fill="black")
+    image.save(image_path)
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
     payload = {
         "record_id": "page.png#1",
         "status": "ok",
@@ -93,9 +101,113 @@ def _write_detection(path: Path, image_path: Path) -> None:
         "image_path": str(image_path),
         "translated_text": "测试",
         "group_name": "框内",
-        "selected_text_box_xyxy": [0, 0, 120, 160],
+        "selected_text_box_xyxy": [0, 0, 240, 200],
+        "candidate_boxes": [
+            {"xyxy": [0, 0, 240, 200], "area": 48000},
+            {"xyxy": [40, 80, 150, 96], "area": 1760},
+        ],
     }
-    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+    _write_jsonl(detection_run / "detections.jsonl", [payload])
+
+    run_dir = run_phase5_orientation(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase5-tight-text-angle",
+        sample_limit=1,
+    )
+
+    row = _read_jsonl(run_dir / "angle-results.jsonl")[0]
+    orientation = row["orientation"]
+    assert orientation["bbox"] == [40, 80, 150, 96]
+    assert orientation["detected_orientation"] == "horizontal"
+    assert abs(orientation["selected_angle_degrees"]) <= 1.0
+
+
+def test_run_phase5_orientation_detects_vertical_from_multiple_text_columns(tmp_path: Path):
+    image_path = tmp_path / "page.png"
+    image = Image.new("RGB", (260, 220), "white")
+    draw = ImageDraw.Draw(image)
+    for x1, x2 in [(50, 74), (105, 129), (160, 184)]:
+        draw.rectangle((x1, 45, x2, 175), fill="black")
+    image.save(image_path)
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    payload = {
+        "record_id": "page.png#1",
+        "status": "ok",
+        "image_name": "page.png",
+        "image_path": str(image_path),
+        "translated_text": "测试",
+        "group_name": "框内",
+        "selected_text_box_xyxy": [20, 20, 220, 200],
+        "candidate_boxes": [
+            {"xyxy": [20, 20, 220, 200], "area": 36000},
+            {"xyxy": [50, 45, 74, 175], "area": 3120},
+            {"xyxy": [105, 45, 129, 175], "area": 3120},
+            {"xyxy": [160, 45, 184, 175], "area": 3120},
+        ],
+    }
+    _write_jsonl(detection_run / "detections.jsonl", [payload])
+
+    run_dir = run_phase5_orientation(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase5-multi-column-angle",
+        sample_limit=1,
+    )
+
+    orientation = _read_jsonl(run_dir / "angle-results.jsonl")[0]["orientation"]
+    assert orientation["bbox"] == [50, 45, 74, 175]
+    assert orientation["detected_orientation"] == "vertical"
+    assert abs(orientation["selected_angle_degrees"]) <= 1.0
+
+
+def test_run_phase5_orientation_filters_by_record_id_before_sample_limit(tmp_path: Path):
+    image_path = tmp_path / "page.png"
+    image = Image.new("RGB", (120, 160), "white")
+    ImageDraw.Draw(image).rectangle((55, 20, 70, 140), fill="black")
+    image.save(image_path)
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(detection_run / "detections.jsonl", image_path, record_ids=["page.png#1", "page.png#2"])
+
+    run_dir = run_phase5_orientation(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase5-filter-test",
+        sample_limit=1,
+        record_ids=["page.png#2"],
+    )
+
+    rows = _read_jsonl(run_dir / "angle-results.jsonl")
+    assert [row["record_id"] for row in rows] == ["page.png#2"]
+
+
+def _write_detection(path: Path, image_path: Path, record_ids: list[str] | None = None) -> None:
+    rows = []
+    for record_id in record_ids or ["page.png#1"]:
+        rows.append(
+            {
+                "record_id": record_id,
+                "status": "ok",
+                "image_name": "page.png",
+                "image_path": str(image_path),
+                "translated_text": "测试",
+                "group_name": "框内",
+                "selected_text_box_xyxy": [0, 0, 120, 160],
+            }
+        )
+    path.write_text(
+        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+
+
+def _write_jsonl(path: Path, payloads: list[dict]) -> None:
+    path.write_text(
+        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in payloads),
+        encoding="utf-8",
+    )
 
 
 def _read_jsonl(path: Path) -> list[dict]:
