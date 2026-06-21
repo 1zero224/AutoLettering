@@ -37,6 +37,23 @@ def test_search_fitting_layout_selects_largest_font_with_bounded_overflow(tmp_pa
     assert measured.height <= int(80 * 1.05)
 
 
+def test_search_fitting_layout_uses_vertical_for_tall_narrow_targets(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+
+    result = search_fitting_layout(
+        text="街头演出？",
+        font_path=font_path,
+        target_size=(90, 220),
+        min_font_size=12,
+        max_font_size=64,
+    )
+
+    measured = measure_text_layout(result.line_breaks, font_path, result.font_size, orientation="vertical")
+    assert result.orientation == "vertical"
+    assert measured.height > measured.width
+    assert result.overflow_ratio <= 0.08
+
+
 def test_render_layout_preview_writes_non_empty_transparent_png(tmp_path: Path):
     font_path = _copy_font(tmp_path)
     output_path = tmp_path / "preview.png"
@@ -49,6 +66,20 @@ def test_render_layout_preview_writes_non_empty_transparent_png(tmp_path: Path):
     with Image.open(output_path) as image:
         assert image.mode == "RGBA"
         assert image.getbbox() is not None
+
+
+def test_render_layout_preview_supports_vertical_text(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+    output_path = tmp_path / "vertical-preview.png"
+    layout = search_fitting_layout("街头演出？", font_path, (90, 220), max_font_size=42)
+
+    result = render_layout_preview(layout, font_path, output_path, canvas_size=(90, 220))
+
+    assert result == output_path
+    with Image.open(output_path) as image:
+        assert image.mode == "RGBA"
+        assert image.getbbox() is not None
+        assert layout.orientation == "vertical"
 
 
 def test_run_phase4_writes_layout_results_and_previews(tmp_path: Path):

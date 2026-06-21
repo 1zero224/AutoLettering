@@ -43,6 +43,7 @@ This phase is a deterministic layout-search prototype.
 The current method:
 
 - reads selected fonts from the Phase 3 MIMO font-selection run
+- chooses `vertical` when the target crop is tall and narrow, otherwise `horizontal`
 - generates simple balanced line-break candidates
 - searches from larger to smaller font sizes
 - measures rendered text with Pillow
@@ -52,13 +53,13 @@ The current method:
 
 Current limitations:
 
-- The first prototype only generates horizontal text.
+- Vertical text is implemented for simple per-character stacking, but Japanese/Chinese punctuation rotation and multi-column vertical layout are not implemented yet.
 - `angle_degrees` is fixed at `0`.
 - MIMO naturalness validation is not run yet.
 - The target size in this smoke run is now read from the Phase 3 source text crop dimensions, which were produced from the Phase 2 selected text box.
 - `manual_review_required` remains `true`.
 
-The next iteration should add vertical layout and vision-model validation.
+The current real smoke record still selects `horizontal` because its source crop is not tall and narrow enough for the deterministic vertical rule. The next iteration should add vision-model validation and richer vertical punctuation/multi-column behavior.
 
 ## Verification
 
@@ -69,7 +70,7 @@ python -m pytest -q
 Fresh result before this report was written:
 
 ```text
-23 passed in 1.07s
+25 passed in 1.13s
 ```
 
 ## Notes
