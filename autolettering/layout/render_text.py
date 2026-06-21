@@ -19,8 +19,63 @@ def render_layout_preview(
     image = _render_text_layer(layout, font_path, size)
     if abs(layout.angle_degrees) >= 0.1:
         image = _rotate_within_canvas(image, layout.angle_degrees, size)
+    image = _recenter_visible_ink(image)
     image.save(output)
     return output
+
+
+def measure_preview_alignment(image_path: str | Path) -> dict:
+    with Image.open(image_path) as image:
+        rgba = image.convert("RGBA")
+        bbox = rgba.getchannel("A").getbbox()
+        return _alignment_metrics(rgba.size, bbox)
+
+
+def _alignment_metrics(size: tuple[int, int], bbox: tuple[int, int, int, int] | None) -> dict:
+    width, height = size
+    if bbox is None:
+        return {
+            "canvas_width": width,
+            "canvas_height": height,
+            "ink_bbox": None,
+            "ink_width": 0,
+            "ink_height": 0,
+            "horizontal_center_offset_px": None,
+            "vertical_center_offset_px": None,
+        }
+
+    left, top, right, bottom = bbox
+    ink_center_x = (left + right) / 2
+    ink_center_y = (top + bottom) / 2
+    return {
+        "canvas_width": width,
+        "canvas_height": height,
+        "ink_bbox": [left, top, right, bottom],
+        "ink_width": right - left,
+        "ink_height": bottom - top,
+        "horizontal_center_offset_px": round(ink_center_x - width / 2, 2),
+        "vertical_center_offset_px": round(ink_center_y - height / 2, 2),
+    }
+
+
+def _recenter_visible_ink(image: Image.Image) -> Image.Image:
+    bbox = image.getchannel("A").getbbox()
+    if bbox is None:
+        return image
+
+    metrics = _alignment_metrics(image.size, bbox)
+    offset_x = metrics["horizontal_center_offset_px"]
+    offset_y = metrics["vertical_center_offset_px"]
+    if offset_x is None or offset_y is None:
+        return image
+
+    return _translate_layer(image, -round(offset_x), -round(offset_y))
+
+
+def _translate_layer(image: Image.Image, dx: int, dy: int) -> Image.Image:
+    canvas = Image.new("RGBA", image.size, (255, 255, 255, 0))
+    canvas.alpha_composite(image, (dx, dy))
+    return canvas
 
 
 def _render_text_layer(layout: LayoutResult, font_path: str | Path, size: tuple[int, int]) -> Image.Image:

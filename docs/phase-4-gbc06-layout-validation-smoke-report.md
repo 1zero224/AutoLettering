@@ -26,34 +26,38 @@ Generated artifacts:
 
 - Layout source: `outputs/runs/phase4-gbc06-layout-smoke/layout-results.jsonl`
 - Records submitted: 1
-- Accepted: 0
-- Needs revision: 1
+- Accepted: 1
+- Needs revision: 0
 - Failed: 0
 - Record: `GBC06_01.png#1`
 - Layout preview: `outputs/runs/phase4-gbc06-layout-smoke/debug/layout_candidates/GBC06-01-png-1.png`
-- Validation status: `needs_revision`
+- Layout alpha ink center offset after correction: `-0.5px` horizontal, `-0.5px` vertical
+- Validation status: `accepted`
 - Selection source: `mimo_vision`
-- Accepted: `false`
-- Needs revision: `true`
+- Accepted: `true`
+- Needs revision: `false`
 - Failure reason: `null`
 - Model failure reason: `null`
-- Raw model text: `REVISE, text is vertically centered but lacks horizontal centering within the target width.`
-- Recommended change: `text is vertically centered but lacks horizontal centering within the target width.`
+- Raw model text: `ACCEPT: Text is centered and fits the target bounding box without overflow.`
+- Reasoning summary: `Text is centered and fits the target bounding box without overflow.`
+- Recommended changes: none
 - Request prompt characters: 205
 - Request thinking type: `disabled`
 - Request image count: 1
 - Max completion tokens: 96
-- Last observed token usage: 242 total tokens
-- Last observed completion tokens: 18
+- Last observed token usage: 239 total tokens
+- Last observed completion tokens: 15
 - Last observed reasoning tokens: 0
 
 ## Interpretation
 
 This phase now has a real model-backed validation path plus a deterministic fallback for model formatting failures. The response parser accepts both structured JSON and short text verdicts such as `ACCEPT: ...`, `ACCEPT, ...`, and `REVISE: ...`.
 
-The latest API request completed, returned usage metadata, and produced non-empty model text. Disabling thinking changed the observed response from an empty body with `95` reasoning tokens to a usable `REVISE` verdict with `0` reasoning tokens.
+The latest API request completed, returned usage metadata, and produced non-empty model text. Disabling thinking changed the observed response from an empty body with `95` reasoning tokens to usable verdict text with `0` reasoning tokens.
 
-The current result is a model-backed revision request, not a deterministic fallback. The model says the rendered text is vertically centered but lacks horizontal centering within the target width. This gives the next layout iteration a concrete visual issue to optimize instead of only relying on measured overflow.
+The previous persisted model-backed verdict was `REVISE, text is vertically centered but lacks horizontal centering within the target width.` The current layout run now records alpha-channel ink alignment and recenters the visible ink after rendering. On the same smoke record, `horizontal_center_offset_px` moved from `-16.5` before correction to `-0.5` after correction, and MIMO now returns `ACCEPT: Text is centered and fits the target bounding box without overflow.`
+
+This is the first closed layout feedback loop in Phase 4: MIMO reported a concrete visual issue, deterministic alpha metrics made the issue measurable, the renderer corrected the visible-ink placement, and MIMO accepted the corrected preview.
 
 ## Adjustment Already Tried
 
@@ -69,25 +73,36 @@ The parser now supports direct text verdicts, so responses like `ACCEPT, text fi
 
 ## Next Adjustment
 
-The next iteration should feed the MIMO revision reason back into layout search:
+The next iteration should broaden the closed feedback loop beyond one smoke record:
 
-- add candidate scoring or placement refinement for horizontal centering within the detected bbox
-- optionally run validation on multiple layout candidates and select the first model-accepted candidate
+- run the same alpha alignment metric on a 10-30 record representative sample
+- add candidate scoring for natural line breaks and visual balance, not only center placement
+- optionally run validation on multiple layout candidates and select the first model-accepted candidate when deterministic scores are close
 - keep recording every failed model response as an experiment artifact
 - use fallback verdicts only as deterministic acceptance, not as visual/model approval
 
 ## Verification
 
-```powershell
-python -m pytest tests/test_phase4_layout_validation.py -q
-python -m pytest -q
-```
-
-Fresh result before this report was written:
+Fresh verification before this report was written:
 
 ```text
-9 passed in 0.25s
-67 passed in 3.63s
+python -m pytest tests/test_phase4_layout.py -q
+10 passed in 0.93s
+
+python -m pytest tests/test_phase4_layout_validation.py -q
+9 passed in 0.20s
+
+python -m pytest -q
+69 passed in 3.96s
+
+git diff --check
+passed
+
+AST length gate
+passed
+
+diff secret scan
+passed
 ```
 
 ## Notes

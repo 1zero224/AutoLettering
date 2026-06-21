@@ -7,7 +7,7 @@ from pathlib import Path
 from PIL import Image
 
 from .layout.measure import search_fitting_layout
-from .layout.render_text import render_layout_preview
+from .layout.render_text import measure_preview_alignment, render_layout_preview
 
 
 def run_phase4(
@@ -65,13 +65,14 @@ def _layout_record(run_dir: Path, row: dict, angle_rows: dict[str, dict]) -> dic
     )
     preview_path = run_dir / "debug" / "layout_candidates" / f"{_safe_name(row['record_id'])}.png"
     render_layout_preview(layout, font_path, preview_path, canvas_size=target_size)
+    alignment = measure_preview_alignment(preview_path)
     return {
         "record_id": row["record_id"],
         "image_name": row.get("image_name"),
         "translated_text": row.get("translated_text", ""),
         "status": "layout_generated" if layout.status == "ok" else "layout_failed",
         "selected_font_id": row.get("selected_font_id"),
-        "layout": _layout_payload(layout, preview_path),
+        "layout": _layout_payload(layout, preview_path, alignment),
     }
 
 
@@ -88,9 +89,10 @@ def _target_size_from_comparison(row: dict) -> tuple[int, int]:
     return 180, 120
 
 
-def _layout_payload(layout, preview_path: Path) -> dict:
+def _layout_payload(layout, preview_path: Path, alignment: dict) -> dict:
     payload = asdict(layout)
     payload["preview_path"] = str(preview_path)
+    payload["alignment"] = alignment
     payload["validation"] = {
         "status": "deterministic_only",
         "checks": ["measured_text_bbox", "bounded_overflow"],

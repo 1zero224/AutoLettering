@@ -6,7 +6,7 @@ from PIL import Image, ImageChops
 
 from autolettering.layout.candidates import generate_line_break_candidates
 from autolettering.layout.measure import measure_text_layout, search_fitting_layout
-from autolettering.layout.render_text import render_layout_preview
+from autolettering.layout.render_text import measure_preview_alignment, render_layout_preview
 from autolettering.phase4 import run_phase4
 
 
@@ -69,6 +69,40 @@ def test_render_layout_preview_writes_non_empty_transparent_png(tmp_path: Path):
         assert image.getbbox() is not None
 
 
+def test_measure_preview_alignment_reports_alpha_ink_offsets(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+    output_path = tmp_path / "preview.png"
+    layout = search_fitting_layout("街头演出？", font_path, (160, 90), max_font_size=42)
+    render_layout_preview(layout, font_path, output_path, canvas_size=(160, 90))
+
+    alignment = measure_preview_alignment(output_path)
+
+    assert alignment["ink_bbox"] is not None
+    assert alignment["canvas_width"] == 160
+    assert alignment["canvas_height"] == 90
+    assert abs(alignment["horizontal_center_offset_px"]) <= 2.0
+    assert abs(alignment["vertical_center_offset_px"]) <= 2.0
+
+
+def test_render_layout_preview_recenters_visible_ink_when_font_bbox_is_unbalanced(tmp_path: Path):
+    font_path = _find_font_with_visible_ink_offset()
+    output_path = tmp_path / "preview.png"
+    layout = search_fitting_layout(
+        "街头演出？",
+        font_path,
+        (375, 342),
+        min_font_size=72,
+        max_font_size=72,
+        orientation="horizontal",
+    )
+
+    render_layout_preview(layout, font_path, output_path, canvas_size=(375, 342))
+    alignment = measure_preview_alignment(output_path)
+
+    assert alignment["ink_bbox"] is not None
+    assert abs(alignment["horizontal_center_offset_px"]) <= 2.0
+
+
 def test_render_layout_preview_supports_vertical_text(tmp_path: Path):
     font_path = _copy_font(tmp_path)
     output_path = tmp_path / "vertical-preview.png"
@@ -119,6 +153,8 @@ def test_run_phase4_writes_layout_results_and_previews(tmp_path: Path):
     assert rows[0]["layout"]["target_width"] == 90
     assert rows[0]["layout"]["target_height"] == 44
     assert rows[0]["layout"]["validation"]["status"] == "deterministic_only"
+    assert rows[0]["layout"]["alignment"]["ink_bbox"] is not None
+    assert abs(rows[0]["layout"]["alignment"]["horizontal_center_offset_px"]) <= 2.0
     assert Path(rows[0]["layout"]["preview_path"]).exists()
     assert (run_dir / "reports" / "phase4-report.md").exists()
 
@@ -153,6 +189,18 @@ def _copy_font(tmp_path: Path) -> Path:
     target = tmp_path / source.name
     target.write_bytes(source.read_bytes())
     return target
+
+
+def _find_font_with_visible_ink_offset() -> Path:
+    candidates = [
+        Path("C:/Windows/Fonts/[toolbox]韩敏小楷-简繁(v2.4).ttf"),
+        Path("C:/Windows/Fonts/[toolbox]宋体-简繁-Regular(v2.4).ttf"),
+        Path("C:/Windows/Fonts/[toolbox]黑体-简繁-DemiBold(v2.5).ttf"),
+    ]
+    for path in candidates:
+        if path.exists():
+            return path
+    return sorted(Path("C:/Windows/Fonts").glob("*.ttf"))[0]
 
 
 def _write_font_selection(path: Path, font_path: Path, source_crop_path: Path) -> None:

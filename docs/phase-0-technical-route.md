@@ -556,6 +556,7 @@ Start with deterministic measurement:
 - Add MIMO text model only after deterministic candidates exist.
 - Render each candidate into a crop-sized canvas.
 - Measure overflow and empty margins.
+- Measure the rendered alpha-channel ink bbox after preview rendering, record center offsets, and recenter visible ink when font measurement boxes do not match perceived ink placement.
 - Use MIMO vision model for naturalness and severe visual errors.
 - Prefer a low-burden `ACCEPT` / `REVISE` text verdict for MIMO validation, while still accepting structured JSON for compatibility.
 - Disable MIMO deep-thinking for this one-line visual verdict so response tokens are available for the actual verdict text.
