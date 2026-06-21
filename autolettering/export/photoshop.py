@@ -56,6 +56,9 @@ JSX_SOURCE = """#target photoshop
         layer.kind = LayerKind.TEXT;
         layer.name = layerData.layer_name;
         var item = layer.textItem;
+        item.kind = TextType.PARAGRAPHTEXT;
+        item.width = UnitValue(layerData.bbox.width, 'px');
+        item.height = UnitValue(layerData.bbox.height, 'px');
         item.contents = textContents(layerData.text);
         item.size = UnitValue(layerData.layout.font_size || 24, 'px');
         setTextFont(item, layerData.font.family_name);

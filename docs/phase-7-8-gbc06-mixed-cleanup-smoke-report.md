@@ -88,7 +88,7 @@ Manifest summary:
 - Pages exported: 1
 - Text layers exported: 2
 - Manifest size: `5578` bytes
-- JSX size: `3437` bytes
+- JSX size: `3603` bytes
 - Missing cleanup layers: 0
 - Effective cleanup methods: `bubble_fill=1`, `gpt_image2_masked_edit=1`
 
@@ -115,6 +115,7 @@ The exported cleanup paths are:
 - The experiment CLI keeps the same `--cleanup-run-dir` name but allows repeating it.
 - This removes the previous need to manually create a merged cleanup run before composing a mixed bubble/non-bubble page.
 - The Photoshop JSX now attempts to place each layer's `cleanup.effective_crop_path` as a bitmap patch layer named `AL cleanup <record_id>` before adding the editable text layer.
+- The editable text layer is now `TextType.PARAGRAPHTEXT` with `item.width` and `item.height` set from the detected bbox dimensions.
 
 ## Limitations
 
@@ -134,6 +135,6 @@ Fresh result before this report was written:
 
 ```text
 5 passed in 0.35s
-3 passed in 0.18s
-55 passed in 2.94s
+3 passed in 0.27s
+55 passed in 4.00s
 ```

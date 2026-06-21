@@ -85,7 +85,7 @@ def _write_report(
         "## JSX Behavior",
         "",
         "- Places `cleanup.effective_crop_path` as a bitmap patch layer when available.",
-        "- Creates one editable Photoshop text layer per exported layer.",
+        "- Creates one editable Photoshop paragraph text layer per exported layer using the bbox width and height.",
         "",
         "## Generated Artifacts",
         "",
