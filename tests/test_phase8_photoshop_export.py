@@ -42,9 +42,14 @@ def test_run_phase8_photoshop_export_writes_manifest_and_jsx(tmp_path: Path):
     jsx = (run_dir / "photoshop-import.jsx").read_text(encoding="utf-8")
     assert "photoshop-manifest.json" in jsx
     assert "LayerKind.TEXT" in jsx
+    assert "function addCleanupPatchLayer" in jsx
+    assert "layerData.cleanup.effective_crop_path" in jsx
+    assert "addCleanupPatchLayer(doc, layerData)" in jsx
+    assert "AL cleanup " in jsx
     report = (run_dir / "reports" / "phase8-report.md").read_text(encoding="utf-8")
     assert "Missing cleanup layers: 0" in report
     assert "`bubble_fill=1`" in report
+    assert "Places `cleanup.effective_crop_path` as a bitmap patch layer" in report
 
 
 def test_run_phase8_photoshop_export_preserves_replacement_cleanup(tmp_path: Path):

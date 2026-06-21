@@ -30,7 +30,7 @@ Generated artifacts:
 - Pages exported: 1
 - Text layers exported: 1
 - Manifest size: `2842` bytes
-- JSX size: `2418` bytes
+- JSX size: `3437` bytes
 - Missing cleanup layers: 0
 - Effective cleanup methods: `bubble_fill=1`
 
@@ -97,7 +97,8 @@ The manifest layer stores the Photoshop-relevant fields:
 2. Open each source image listed in the manifest.
 3. Create one editable Photoshop text layer per exported layer.
 4. Set text contents, font size, font family when Photoshop can resolve it, direction, pixel position, and rotation angle.
-5. Save PSD files under a sibling `psd/` folder.
+5. Place `cleanup.effective_crop_path` as a best-effort bitmap patch layer named `AL cleanup <record_id>` when the path exists.
+6. Save PSD files under a sibling `psd/` folder.
 
 This follows the existing `PS-Script/src/importer.ts` model of creating Photoshop `LayerKind.TEXT` layers, but uses a richer project manifest instead of the old LabelPlus txt format.
 
@@ -105,7 +106,7 @@ This follows the existing `PS-Script/src/importer.ts` model of creating Photosho
 
 - Photoshop is not available in this environment, so the JSX was not executed inside Photoshop.
 - Photoshop font lookup uses `family_name` and may require manual font mapping if Photoshop expects a different PostScript font name.
-- The script currently creates editable text layers only. The manifest records cleaned/replacement crop paths, but the JSX does not yet recreate bitmap patches as separate Photoshop layers.
+- The script now attempts to place `cleanup.effective_crop_path` as a bitmap patch layer before creating each editable text layer. Photoshop execution is still unverified in this environment.
 - Text position uses the detected bbox top-left as the initial anchor. Photoshop text baseline behavior may require manual adjustment for production use.
 - The export covers one real aligned record because upstream font/layout/cleanup runs currently cover one record.
 

@@ -30,7 +30,7 @@ Generated artifacts:
 - Pages exported: 1
 - Text layers exported: 2
 - Manifest size: `5333` bytes
-- JSX size: `2418` bytes
+- JSX size: `3437` bytes
 - Missing cleanup layers: 1
 - Effective cleanup methods: `gpt_image2_masked_edit=1`
 
@@ -71,10 +71,11 @@ For the non-bubble record, `effective_*` points at the GPT replacement crop beca
 - `cleanup.replacement_method` and `cleanup.replacement_crop_path` describe the optional GPT replacement crop.
 - `cleanup.effective_method` and `cleanup.effective_crop_path` select the artifact that downstream tools should prefer for preview/export metadata.
 - Missing cleanup rows now still emit a stable cleanup object with all cleanup path/method fields set to `null`.
+- `photoshop-import.jsx` attempts to place `cleanup.effective_crop_path` as a bitmap patch layer named `AL cleanup <record_id>` before adding editable text.
 
 ## Limitations
 
-- The generated JSX still creates editable text layers only. It records cleanup bitmap paths in the manifest but does not yet place cleaned/replacement bitmap patches as Photoshop layers.
+- The generated JSX now attempts to place cleanup bitmap patches from `cleanup.effective_crop_path` before creating editable text layers. Photoshop execution is still unverified in this environment.
 - This run uses a non-bubble cleanup directory only, so the first bubble record has missing cleanup metadata. Mixed bubble/non-bubble export is now covered by `docs/phase-7-8-gbc06-mixed-cleanup-smoke-report.md`, using repeated `--cleanup-run-dir` inputs.
 - Photoshop is not available in this environment, so the JSX was not executed inside Photoshop.
 

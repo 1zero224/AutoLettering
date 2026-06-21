@@ -30,6 +30,27 @@ JSX_SOURCE = """#target photoshop
             textItem.direction = (orientation == 'vertical') ? Direction.VERTICAL : Direction.HORIZONTAL;
         } catch (err) {}
     }
+    function moveLayerTopLeft(layer, x, y) {
+        var bounds = layer.bounds;
+        var currentX = bounds[0].as('px');
+        var currentY = bounds[1].as('px');
+        layer.translate(UnitValue(x - currentX, 'px'), UnitValue(y - currentY, 'px'));
+    }
+    function addCleanupPatchLayer(doc, layerData) {
+        var patchPath = layerData.cleanup && layerData.cleanup.effective_crop_path;
+        if (!patchPath) { return; }
+        var patchFile = new File(patchPath);
+        if (!patchFile.exists) { return; }
+        var sourceDoc = app.open(patchFile);
+        sourceDoc.selection.selectAll();
+        sourceDoc.selection.copy();
+        sourceDoc.close(SaveOptions.DONOTSAVECHANGES);
+        app.activeDocument = doc;
+        doc.paste();
+        var layer = doc.activeLayer;
+        layer.name = 'AL cleanup ' + layerData.record_id;
+        moveLayerTopLeft(layer, layerData.bbox.x, layerData.bbox.y);
+    }
     function addTextLayer(doc, layerData) {
         var layer = doc.artLayers.add();
         layer.kind = LayerKind.TEXT;
@@ -50,7 +71,10 @@ JSX_SOURCE = """#target photoshop
     for (var i = 0; i < manifest.pages.length; i++) {
         var page = manifest.pages[i];
         var doc = app.open(new File(page.image_path));
-        for (var j = 0; j < page.layers.length; j++) { addTextLayer(doc, page.layers[j]); }
+        for (var j = 0; j < page.layers.length; j++) {
+            try { addCleanupPatchLayer(doc, page.layers[j]); } catch (err) {}
+            addTextLayer(doc, page.layers[j]);
+        }
         var saveFile = new File(outputFolder.fsName + '/' + baseName(page.image_name) + '.psd');
         var options = new PhotoshopSaveOptions();
         doc.saveAs(saveFile, options, false, Extension.LOWERCASE);
