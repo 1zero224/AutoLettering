@@ -35,6 +35,13 @@ Generated page preview:
 outputs/runs/phase7-gbc06-mixed-cleanup-preview-smoke/pages/GBC06-01-png.png
 ```
 
+Generated Phase 7 artifacts:
+
+- `preview-results.jsonl`
+- `pages/GBC06-01-png.png`
+- `reports/phase7-report.md`
+- `reports/manual-review.csv`
+
 Image check:
 
 - Size: `1440 x 2048`
@@ -50,11 +57,15 @@ Image check:
   "records": [
     {
       "record_id": "GBC06_01.png#1",
-      "cleanup_method": "bubble_fill"
+      "translated_text": "街头演出？",
+      "cleanup_method": "bubble_fill",
+      "cleanup_crop_path": "outputs\\runs\\phase6-gbc06-bubble-smoke\\crops\\cleaned\\GBC06-01-png-1.png"
     },
     {
       "record_id": "GBC06_01.png#16",
-      "cleanup_method": "gpt_image2_masked_edit"
+      "translated_text": "来自桃香的唐突的提案",
+      "cleanup_method": "gpt_image2_masked_edit",
+      "cleanup_crop_path": "outputs\\runs\\phase6-gbc06-nonbubble-gpt-image-smoke\\gpt_image2_normalized\\GBC06-01-png-16.png"
     }
   ],
   "preview": {
@@ -68,6 +79,13 @@ Phase 7 report summary:
 - Records processed: 2
 - Page previews generated: 1
 - Skipped: 0
+- Manual review CSV rows: 2
+- Manual review CSV size: `910` bytes
+
+`reports/manual-review.csv` now gives the human review queue for the generated page preview. It contains one row per record, including `record_id`, preview status, image name, translated text, bbox, cleanup method/crop, layout preview path, page preview path, failure reason, and blank `manual_decision` / `review_notes` columns. In this smoke, the two review rows cover:
+
+- `GBC06_01.png#1`: `bubble_fill`
+- `GBC06_01.png#16`: `gpt_image2_masked_edit`
 
 ## Phase 8 Output
 
@@ -114,6 +132,7 @@ The exported cleanup paths are:
 - Phase 7 and Phase 8 now accept one or more cleanup run directories.
 - The experiment CLI keeps the same `--cleanup-run-dir` name but allows repeating it.
 - This removes the previous need to manually create a merged cleanup run before composing a mixed bubble/non-bubble page.
+- Phase 7 now writes `reports/manual-review.csv` so generated page previews and skipped records can be accepted, rejected, or annotated during human inspection.
 - The Photoshop JSX now attempts to place each layer's `cleanup.effective_crop_path` as a bitmap patch layer named `AL cleanup <record_id>` before adding the editable text layer.
 - The editable text layer is now `TextType.PARAGRAPHTEXT` with `item.width` and `item.height` set from the detected bbox dimensions.
 - The JSX maps `layout.line_spacing` to Photoshop `leading` and maps `layout.letter_spacing` to best-effort `tracking`.
@@ -139,11 +158,11 @@ python -m pytest tests/test_phase8_photoshop_export.py -q
 python -m pytest -q
 ```
 
-Fresh result before this report was written:
+Recorded verification results during this report refresh:
 
 ```text
-5 passed in 0.44s
-5 passed in 0.25s
-3 passed in 0.19s
-55 passed in 2.88s
+5 passed in 0.65s
+6 passed in 0.27s
+4 passed in 0.28s
+58 passed in 3.55s
 ```

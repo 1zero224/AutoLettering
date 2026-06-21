@@ -19,6 +19,7 @@ Generated artifacts:
 - `preview-results.jsonl`
 - `pages/*.png`
 - `reports/phase7-report.md`
+- `reports/manual-review.csv`
 
 ## Result Summary
 
@@ -34,6 +35,8 @@ Generated artifacts:
 - Preview image size: `1440 x 2048`
 - Text bbox: `[674, 0, 1049, 342]`
 - Cleanup method: `bubble_fill`
+- Manual review CSV rows: `1`
+- Manual review CSV size: `498` bytes
 - Layout preview: `outputs/runs/phase4-gbc06-layout-smoke/debug/layout_candidates/GBC06-01-png-1.png`
 
 The page-level JSONL row is now grouped by image:
@@ -46,7 +49,9 @@ The page-level JSONL row is now grouped by image:
     {
       "record_id": "GBC06_01.png#1",
       "bbox": [674, 0, 1049, 342],
+      "translated_text": "街头演出？",
       "cleanup_method": "bubble_fill",
+      "cleanup_crop_path": "outputs\\runs\\phase6-gbc06-bubble-smoke\\crops\\cleaned\\GBC06-01-png-1.png",
       "layout_preview_path": "outputs\\runs\\phase4-gbc06-layout-smoke\\debug\\layout_candidates\\GBC06-01-png-1.png"
     }
   ],
@@ -69,6 +74,7 @@ This is the first complete local preview chain:
 
 This creates one inspectable full-page preview per processed source image. Synthetic tests cover multiple records on the same page; the current GBC06 smoke still uses one real record because the upstream Phase 3/4/6 runs only contain one aligned record.
 Records missing matching detection or layout rows are kept as `skipped` rows with a failure reason instead of being silently dropped.
+`reports/manual-review.csv` now provides the Phase 7 human review queue. Each row includes the record, translated text, bbox, cleanup method/crop, layout preview, page preview, failure reason, and blank `manual_decision` / `review_notes` columns.
 
 ## Limitations
 
@@ -84,10 +90,10 @@ Records missing matching detection or layout rows are kept as `skipped` rows wit
 python -m pytest -q
 ```
 
-Fresh result before this report was written:
+Recorded full-suite result during this report refresh:
 
 ```text
-36 passed in 1.41s
+58 passed in 3.55s
 ```
 
 ## Notes

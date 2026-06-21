@@ -1,4 +1,5 @@
 import json
+import csv
 from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw
@@ -70,6 +71,44 @@ def test_run_phase7_preview_groups_multiple_records_on_one_page(tmp_path: Path):
         assert preview.getpixel((60, 45)) == (0, 0, 0)
         assert preview.getpixel((30, 25)) == (0, 0, 0)
     assert (run_dir / "reports" / "phase7-report.md").exists()
+
+
+def test_run_phase7_preview_writes_manual_review_csv(tmp_path: Path):
+    page_path = _write_page(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    cleanup_run = tmp_path / "phase6"
+    layout_run = tmp_path / "phase4"
+    detection_run.mkdir()
+    cleanup_run.mkdir()
+    layout_run.mkdir()
+    _write_detections(detection_run / "detections.jsonl", page_path)
+    _write_cleanups(cleanup_run / "cleanup-results.jsonl", tmp_path)
+    _write_jsonl(layout_run / "layout-results.jsonl", [_layout_payload("page.png#1", _write_layout_preview(tmp_path / "layout-1.png"))])
+
+    run_dir = run_phase7_preview(
+        detection_run_dir=detection_run,
+        cleanup_run_dir=cleanup_run,
+        layout_run_dir=layout_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase7-review",
+        sample_limit=2,
+    )
+
+    rows = _read_csv(run_dir / "reports" / "manual-review.csv")
+    assert [row["record_id"] for row in rows] == ["page.png#1", "page.png#2"]
+    assert rows[0]["status"] == "page_preview_generated"
+    assert rows[0]["image_name"] == "page.png"
+    assert Path(rows[0]["page_preview_path"]).name == "page-png.png"
+    assert Path(rows[0]["page_preview_path"]).parent.name == "pages"
+    assert rows[0]["cleanup_method"] == "bubble_fill"
+    assert rows[0]["cleanup_crop_path"].endswith("cleaned-1.png")
+    assert rows[0]["layout_preview_path"].endswith("layout-1.png")
+    assert rows[0]["failure_reason"] == ""
+    assert rows[0]["manual_decision"] == ""
+    assert rows[0]["review_notes"] == ""
+    assert rows[1]["status"] == "skipped"
+    assert rows[1]["failure_reason"] == "missing_layout"
+    assert rows[1]["page_preview_path"] == ""
 
 
 def test_run_phase7_preview_merges_multiple_cleanup_runs(tmp_path: Path):
@@ -240,7 +279,7 @@ def _cleanup_payload(record_id: str, cleaned_path: Path, bbox: list[int], replac
     payload = {
         "record_id": record_id,
         "status": "cleaned",
-        "cleanup": {"cleaned_crop_path": str(cleaned_path), "bbox": bbox},
+        "cleanup": {"method": "bubble_fill", "cleaned_crop_path": str(cleaned_path), "bbox": bbox},
     }
     if replacement_path is not None:
         payload["cleanup"]["replacement_method"] = "gpt_image2_masked_edit"
@@ -280,3 +319,8 @@ def _jsonl(payloads: list[dict]) -> str:
 
 def _read_jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def _read_csv(path: Path) -> list[dict]:
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        return list(csv.DictReader(handle))

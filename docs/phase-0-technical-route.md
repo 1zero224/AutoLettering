@@ -601,6 +601,8 @@ Compose page previews from:
 
 The preview must be programmatic and independent of Photoshop.
 
+Each preview run should also write `reports/manual-review.csv`. The review CSV is the human inspection queue for rendered page previews, with one row per generated or skipped record. It should include `record_id`, `status`, `image_name`, `translated_text`, `bbox`, `cleanup_method`, `cleanup_crop_path`, `layout_preview_path`, `page_preview_path`, `failure_reason`, and blank `manual_decision` / `review_notes` columns so visual review decisions can be tracked without editing JSONL artifacts.
+
 ### Phase 8: Photoshop Export
 
 Do not force the old LabelPlus text format to carry all new metadata.

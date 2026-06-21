@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
 
@@ -22,6 +23,7 @@ def run_phase7_preview(
     layouts = _load_jsonl_by_id(Path(layout_run_dir) / "layout-results.jsonl", "layout_generated")
     rows = _preview_rows(run_dir, detections, cleanups, layouts, sample_limit)
     _write_jsonl(run_dir / "preview-results.jsonl", rows)
+    _write_manual_review_csv(run_dir / "reports" / "manual-review.csv", rows)
     _write_report(run_dir / "reports" / "phase7-report.md", detection_run_dir, cleanup_run_dir, layout_run_dir, rows)
     return run_dir
 
@@ -116,7 +118,9 @@ def _record_summary(record: dict) -> dict:
     return {
         "record_id": record["record_id"],
         "bbox": record["bbox"],
+        "translated_text": record.get("translated_text", ""),
         "cleanup_method": record.get("cleanup_method"),
+        "cleanup_crop_path": record.get("cleaned_crop_path", ""),
         "layout_preview_path": record["layout_preview_path"],
     }
 
@@ -151,6 +155,73 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def _write_manual_review_csv(output_path: Path, rows: list[dict]) -> None:
+    fieldnames = [
+        "record_id",
+        "status",
+        "image_name",
+        "translated_text",
+        "bbox",
+        "cleanup_method",
+        "cleanup_crop_path",
+        "layout_preview_path",
+        "page_preview_path",
+        "failure_reason",
+        "manual_decision",
+        "review_notes",
+    ]
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            for review_row in _manual_review_rows(row):
+                writer.writerow(review_row)
+
+
+def _manual_review_rows(row: dict) -> list[dict]:
+    if row["status"] == "skipped":
+        return [_skipped_review_row(row)]
+    return [
+        _generated_review_row(row, record)
+        for record in row.get("records", [])
+    ]
+
+
+def _generated_review_row(row: dict, record: dict) -> dict:
+    return {
+        "record_id": record["record_id"],
+        "status": row["status"],
+        "image_name": row.get("image_name", ""),
+        "translated_text": record.get("translated_text", ""),
+        "bbox": json.dumps(record.get("bbox"), ensure_ascii=False),
+        "cleanup_method": record.get("cleanup_method") or "",
+        "cleanup_crop_path": record.get("cleanup_crop_path", ""),
+        "layout_preview_path": record.get("layout_preview_path", ""),
+        "page_preview_path": row.get("preview", {}).get("page_preview_path", ""),
+        "failure_reason": "",
+        "manual_decision": "",
+        "review_notes": "",
+    }
+
+
+def _skipped_review_row(row: dict) -> dict:
+    return {
+        "record_id": row["record_id"],
+        "status": row["status"],
+        "image_name": "",
+        "translated_text": "",
+        "bbox": "",
+        "cleanup_method": "",
+        "cleanup_crop_path": "",
+        "layout_preview_path": "",
+        "page_preview_path": "",
+        "failure_reason": row.get("preview", {}).get("failure_reason", ""),
+        "manual_decision": "",
+        "review_notes": "",
+    }
+
+
 def _write_report(
     output_path: Path,
     detection_run_dir: str | Path,
@@ -178,6 +249,7 @@ def _write_report(
         "",
         "- `preview-results.jsonl`",
         "- `pages/*.png`",
+        "- `reports/manual-review.csv`",
     ]
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
