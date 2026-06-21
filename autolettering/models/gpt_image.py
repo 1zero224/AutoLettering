@@ -5,6 +5,7 @@ from pathlib import Path
 import base64
 
 from openai import OpenAI
+from PIL import Image, ImageOps
 
 
 @dataclass(frozen=True)
@@ -94,6 +95,24 @@ def _save_first_image(result, output_path: str | Path) -> dict:
             "created": getattr(result, "created", None),
             "usage": _usage_payload(getattr(result, "usage", None)),
         },
+    }
+
+
+def normalize_gpt_output_to_crop(
+    image_path: str | Path,
+    target_size: tuple[int, int],
+    output_path: str | Path,
+) -> dict:
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with Image.open(image_path) as image:
+        source = image.convert("RGB")
+        normalized = ImageOps.fit(source, target_size, method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
+    normalized.save(output)
+    return {
+        "normalized_output_path": str(output),
+        "normalized_size": list(target_size),
+        "source_size": list(source.size),
     }
 
 

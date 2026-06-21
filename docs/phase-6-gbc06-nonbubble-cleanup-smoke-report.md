@@ -57,7 +57,10 @@ Generated artifacts:
 - GPT prompt length: `213`
 - GPT usage total tokens: `1690`
 - GPT output: `outputs/runs/phase6-gbc06-nonbubble-gpt-image-smoke/gpt_image2/GBC06-01-png-16.png`
-- GPT output image: `884 x 1779`, `RGB`, non-empty
+- GPT output image: `837 x 1879`, `RGB`, non-empty
+- Normalized GPT crop: `outputs/runs/phase6-gbc06-nonbubble-gpt-image-smoke/gpt_image2_normalized/GBC06-01-png-16.png`
+- Normalized GPT crop image: `58 x 257`, `RGB`, non-empty
+- Replacement crop method for Phase 7: `gpt_image2_masked_edit`
 
 The real-call JSONL row records a safe request summary without API keys:
 
@@ -89,7 +92,9 @@ The real-call JSONL row records a safe request summary without API keys:
       "usage": {
         "total_tokens": 1690
       }
-    }
+    },
+    "normalized_output_path": "outputs\\runs\\phase6-gbc06-nonbubble-gpt-image-smoke\\gpt_image2_normalized\\GBC06-01-png-16.png",
+    "normalized_size": [58, 257]
   }
 }
 ```
@@ -104,16 +109,17 @@ Phase 6 now has a non-bubble cleanup path:
 4. Save a gpt-image-2 compatible RGBA mask where the text area has alpha `0` and preserved regions have alpha `255`.
 5. Support dry-run request packaging by default.
 6. Support a controlled real `gpt-image-2` edit call with `--call-gpt-image`.
+7. Normalize successful gpt-image-2 output back to the detection crop size and expose it as `cleanup.replacement_crop_path` for Phase 7.
 
 The first real call initially exposed a base URL compatibility issue: the configured `GPT_IMAGE_BASE_URL` ended at `/images`, while the OpenAI SDK appends `/images/edits`. The client now normalizes `/images` or `/images/edits` suffixes before creating the SDK client.
 
 ## Limitations
 
 - The local diffusion inpaint is only a baseline. It can reduce obvious dark text but is not equivalent to LaMa, PatchMatch, or Photoshop content-aware fill.
-- The gpt-image-2 output size changed from the input crop size `58 x 257` to `884 x 1779`. This means direct crop replacement is not yet safe; a later step must resize/crop/register the generated output before page composition.
+- The gpt-image-2 output size changed from the input crop size `58 x 257` to `837 x 1879`; the current code center-fits it back to `58 x 257` for page composition. This is usable for smoke preview but may crop useful generated detail.
 - The prompt asks the model to edit the masked text area and preserve surrounding art, but the result still requires manual visual review.
 - The current runner uses Phase 2 detection boxes directly; poor text boxes will produce poor masks and poor edits.
-- This path is not yet integrated into Phase 7 page preview or Phase 8 Photoshop export selection logic.
+- This path is now integrated into Phase 7 page preview through `replacement_crop_path`; Phase 8 Photoshop export selection still needs follow-up metadata support for replacement crops.
 
 ## Verification
 

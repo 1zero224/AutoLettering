@@ -62,12 +62,14 @@ def _select_one(row: dict, client: FontSelectionClient) -> tuple[dict, dict]:
             response["raw_text"],
             [font["font_id"] for font in row["candidate_fonts"]],
         )
-        return _selection_row(row, result, response["raw_text"]), _api_call_row(row, response)
+        if result.status == "selected":
+            return _selection_row(row, result, response["raw_text"], "mimo_vision"), _api_call_row(row, response)
+        return _fallback_selection(row, result.failure_reason, response["raw_text"]), _api_call_row(row, response)
     except Exception as exc:
-        return _api_failure_selection(row, exc), _api_failure_call(row, exc, prompt)
+        return _fallback_selection(row, f"api_error:{type(exc).__name__}", None), _api_failure_call(row, exc, prompt)
 
 
-def _selection_row(row: dict, result, raw_text: str) -> dict:
+def _selection_row(row: dict, result, raw_text: str, source: str) -> dict:
     selected_font = _find_font(row["candidate_fonts"], result.selected_font_id)
     return {
         "record_id": row["record_id"],
@@ -79,7 +81,27 @@ def _selection_row(row: dict, result, raw_text: str) -> dict:
         "confidence": result.confidence,
         "model_reasoning_summary": result.reasoning_summary,
         "failure_reason": result.failure_reason,
+        "selection_source": source,
         "comparison_image_path": row["comparison_image_path"],
+        "source_crop_path": row.get("source_crop_path"),
+        "raw_model_text": raw_text,
+    }
+
+
+def _fallback_selection(row: dict, reason: str | None, raw_text: str | None) -> dict:
+    fallback_font = _first_candidate(row)
+    return {
+        "record_id": row["record_id"],
+        "image_name": row.get("image_name"),
+        "translated_text": row.get("translated_text", ""),
+        "status": "selected" if fallback_font else "failed",
+        "selected_font_id": fallback_font.get("font_id") if fallback_font else None,
+        "selected_font": fallback_font,
+        "confidence": 0.0 if fallback_font else None,
+        "model_reasoning_summary": f"deterministic fallback after model failure: {reason}",
+        "failure_reason": reason,
+        "selection_source": "deterministic_fallback" if fallback_font else "none",
+        "comparison_image_path": row.get("comparison_image_path"),
         "source_crop_path": row.get("source_crop_path"),
         "raw_model_text": raw_text,
     }
@@ -105,6 +127,7 @@ def _api_failure_selection(row: dict, exc: Exception) -> dict:
         "confidence": None,
         "model_reasoning_summary": None,
         "failure_reason": f"api_error:{type(exc).__name__}",
+        "selection_source": "none",
         "comparison_image_path": row.get("comparison_image_path"),
         "source_crop_path": row.get("source_crop_path"),
         "raw_model_text": None,
@@ -130,6 +153,11 @@ def _find_font(candidate_fonts: list[dict], font_id: str | None) -> dict | None:
     if font_id is None:
         return None
     return next((font for font in candidate_fonts if font["font_id"] == font_id), None)
+
+
+def _first_candidate(row: dict) -> dict | None:
+    candidates = row.get("candidate_fonts") or []
+    return candidates[0] if candidates else None
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:

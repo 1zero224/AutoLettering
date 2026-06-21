@@ -91,8 +91,8 @@ def _preview_record(detection: dict, cleanup: dict, layout: dict) -> dict:
         "translated_text": detection.get("translated_text", ""),
         "image_path": detection["image_path"],
         "bbox": bbox,
-        "cleanup_method": cleanup["cleanup"].get("method"),
-        "cleaned_crop_path": cleanup["cleanup"]["cleaned_crop_path"],
+        "cleanup_method": _cleanup_method(cleanup["cleanup"]),
+        "cleaned_crop_path": _cleanup_crop_path(cleanup["cleanup"]),
         "layout_preview_path": layout["layout"]["preview_path"],
     }
 
@@ -118,6 +118,14 @@ def _record_summary(record: dict) -> dict:
         "cleanup_method": record.get("cleanup_method"),
         "layout_preview_path": record["layout_preview_path"],
     }
+
+
+def _cleanup_crop_path(cleanup: dict) -> str:
+    return cleanup.get("replacement_crop_path") or cleanup["cleaned_crop_path"]
+
+
+def _cleanup_method(cleanup: dict) -> str | None:
+    return cleanup.get("replacement_method") or cleanup.get("method")
 
 
 def _skipped_row(record_id: str, reason: str) -> dict:

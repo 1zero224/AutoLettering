@@ -5,7 +5,13 @@ import json
 from pathlib import Path
 
 from .inpaint.nonbubble import inpaint_nonbubble_text
-from .models.gpt_image import GptImageConfig, GptImageEditClient, gpt_image_edit_prompt, gpt_image_request_summary
+from .models.gpt_image import (
+    GptImageConfig,
+    GptImageEditClient,
+    gpt_image_edit_prompt,
+    gpt_image_request_summary,
+    normalize_gpt_output_to_crop,
+)
 
 
 def run_phase6_nonbubble_cleanup(
@@ -46,13 +52,16 @@ def _cleanup_one(run_dir: Path, detection: dict, config: GptImageConfig | None, 
         record_id=detection["record_id"],
     )
     prompt = gpt_image_edit_prompt(detection.get("translated_text", ""))
+    cleanup = _cleanup_payload(result)
+    gpt_payload = _gpt_image_payload(run_dir, detection["record_id"], result, prompt, config, client)
+    _apply_gpt_replacement(cleanup, gpt_payload)
     return {
         "record_id": detection["record_id"],
         "image_name": detection.get("image_name"),
         "translated_text": detection.get("translated_text", ""),
         "status": "cleaned",
-        "cleanup": _cleanup_payload(result),
-        "gpt_image2_edit": _gpt_image_payload(run_dir, detection["record_id"], result, prompt, config, client),
+        "cleanup": cleanup,
+        "gpt_image2_edit": gpt_payload,
     }
 
 
@@ -78,9 +87,26 @@ def _gpt_image_payload(
     try:
         output_path = run_dir / "gpt_image2" / f"{_safe_name(record_id)}.png"
         response = client.edit_image(result.input_crop_path, result.gpt_mask_path, prompt, output_path)
-        return {"request": summary, **response}
+        normalized = normalize_gpt_output_to_crop(
+            response["output_path"],
+            _crop_size(result.bbox),
+            run_dir / "gpt_image2_normalized" / f"{_safe_name(record_id)}.png",
+        )
+        return {"request": summary, **response, **normalized}
     except Exception as exc:
         return {"status": "failed", "request": summary, "failure_reason": f"{type(exc).__name__}:{str(exc)[:500]}"}
+
+
+def _apply_gpt_replacement(cleanup: dict, gpt_payload: dict) -> None:
+    if gpt_payload.get("status") != "ok" or not gpt_payload.get("normalized_output_path"):
+        return
+    cleanup["replacement_method"] = "gpt_image2_masked_edit"
+    cleanup["replacement_crop_path"] = gpt_payload["normalized_output_path"]
+
+
+def _crop_size(bbox: tuple[int, int, int, int]) -> tuple[int, int]:
+    x1, y1, x2, y2 = bbox
+    return x2 - x1, y2 - y1
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:

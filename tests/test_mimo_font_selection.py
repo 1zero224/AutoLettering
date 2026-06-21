@@ -35,6 +35,15 @@ class FakeMimoVisionClient:
         }
 
 
+class InvalidJsonMimoVisionClient:
+    def choose_font(self, comparison_image_path: str | Path, prompt: str) -> dict:
+        return {
+            "raw_text": "",
+            "request": {"model": "mimo-v2.5", "prompt_chars": len(prompt)},
+            "response": {"status": "ok"},
+        }
+
+
 def test_mimo_vision_client_builds_image_request_without_exposing_key(tmp_path: Path):
     image_path = tmp_path / "comparison.png"
     Image.new("RGB", (10, 10), "white").save(image_path)
@@ -117,10 +126,33 @@ def test_run_phase3_vision_selection_writes_results_and_api_summaries(tmp_path: 
     assert selections[0]["status"] == "selected"
     assert selections[0]["selected_font_id"] == "font-a"
     assert selections[0]["selected_font"]["font_id"] == "font-a"
+    assert selections[0]["selection_source"] == "mimo_vision"
     assert selections[0]["source_crop_path"] == str(comparison_path)
     assert api_calls[0]["record_id"] == "page.png#1"
     assert api_calls[0]["request"]["prompt_chars"] > 0
     assert "api_key" not in json.dumps(api_calls[0]).lower()
+
+
+def test_run_phase3_vision_selection_falls_back_when_model_returns_invalid_json(tmp_path: Path):
+    comparison_path = tmp_path / "comparison.png"
+    Image.new("RGB", (32, 32), "white").save(comparison_path)
+    input_run = tmp_path / "phase3"
+    input_run.mkdir()
+    _write_comparison_jsonl(input_run / "font-comparisons.jsonl", comparison_path)
+
+    run_dir = run_phase3_vision_selection(
+        input_run_dir=input_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase3-fallback-test",
+        sample_limit=1,
+        client=InvalidJsonMimoVisionClient(),
+    )
+
+    selections = _read_jsonl(run_dir / "font-selections.jsonl")
+    assert selections[0]["status"] == "selected"
+    assert selections[0]["selected_font_id"] == "font-a"
+    assert selections[0]["selection_source"] == "deterministic_fallback"
+    assert selections[0]["failure_reason"] == "invalid_json"
 
 
 def test_build_font_selection_prompt_lists_candidate_ids():

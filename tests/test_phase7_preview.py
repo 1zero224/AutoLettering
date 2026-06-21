@@ -108,6 +108,35 @@ def test_run_phase7_preview_records_missing_layout_as_skipped(tmp_path: Path):
     assert "- Skipped: 1" in report
 
 
+def test_run_phase7_preview_prefers_replacement_crop_when_available(tmp_path: Path):
+    page_path = _write_page(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    cleanup_run = tmp_path / "phase6"
+    layout_run = tmp_path / "phase4"
+    detection_run.mkdir()
+    cleanup_run.mkdir()
+    layout_run.mkdir()
+    bbox = [40, 20, 80, 70]
+    replacement_path = tmp_path / "replacement.png"
+    Image.new("RGB", (40, 50), "red").save(replacement_path)
+    _write_jsonl(
+        detection_run / "detections.jsonl",
+        [_detection_payload("page.png#1", page_path, bbox)],
+    )
+    _write_jsonl(
+        cleanup_run / "cleanup-results.jsonl",
+        [_cleanup_payload("page.png#1", _write_cleaned_crop(tmp_path / "local.png"), bbox, replacement_path)],
+    )
+    _write_jsonl(layout_run / "layout-results.jsonl", [_layout_payload("page.png#1", _transparent_layout(tmp_path))])
+
+    run_dir = run_phase7_preview(detection_run, cleanup_run, layout_run, tmp_path / "outputs", "phase7-replacement", 1)
+
+    rows = _read_jsonl(run_dir / "preview-results.jsonl")
+    assert rows[0]["records"][0]["cleanup_method"] == "gpt_image2_masked_edit"
+    with Image.open(rows[0]["preview"]["page_preview_path"]).convert("RGB") as preview:
+        assert preview.getpixel((50, 30)) == (255, 0, 0)
+
+
 def _write_page(path: Path) -> Path:
     image = Image.new("RGB", (120, 100), "white")
     ImageDraw.Draw(image).rectangle((40, 20, 80, 70), fill="black")
@@ -170,12 +199,22 @@ def _detection_payload(record_id: str, page_path: Path, bbox: list[int]) -> dict
     }
 
 
-def _cleanup_payload(record_id: str, cleaned_path: Path, bbox: list[int]) -> dict:
-    return {
+def _cleanup_payload(record_id: str, cleaned_path: Path, bbox: list[int], replacement_path: Path | None = None) -> dict:
+    payload = {
         "record_id": record_id,
         "status": "cleaned",
         "cleanup": {"cleaned_crop_path": str(cleaned_path), "bbox": bbox},
     }
+    if replacement_path is not None:
+        payload["cleanup"]["replacement_method"] = "gpt_image2_masked_edit"
+        payload["cleanup"]["replacement_crop_path"] = str(replacement_path)
+    return payload
+
+
+def _transparent_layout(tmp_path: Path) -> Path:
+    path = tmp_path / "transparent-layout.png"
+    Image.new("RGBA", (40, 50), (255, 255, 255, 0)).save(path)
+    return path
 
 
 def _layout_payload(record_id: str, layout_path: Path) -> dict:

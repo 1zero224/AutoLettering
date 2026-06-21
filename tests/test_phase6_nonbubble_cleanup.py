@@ -4,7 +4,7 @@ from pathlib import Path
 from PIL import Image, ImageChops, ImageDraw
 
 from autolettering.inpaint.nonbubble import build_gpt_edit_mask, build_text_mask, inpaint_nonbubble_text
-from autolettering.models.gpt_image import GptImageConfig, normalize_openai_base_url
+from autolettering.models.gpt_image import GptImageConfig, normalize_gpt_output_to_crop, normalize_openai_base_url
 from autolettering.phase6_nonbubble import run_phase6_nonbubble_cleanup
 
 
@@ -81,8 +81,23 @@ def test_run_phase6_nonbubble_cleanup_records_gpt_success_with_fake_client(tmp_p
     rows = _read_jsonl(run_dir / "cleanup-results.jsonl")
     assert rows[0]["gpt_image2_edit"]["status"] == "ok"
     assert rows[0]["gpt_image2_edit"]["output_path"].endswith(".png")
+    assert rows[0]["gpt_image2_edit"]["normalized_size"] == [70, 60]
+    assert rows[0]["cleanup"]["replacement_method"] == "gpt_image2_masked_edit"
+    assert Path(rows[0]["cleanup"]["replacement_crop_path"]).exists()
     report = (run_dir / "reports" / "phase6-nonbubble-report.md").read_text(encoding="utf-8")
     assert "- GPT image calls: 1" in report
+
+
+def test_normalize_gpt_output_to_crop_writes_target_sized_image(tmp_path: Path):
+    image_path = tmp_path / "gpt.png"
+    Image.new("RGB", (300, 500), "blue").save(image_path)
+
+    result = normalize_gpt_output_to_crop(image_path, (30, 70), tmp_path / "normalized.png")
+
+    assert result["source_size"] == [300, 500]
+    assert result["normalized_size"] == [30, 70]
+    with Image.open(result["normalized_output_path"]) as image:
+        assert image.size == (30, 70)
 
 
 def test_normalize_openai_base_url_removes_image_endpoint_suffix():
