@@ -557,7 +557,8 @@ Start with deterministic measurement:
 - Render each candidate into a crop-sized canvas.
 - Measure overflow and empty margins.
 - Use MIMO vision model for naturalness and severe visual errors.
-- If model validation returns unusable JSON, allow deterministic fallback only when measured overflow already passes, and preserve the model failure reason.
+- Prefer a low-burden `ACCEPT` / `REVISE` text verdict for MIMO validation, while still accepting structured JSON for compatibility.
+- If model validation returns unusable text or JSON, allow deterministic fallback only when measured overflow already passes, and preserve the model failure reason.
 
 ### Phase 5: Orientation and Angle
 

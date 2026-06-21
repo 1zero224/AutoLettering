@@ -21,15 +21,16 @@ def build_layout_validation_prompt(translated_text: str, layout: dict) -> str:
     return (
         "Judge manga text layout. "
         f"Facts JSON: {json.dumps(facts, ensure_ascii=False, separators=(',', ':'))}. "
-        "Return JSON only: accepted,needs_revision,overflow_ok,naturalness_score,reasoning_summary."
+        "Reply one line: ACCEPT or REVISE, then a short reason."
     )
 
 
 def parse_layout_validation_response(raw_text: str) -> LayoutValidationResult:
+    text = _strip_json_wrapper(raw_text)
     try:
-        payload = json.loads(_strip_json_wrapper(raw_text))
+        payload = json.loads(text)
     except json.JSONDecodeError:
-        return _failed("invalid_json")
+        return _parse_text_verdict(text)
 
     accepted = _optional_bool(payload.get("accepted"))
     needs_revision = _optional_bool(payload.get("needs_revision"))
@@ -57,6 +58,48 @@ def _strip_json_wrapper(raw_text: str) -> str:
             lines = lines[:-1]
         text = "\n".join(lines).strip()
     return text
+
+
+def _parse_text_verdict(text: str) -> LayoutValidationResult:
+    normalized = text.strip()
+    if not normalized:
+        return _failed("invalid_json")
+    prefix, reason = _split_verdict(normalized)
+    if prefix == "ACCEPT":
+        return _text_result("accepted", True, False, reason)
+    if prefix == "REVISE":
+        return _text_result("needs_revision", False, True, reason)
+    return _failed("invalid_json")
+
+
+def _split_verdict(text: str) -> tuple[str, str | None]:
+    stripped = text.strip()
+    upper = stripped.upper()
+    for prefix in ("ACCEPT", "REVISE"):
+        if upper.startswith(prefix):
+            reason = stripped[len(prefix) :].strip(" ,:")
+            return prefix, reason or None
+    first_token = stripped.partition(" ")[0].strip(",:").upper()
+    return first_token, None
+
+
+def _text_result(
+    status: str,
+    accepted: bool,
+    needs_revision: bool,
+    reason: str | None,
+) -> LayoutValidationResult:
+    changes = [reason] if status == "needs_revision" and reason else []
+    return LayoutValidationResult(
+        status=status,
+        accepted=accepted,
+        needs_revision=needs_revision,
+        overflow_ok=None,
+        naturalness_score=None,
+        recommended_changes=changes,
+        reasoning_summary=reason,
+        failure_reason=None,
+    )
 
 
 def _optional_bool(value: object) -> bool | None:

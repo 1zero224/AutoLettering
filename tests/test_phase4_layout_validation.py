@@ -72,6 +72,36 @@ def test_parse_layout_validation_response_accepts_structured_json():
     assert result.failure_reason is None
 
 
+def test_parse_layout_validation_response_accepts_text_verdict():
+    result = parse_layout_validation_response("ACCEPT: text fits and remains readable.")
+
+    assert result.status == "accepted"
+    assert result.accepted is True
+    assert result.needs_revision is False
+    assert result.reasoning_summary == "text fits and remains readable."
+    assert result.failure_reason is None
+
+
+def test_parse_layout_validation_response_accepts_comma_text_verdict():
+    result = parse_layout_validation_response("ACCEPT, text fits target")
+
+    assert result.status == "accepted"
+    assert result.accepted is True
+    assert result.needs_revision is False
+    assert result.reasoning_summary == "text fits target"
+    assert result.failure_reason is None
+
+
+def test_parse_layout_validation_response_requests_revision_from_text_verdict():
+    result = parse_layout_validation_response("REVISE: text is too dense near the border.")
+
+    assert result.status == "needs_revision"
+    assert result.accepted is False
+    assert result.needs_revision is True
+    assert result.recommended_changes == ["text is too dense near the border."]
+    assert result.failure_reason is None
+
+
 def test_parse_layout_validation_response_reports_invalid_json():
     result = parse_layout_validation_response("")
 
@@ -147,7 +177,8 @@ def test_build_layout_validation_prompt_includes_measurements():
 
     assert "街头演出？" in prompt
     assert "overflow" in prompt
-    assert "JSON" in prompt
+    assert "ACCEPT" in prompt
+    assert "REVISE" in prompt
     assert "recommended_changes" not in prompt
     assert len(prompt) < 260
 
