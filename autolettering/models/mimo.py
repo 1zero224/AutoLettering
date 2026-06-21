@@ -17,6 +17,7 @@ class MimoVisionConfig:
     api_key: str
     model: str
     max_completion_tokens: int = 512
+    thinking_type: str | None = None
 
 
 @dataclass(frozen=True)
@@ -39,7 +40,7 @@ class MimoVisionClient:
         system_prompt: str | None = None,
         max_completion_tokens: int | None = None,
     ) -> dict:
-        return {
+        payload = {
             "model": self.config.model,
             "messages": [
                 {
@@ -59,6 +60,9 @@ class MimoVisionClient:
             ],
             "max_completion_tokens": max_completion_tokens or self.config.max_completion_tokens,
         }
+        if self.config.thinking_type:
+            payload["thinking"] = {"type": self.config.thinking_type}
+        return payload
 
     def choose_font(self, comparison_image_path: str | Path, prompt: str) -> dict:
         system_prompt = "You select manga lettering fonts from labeled comparison images."

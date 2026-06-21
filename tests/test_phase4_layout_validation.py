@@ -8,6 +8,7 @@ from autolettering.layout.validation import (
     parse_layout_validation_response,
 )
 from autolettering.phase4_validate import run_phase4_layout_validation
+from experiments.phase4_layout_validate import _mimo_config_from_env
 
 
 class FakeLayoutValidationClient:
@@ -181,6 +182,16 @@ def test_build_layout_validation_prompt_includes_measurements():
     assert "REVISE" in prompt
     assert "recommended_changes" not in prompt
     assert len(prompt) < 260
+
+
+def test_phase4_experiment_disables_mimo_thinking_by_default(monkeypatch):
+    monkeypatch.setenv("MIMO_BASE_URL", "https://api.example/v1")
+    monkeypatch.setenv("MIMO_API_KEY", "secret-value")
+    monkeypatch.setenv("MIMO_VISION_MODEL", "mimo-v2.5")
+
+    config = _mimo_config_from_env()
+
+    assert config.thinking_type == "disabled"
 
 
 def _write_layout_results(path: Path, preview_path: Path) -> None:

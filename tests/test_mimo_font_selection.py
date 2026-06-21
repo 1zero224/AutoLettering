@@ -61,6 +61,21 @@ def test_mimo_vision_client_builds_image_request_without_exposing_key(tmp_path: 
     assert summary["image_path"] == str(image_path)
 
 
+def test_mimo_vision_client_can_disable_thinking_in_payload_and_summary(tmp_path: Path):
+    image_path = tmp_path / "comparison.png"
+    Image.new("RGB", (10, 10), "white").save(image_path)
+    client = MimoVisionClient(
+        MimoVisionConfig("https://api.example/v1", "secret-value", "mimo-v2.5", thinking_type="disabled")
+    )
+
+    payload = client.build_chat_payload(image_path, "Pick a font")
+    summary = request_summary("font_selection", payload, image_path=image_path)
+
+    assert payload["thinking"] == {"type": "disabled"}
+    assert summary["thinking_type"] == "disabled"
+    assert "secret-value" not in json.dumps(summary)
+
+
 def test_mimo_vision_client_analyze_image_uses_given_image_path(tmp_path: Path, monkeypatch):
     image_path = tmp_path / "layout.png"
     Image.new("RGB", (10, 10), "white").save(image_path)

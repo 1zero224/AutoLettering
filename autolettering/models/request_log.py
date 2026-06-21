@@ -15,6 +15,9 @@ def request_summary(kind: str, payload: dict[str, Any], image_path: str | Path |
         "prompt_chars": sum(len(text) for text in text_parts),
         "max_completion_tokens": payload.get("max_completion_tokens"),
     }
+    thinking = payload.get("thinking")
+    if isinstance(thinking, dict):
+        summary["thinking_type"] = thinking.get("type")
     if image_path is not None:
         summary["image_path"] = str(image_path)
     return summary
