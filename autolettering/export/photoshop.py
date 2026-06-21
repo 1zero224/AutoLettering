@@ -30,6 +30,14 @@ JSX_SOURCE = """#target photoshop
             textItem.direction = (orientation == 'vertical') ? Direction.VERTICAL : Direction.HORIZONTAL;
         } catch (err) {}
     }
+    function setTextSpacing(textItem, layout) {
+        if (layout.line_spacing !== null && layout.line_spacing !== undefined) {
+            textItem.leading = UnitValue((layout.font_size || 24) + layout.line_spacing, 'px');
+        }
+        if (layout.letter_spacing !== null && layout.letter_spacing !== undefined) {
+            try { textItem.tracking = layout.letter_spacing; } catch (err) {}
+        }
+    }
     function moveLayerTopLeft(layer, x, y) {
         var bounds = layer.bounds;
         var currentX = bounds[0].as('px');
@@ -63,6 +71,7 @@ JSX_SOURCE = """#target photoshop
         item.size = UnitValue(layerData.layout.font_size || 24, 'px');
         setTextFont(item, layerData.font.family_name);
         setTextDirection(item, layerData.layout.orientation);
+        setTextSpacing(item, layerData.layout);
         item.position = [UnitValue(layerData.position.x_px, 'px'), UnitValue(layerData.position.y_px, 'px')];
         if (layerData.layout.angle_degrees) { layer.rotate(layerData.layout.angle_degrees); }
     }

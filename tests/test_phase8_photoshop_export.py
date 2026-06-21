@@ -7,26 +7,7 @@ from autolettering.phase8 import run_phase8_photoshop_export
 
 
 def test_run_phase8_photoshop_export_writes_manifest_and_jsx(tmp_path: Path):
-    image_path = tmp_path / "page.png"
-    Image.new("RGB", (120, 160), "white").save(image_path)
-    detection_run = _mkdir(tmp_path / "phase2")
-    font_run = _mkdir(tmp_path / "phase3")
-    layout_run = _mkdir(tmp_path / "phase4")
-    cleanup_run = _mkdir(tmp_path / "phase6")
-    _write_jsonl(detection_run / "detections.jsonl", [_detection_payload(image_path)])
-    _write_jsonl(font_run / "font-selections.jsonl", [_font_payload(tmp_path / "font.ttf")])
-    _write_jsonl(layout_run / "layout-results.jsonl", [_layout_payload()])
-    _write_jsonl(cleanup_run / "cleanup-results.jsonl", [_cleanup_payload(tmp_path / "cleaned.png")])
-
-    run_dir = run_phase8_photoshop_export(
-        detection_run_dir=detection_run,
-        font_selection_run_dir=font_run,
-        layout_run_dir=layout_run,
-        cleanup_run_dir=cleanup_run,
-        output_root=tmp_path / "outputs",
-        run_id="phase8-test",
-        sample_limit=1,
-    )
+    run_dir = _run_standard_phase8_export(tmp_path)
 
     manifest = json.loads((run_dir / "photoshop-manifest.json").read_text(encoding="utf-8"))
     layer = manifest["pages"][0]["layers"][0]
@@ -40,20 +21,13 @@ def test_run_phase8_photoshop_export_writes_manifest_and_jsx(tmp_path: Path):
     assert layer["cleanup"]["effective_method"] == "bubble_fill"
     assert layer["cleanup"]["effective_crop_path"] == str(tmp_path / "cleaned.png")
     jsx = (run_dir / "photoshop-import.jsx").read_text(encoding="utf-8")
-    assert "photoshop-manifest.json" in jsx
-    assert "LayerKind.TEXT" in jsx
-    assert "function addCleanupPatchLayer" in jsx
-    assert "layerData.cleanup.effective_crop_path" in jsx
-    assert "addCleanupPatchLayer(doc, layerData)" in jsx
-    assert "AL cleanup " in jsx
-    assert "TextType.PARAGRAPHTEXT" in jsx
-    assert "item.width = UnitValue(layerData.bbox.width, 'px')" in jsx
-    assert "item.height = UnitValue(layerData.bbox.height, 'px')" in jsx
+    _assert_rich_jsx_importer(jsx)
     report = (run_dir / "reports" / "phase8-report.md").read_text(encoding="utf-8")
     assert "Missing cleanup layers: 0" in report
     assert "`bubble_fill=1`" in report
     assert "Places `cleanup.effective_crop_path` as a bitmap patch layer" in report
     assert "paragraph text layer" in report
+    assert "layout.line_spacing" in report
 
 
 def test_run_phase8_photoshop_export_preserves_replacement_cleanup(tmp_path: Path):
@@ -115,6 +89,46 @@ def test_run_phase8_photoshop_export_skips_records_without_font_selection(tmp_pa
 def _mkdir(path: Path) -> Path:
     path.mkdir()
     return path
+
+
+def _run_standard_phase8_export(tmp_path: Path) -> Path:
+    image_path = tmp_path / "page.png"
+    Image.new("RGB", (120, 160), "white").save(image_path)
+    detection_run = _mkdir(tmp_path / "phase2")
+    font_run = _mkdir(tmp_path / "phase3")
+    layout_run = _mkdir(tmp_path / "phase4")
+    cleanup_run = _mkdir(tmp_path / "phase6")
+    _write_jsonl(detection_run / "detections.jsonl", [_detection_payload(image_path)])
+    _write_jsonl(font_run / "font-selections.jsonl", [_font_payload(tmp_path / "font.ttf")])
+    _write_jsonl(layout_run / "layout-results.jsonl", [_layout_payload()])
+    _write_jsonl(cleanup_run / "cleanup-results.jsonl", [_cleanup_payload(tmp_path / "cleaned.png")])
+    return run_phase8_photoshop_export(
+        detection_run,
+        font_run,
+        layout_run,
+        cleanup_run,
+        tmp_path / "outputs",
+        "phase8-test",
+        1,
+    )
+
+
+def _assert_rich_jsx_importer(jsx: str) -> None:
+    for expected in [
+        "photoshop-manifest.json",
+        "LayerKind.TEXT",
+        "function addCleanupPatchLayer",
+        "layerData.cleanup.effective_crop_path",
+        "addCleanupPatchLayer(doc, layerData)",
+        "AL cleanup ",
+        "TextType.PARAGRAPHTEXT",
+        "item.width = UnitValue(layerData.bbox.width, 'px')",
+        "item.height = UnitValue(layerData.bbox.height, 'px')",
+        "function setTextSpacing",
+        "textItem.leading",
+        "textItem.tracking",
+    ]:
+        assert expected in jsx
 
 
 def _detection_payload(image_path: Path) -> dict:

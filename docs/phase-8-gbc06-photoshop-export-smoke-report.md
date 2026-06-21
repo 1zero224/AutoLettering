@@ -30,7 +30,7 @@ Generated artifacts:
 - Pages exported: 1
 - Text layers exported: 1
 - Manifest size: `2842` bytes
-- JSX size: `3603` bytes
+- JSX size: `4065` bytes
 - Missing cleanup layers: 0
 - Effective cleanup methods: `bubble_fill=1`
 
@@ -99,7 +99,8 @@ The manifest layer stores the Photoshop-relevant fields:
 4. Set text contents, font size, font family when Photoshop can resolve it, direction, pixel position, and rotation angle.
 5. Place `cleanup.effective_crop_path` as a best-effort bitmap patch layer named `AL cleanup <record_id>` when the path exists.
 6. Use paragraph text with bbox width and height for the editable text layer.
-7. Save PSD files under a sibling `psd/` folder.
+7. Map `layout.line_spacing` to Photoshop leading and `layout.letter_spacing` to best-effort tracking.
+8. Save PSD files under a sibling `psd/` folder.
 
 This follows the existing `PS-Script/src/importer.ts` model of creating Photoshop `LayerKind.TEXT` layers, but uses a richer project manifest instead of the old LabelPlus txt format.
 

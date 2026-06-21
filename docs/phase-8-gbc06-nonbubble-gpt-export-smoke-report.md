@@ -30,7 +30,7 @@ Generated artifacts:
 - Pages exported: 1
 - Text layers exported: 2
 - Manifest size: `5333` bytes
-- JSX size: `3603` bytes
+- JSX size: `4065` bytes
 - Missing cleanup layers: 1
 - Effective cleanup methods: `gpt_image2_masked_edit=1`
 
@@ -72,6 +72,7 @@ For the non-bubble record, `effective_*` points at the GPT replacement crop beca
 - `cleanup.effective_method` and `cleanup.effective_crop_path` select the artifact that downstream tools should prefer for preview/export metadata.
 - Missing cleanup rows now still emit a stable cleanup object with all cleanup path/method fields set to `null`.
 - `photoshop-import.jsx` attempts to place `cleanup.effective_crop_path` as a bitmap patch layer named `AL cleanup <record_id>` before adding editable text.
+- `photoshop-import.jsx` maps `layout.line_spacing` to Photoshop leading and `layout.letter_spacing` to best-effort tracking.
 
 ## Limitations
 

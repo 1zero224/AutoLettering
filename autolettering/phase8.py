@@ -86,6 +86,7 @@ def _write_report(
         "",
         "- Places `cleanup.effective_crop_path` as a bitmap patch layer when available.",
         "- Creates one editable Photoshop paragraph text layer per exported layer using the bbox width and height.",
+        "- Maps `layout.line_spacing` to Photoshop leading and `layout.letter_spacing` to best-effort tracking.",
         "",
         "## Generated Artifacts",
         "",
