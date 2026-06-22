@@ -4,7 +4,9 @@ from dataclasses import asdict
 import json
 from pathlib import Path
 
-from .inpaint.bubble_fill import mask_fill_text_pixels, region_fill_text_area
+from PIL import Image
+
+from .inpaint.bubble_fill import mask_fill_text_pixels, region_fill_text_area, soft_region_fill_text_area
 from .record_selection import normalize_record_ids, row_matches_record_ids
 from .text_bbox import selected_text_bbox
 
@@ -103,9 +105,18 @@ def _clean_bubble_crop(
 ):
     if cleanup_method == "region_fill":
         return region_fill_text_area(image_path, bbox, text_bbox, output_dir, record_id)
+    if cleanup_method == "soft_region_fill":
+        return soft_region_fill_text_area(image_path, _context_bbox(image_path, text_bbox), text_bbox, output_dir, record_id)
     if cleanup_method == "mask_fill":
         return mask_fill_text_pixels(image_path, bbox, text_bbox, output_dir, record_id)
     raise ValueError(f"unsupported_bubble_cleanup_method:{cleanup_method}")
+
+
+def _context_bbox(image_path: str | Path, bbox: tuple[int, int, int, int], padding_px: int = 10) -> tuple[int, int, int, int]:
+    with Image.open(image_path) as image:
+        width, height = image.size
+    x1, y1, x2, y2 = bbox
+    return max(0, x1 - padding_px), max(0, y1 - padding_px), min(width, x2 + padding_px), min(height, y2 + padding_px)
 
 
 def _text_bbox(detection: dict) -> tuple[int, int, int, int]:

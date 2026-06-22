@@ -82,6 +82,38 @@ def test_run_phase8_photoshop_export_preserves_replacement_cleanup(tmp_path: Pat
     assert "`gpt_image2_masked_edit=1`" in report
 
 
+def test_run_phase8_photoshop_export_places_cleanup_patch_by_cleanup_bbox(tmp_path: Path):
+    image_path = tmp_path / "page.png"
+    Image.new("RGB", (120, 160), "white").save(image_path)
+    detection_run = _mkdir(tmp_path / "phase2")
+    font_run = _mkdir(tmp_path / "phase3")
+    layout_run = _mkdir(tmp_path / "phase4")
+    cleanup_run = _mkdir(tmp_path / "phase6")
+    _write_jsonl(detection_run / "detections.jsonl", [_detection_payload(image_path)])
+    _write_jsonl(font_run / "font-selections.jsonl", [_font_payload(tmp_path / "font.ttf")])
+    _write_jsonl(layout_run / "layout-results.jsonl", [_layout_payload()])
+    _write_jsonl(cleanup_run / "cleanup-results.jsonl", [_cleanup_payload(tmp_path / "cleaned.png", cleanup_bbox=[0, 10, 90, 110])])
+
+    run_dir = run_phase8_photoshop_export(
+        detection_run,
+        font_run,
+        layout_run,
+        cleanup_run,
+        tmp_path / "outputs",
+        sample_limit=1,
+    )
+
+    manifest = json.loads((run_dir / "photoshop-manifest.json").read_text(encoding="utf-8"))
+    layer = manifest["pages"][0]["layers"][0]
+    assert layer["bbox"]["xyxy"] == [10, 20, 80, 90]
+    assert layer["cleanup"]["bbox"]["xyxy"] == [0, 10, 90, 110]
+    assert layer["cleanup"]["position"]["x_px"] == 0
+    assert layer["cleanup"]["position"]["y_px"] == 10
+    jsx = (run_dir / "photoshop-import.jsx").read_text(encoding="utf-8")
+    assert "var patchPosition = (layerData.cleanup && layerData.cleanup.position) || layerData.position" in jsx
+    assert "moveLayerTopLeft(layer, patchPosition.x_px, patchPosition.y_px)" in jsx
+
+
 def test_run_phase8_photoshop_export_applies_font_mapping_file(tmp_path: Path):
     image_path = tmp_path / "page.png"
     Image.new("RGB", (120, 160), "white").save(image_path)
@@ -233,12 +265,14 @@ def _layout_payload() -> dict:
     }
 
 
-def _cleanup_payload(cleaned_path: Path, replacement_path: Path | None = None) -> dict:
+def _cleanup_payload(cleaned_path: Path, replacement_path: Path | None = None, cleanup_bbox: list[int] | None = None) -> dict:
     cleanup = {
         "method": "bubble_fill",
         "cleaned_crop_path": str(cleaned_path),
         "before_after_path": str(cleaned_path),
     }
+    if cleanup_bbox is not None:
+        cleanup["bbox"] = cleanup_bbox
     if replacement_path is not None:
         cleanup["method"] = "local_diffusion_inpaint"
         cleanup["replacement_method"] = "gpt_image2_masked_edit"

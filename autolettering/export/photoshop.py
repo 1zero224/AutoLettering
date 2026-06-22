@@ -64,6 +64,7 @@ JSX_SOURCE = """#target photoshop
         if (!patchPath) { return; }
         var patchFile = new File(patchPath);
         if (!patchFile.exists) { return; }
+        var patchPosition = (layerData.cleanup && layerData.cleanup.position) || layerData.position;
         var sourceDoc = app.open(patchFile);
         sourceDoc.selection.selectAll();
         sourceDoc.selection.copy();
@@ -72,7 +73,7 @@ JSX_SOURCE = """#target photoshop
         doc.paste();
         var layer = doc.activeLayer;
         layer.name = 'AL cleanup ' + layerData.record_id;
-        moveLayerTopLeft(layer, layerData.bbox.x, layerData.bbox.y);
+        moveLayerTopLeft(layer, patchPosition.x_px, patchPosition.y_px);
     }
     function addTextLayer(doc, layerData) {
         var layer = doc.artLayers.add();
@@ -183,7 +184,7 @@ def _layer_record(
         "text_position": _position_payload(text_bbox, image_size),
         "font": _font_payload(font_row, font_mapping),
         "layout": _layout_payload(layout),
-        "cleanup": _cleanup_payload(cleanup_row),
+        "cleanup": _cleanup_payload(cleanup_row, image_size),
         "validation": layout.get("validation", {}),
     }
 
@@ -289,11 +290,13 @@ def _clamp_color(value: object) -> int:
     return max(0, min(255, number))
 
 
-def _cleanup_payload(cleanup_row: dict | None) -> dict:
+def _cleanup_payload(cleanup_row: dict | None, image_size: tuple[int, int] | None = None) -> dict:
     if cleanup_row is None:
         return {
             "status": "missing",
             "method": None,
+            "bbox": None,
+            "position": None,
             "cleaned_crop_path": None,
             "before_after_path": None,
             "replacement_method": None,
@@ -306,9 +309,12 @@ def _cleanup_payload(cleanup_row: dict | None) -> dict:
     cleaned_crop_path = cleanup.get("cleaned_crop_path")
     replacement_method = cleanup.get("replacement_method")
     method = cleanup.get("method")
+    bbox = cleanup.get("bbox")
     return {
         "status": cleanup_row.get("status"),
         "method": method,
+        "bbox": _bbox_payload(bbox) if bbox else None,
+        "position": _position_payload(bbox, image_size) if bbox and image_size else None,
         "cleaned_crop_path": cleaned_crop_path,
         "before_after_path": cleanup.get("before_after_path"),
         "replacement_method": replacement_method,

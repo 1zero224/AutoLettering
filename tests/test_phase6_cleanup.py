@@ -3,7 +3,13 @@ from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw
 
-from autolettering.inpaint.bubble_fill import fill_text_box, mask_fill_text_pixels, region_fill_text_area, sample_border_color
+from autolettering.inpaint.bubble_fill import (
+    fill_text_box,
+    mask_fill_text_pixels,
+    region_fill_text_area,
+    sample_border_color,
+    soft_region_fill_text_area,
+)
 from autolettering.phase6 import run_phase6_bubble_cleanup
 from autolettering.phase6 import _text_bbox
 
@@ -82,6 +88,53 @@ def test_region_fill_text_area_removes_light_glyph_ghosts(tmp_path: Path):
         assert result.method == "bubble_region_fill"
         assert cleaned.convert("L").getpixel((60, 65)) > 245
         assert cleaned.convert("L").getpixel((30, 10)) < 40
+
+
+def test_soft_region_fill_text_area_feathers_cleanup_mask_edges(tmp_path: Path):
+    image = Image.new("RGB", (80, 70), (245, 245, 245))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((28, 22, 52, 48), fill=(40, 40, 40))
+    image_path = tmp_path / "page.png"
+    image.save(image_path)
+
+    result = soft_region_fill_text_area(
+        image_path=image_path,
+        bbox=(0, 0, 80, 70),
+        text_bbox=(28, 22, 52, 48),
+        output_dir=tmp_path / "cleanup",
+        record_id="page.png#1",
+        padding_px=4,
+        feather_px=3,
+    )
+
+    with Image.open(result.cleanup_mask_path).convert("L") as mask, Image.open(result.cleaned_crop_path).convert("L") as cleaned:
+        assert result.method == "bubble_soft_region_fill"
+        assert mask.getpixel((40, 35)) == 255
+        assert 0 < mask.getpixel((24, 35)) < 255
+        assert mask.getpixel((18, 35)) == 0
+        assert cleaned.getpixel((40, 35)) > 240
+
+
+def test_soft_region_fill_text_area_keeps_tiny_edge_region_opaque(tmp_path: Path):
+    image = Image.new("RGB", (8, 8), (245, 245, 245))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 0, 1, 1), fill=(40, 40, 40))
+    image_path = tmp_path / "tiny-edge.png"
+    image.save(image_path)
+
+    result = soft_region_fill_text_area(
+        image_path=image_path,
+        bbox=(0, 0, 8, 8),
+        text_bbox=(0, 0, 1, 1),
+        output_dir=tmp_path / "cleanup",
+        record_id="tiny-edge.png#1",
+        padding_px=4,
+        feather_px=3,
+    )
+
+    with Image.open(result.cleanup_mask_path).convert("L") as mask, Image.open(result.cleaned_crop_path).convert("L") as cleaned:
+        assert mask.getpixel((0, 0)) == 255
+        assert cleaned.getpixel((0, 0)) > 240
 
 
 def test_run_phase6_bubble_cleanup_writes_results_and_artifacts(tmp_path: Path):
@@ -223,6 +276,31 @@ def test_run_phase6_bubble_cleanup_can_keep_mask_fill_for_comparison(tmp_path: P
 
     rows = _read_jsonl(run_dir / "cleanup-results.jsonl")
     assert rows[0]["cleanup"]["method"] == "bubble_mask_fill"
+
+
+def test_run_phase6_bubble_cleanup_can_use_soft_region_fill_for_comparison(tmp_path: Path):
+    image_path = _write_sample_image(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    layout_run = tmp_path / "phase4"
+    detection_run.mkdir()
+    layout_run.mkdir()
+    _write_detection(detection_run / "detections.jsonl", image_path)
+    _write_layout(layout_run / "layout-results.jsonl")
+
+    run_dir = run_phase6_bubble_cleanup(
+        detection_run_dir=detection_run,
+        layout_run_dir=layout_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-soft-region-test",
+        sample_limit=1,
+        cleanup_method="soft_region_fill",
+    )
+
+    rows = _read_jsonl(run_dir / "cleanup-results.jsonl")
+    assert rows[0]["cleanup"]["method"] == "bubble_soft_region_fill"
+    assert rows[0]["cleanup"]["bbox"] == [25, 15, 90, 100]
+    with Image.open(rows[0]["cleanup"]["cleanup_mask_path"]).convert("L") as mask:
+        assert mask.getextrema() == (0, 255)
 
 
 def test_run_phase6_bubble_cleanup_filters_by_record_id_before_sample_limit(tmp_path: Path):

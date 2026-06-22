@@ -18,7 +18,7 @@ def main() -> None:
     parser.add_argument("--output-root", default="outputs/runs")
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--sample-limit", type=int, default=5)
-    parser.add_argument("--cleanup-method", default="region_fill", choices=["region_fill", "mask_fill"])
+    parser.add_argument("--cleanup-method", default="region_fill", choices=["region_fill", "soft_region_fill", "mask_fill"])
     parser.add_argument("--record-id", action="append", dest="record_ids", default=None)
     args = parser.parse_args()
 
