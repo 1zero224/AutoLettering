@@ -46,9 +46,9 @@ page_count=1
 
 ## JSX Behavior
 
-`photoshop-import.jsx` now reads `layerData.layout.vertical_align`.
-When a layer is both vertical and top-aligned, the JSX appends `vertical_align=top` to the Photoshop layer name for manual inspection and calls `applyVerticalTopAnchor()` after optional rotation.
-That helper attempts to move the rendered layer bounds top to `text_position.y_px`, so the editable Photoshop layer no longer relies only on Photoshop's default paragraph baseline behavior.
+The manifest now derives `photoshop.vertical_top_anchor_y_px` from records where `layout.orientation=vertical` and `layout.vertical_align=top`.
+`photoshop-import.jsx` reads that Photoshop-specific field, appends `vertical_align=top` to the layer name for manual inspection, and calls `applyVerticalTopAnchor()` after optional rotation.
+That helper attempts to move the rendered layer bounds top to the exported anchor y coordinate, so the editable Photoshop layer no longer relies only on Photoshop's default paragraph baseline behavior.
 
 This is intentionally conservative. The export preserves the layout intent and validation checklist, but it does not claim exact Photoshop raster parity without running Photoshop locally.
 
