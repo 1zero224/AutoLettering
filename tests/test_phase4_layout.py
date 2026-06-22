@@ -2,6 +2,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
 from PIL import Image, ImageChops
 
 from autolettering.layout.candidates import generate_line_break_candidates
@@ -232,6 +233,34 @@ def test_render_layout_preview_supports_vertical_text_columns(tmp_path: Path):
     assert alignment["ink_bbox"] is not None
     assert alignment["ink_width"] > 12
     assert alignment["ink_height"] <= 188
+
+
+def test_render_layout_preview_can_switch_vertical_column_order(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+    layout = search_fitting_layout(
+        "昴也好\n仁菜也好",
+        font_path,
+        (85, 128),
+        min_font_size=31,
+        max_font_size=31,
+        orientation="vertical",
+    )
+    rtl_path = tmp_path / "vertical-rtl.png"
+    ltr_path = tmp_path / "vertical-ltr.png"
+
+    render_layout_preview(layout, font_path, rtl_path, canvas_size=(85, 128), vertical_column_order="rtl")
+    render_layout_preview(layout, font_path, ltr_path, canvas_size=(85, 128), vertical_column_order="ltr")
+
+    with Image.open(rtl_path) as rtl, Image.open(ltr_path) as ltr:
+        assert ImageChops.difference(rtl, ltr).getbbox() is not None
+
+
+def test_render_layout_preview_rejects_unknown_vertical_column_order(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+    layout = search_fitting_layout("昴也好\n仁菜也好", font_path, (85, 128), orientation="vertical")
+
+    with pytest.raises(ValueError, match="vertical_column_order"):
+        render_layout_preview(layout, font_path, tmp_path / "bad.png", vertical_column_order="middle")
 
 
 def test_render_layout_preview_applies_layout_angle(tmp_path: Path):

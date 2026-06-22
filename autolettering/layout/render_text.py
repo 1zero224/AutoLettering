@@ -13,11 +13,15 @@ def render_layout_preview(
     output_path: str | Path,
     canvas_size: tuple[int, int] | None = None,
     text_color: tuple[int, int, int, int] = (0, 0, 0, 255),
+    vertical_column_order: str = "rtl",
 ) -> Path:
+    if vertical_column_order not in {"rtl", "ltr"}:
+        raise ValueError("vertical_column_order must be 'rtl' or 'ltr'")
+
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     size = canvas_size or (layout.target_width, layout.target_height)
-    image = _render_text_layer(layout, font_path, size, text_color)
+    image = _render_text_layer(layout, font_path, size, text_color, vertical_column_order)
     if abs(layout.angle_degrees) >= 0.1:
         image = _rotate_within_canvas(image, layout.angle_degrees, size)
     image = _recenter_visible_ink(image)
@@ -84,12 +88,13 @@ def _render_text_layer(
     font_path: str | Path,
     size: tuple[int, int],
     text_color: tuple[int, int, int, int],
+    vertical_column_order: str,
 ) -> Image.Image:
     image = Image.new("RGBA", size, (255, 255, 255, 0))
     font = ImageFont.truetype(str(font_path), layout.font_size)
     draw = ImageDraw.Draw(image)
     if layout.orientation == "vertical":
-        _draw_vertical(draw, layout, font, size, text_color)
+        _draw_vertical(draw, layout, font, size, text_color, vertical_column_order)
         return image
 
     _draw_horizontal(draw, layout, font, size, text_color)
@@ -124,13 +129,21 @@ def _draw_vertical(
     font: ImageFont.FreeTypeFont,
     size: tuple[int, int],
     text_color: tuple[int, int, int, int],
+    vertical_column_order: str,
 ) -> None:
     columns = [[char for char in column if char.strip()] for column in layout.line_breaks.splitlines()]
     columns = [column for column in columns if column]
     column_metrics = [_vertical_column_metrics(draw, column, font, layout.line_spacing) for column in columns]
     total_width = sum(item["width"] for item in column_metrics) + layout.line_spacing * max(0, len(column_metrics) - 1)
-    x = max(0, (size[0] - total_width) // 2 + total_width)
+    left = max(0, (size[0] - total_width) // 2)
+    if vertical_column_order == "ltr":
+        x = left
+        for column, metrics in zip(columns, column_metrics):
+            _draw_vertical_column(draw, column, metrics, font, layout.line_spacing, x, size[1], text_color)
+            x += metrics["width"] + layout.line_spacing
+        return
 
+    x = left + total_width
     for column, metrics in zip(columns, column_metrics):
         x -= metrics["width"]
         _draw_vertical_column(draw, column, metrics, font, layout.line_spacing, x, size[1], text_color)
