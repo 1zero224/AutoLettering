@@ -24,6 +24,7 @@ DEFAULT_METHODS = [
     "opencv_telea",
     "opencv_ns",
     "bt_patchmatch",
+    "bt_aot",
     "bt_lama_large",
 ]
 

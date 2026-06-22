@@ -2,11 +2,18 @@ import json
 import importlib.util
 from pathlib import Path
 
+import numpy as np
 import pytest
 from PIL import Image, ImageChops, ImageDraw
 
 from autolettering.inpaint.nonbubble import build_gpt_edit_mask, build_text_mask, inpaint_crop, inpaint_nonbubble_text
-from autolettering.models.gpt_image import GptImageConfig, normalize_gpt_output_to_crop, normalize_openai_base_url
+from autolettering.inpaint.balloons import _restore_grayscale_if_mono
+from autolettering.models.gpt_image import (
+    GptImageConfig,
+    gpt_image_edit_prompt,
+    normalize_gpt_output_to_crop,
+    normalize_openai_base_url,
+)
 from autolettering.phase6_nonbubble import run_phase6_nonbubble_cleanup
 
 
@@ -21,6 +28,14 @@ def test_build_text_mask_and_gpt_mask_use_expected_alpha_convention():
     assert text_mask.getpixel((2, 2)) == 0
     assert gpt_mask.getpixel((20, 15))[3] == 0
     assert gpt_mask.getpixel((2, 2))[3] == 255
+
+
+def test_gpt_image_prompt_requires_exact_target_text():
+    prompt = gpt_image_edit_prompt("来自桃香的唐突的提案")
+
+    assert "Target Chinese text: 来自桃香的唐突的提案" in prompt
+    assert "exactly match" in prompt
+    assert "Do not omit" in prompt
 
 
 def test_build_text_mask_excludes_large_solid_icon_on_light_background():
@@ -142,6 +157,41 @@ def test_inpaint_crop_routes_balloon_patchmatch_method(monkeypatch):
 
     assert method == "bt_patchmatch_inpaint"
     assert result.getpixel((0, 0)) == (255, 255, 255)
+
+
+def test_inpaint_crop_routes_balloon_aot_method(monkeypatch):
+    crop = Image.new("RGB", (12, 10), "black")
+    mask = Image.new("L", crop.size, 255)
+
+    monkeypatch.setattr(
+        "autolettering.inpaint.nonbubble.balloons_aot_inpaint",
+        lambda crop_arg, mask_arg: Image.new("RGB", crop_arg.size, "white"),
+    )
+
+    method, result = inpaint_crop(crop, mask, "bt_aot")
+
+    assert method == "bt_aot_inpaint"
+    assert result.getpixel((0, 0)) == (255, 255, 255)
+
+
+def test_aot_grayscale_postprocess_only_applies_to_mono_sources():
+    mono_original = np.full((2, 2, 3), 120, dtype=np.uint8)
+    color_result = np.array(
+        [
+            [[60, 120, 200], [70, 130, 210]],
+            [[80, 140, 220], [90, 150, 230]],
+        ],
+        dtype=np.uint8,
+    )
+    restored = _restore_grayscale_if_mono(mono_original, color_result)
+
+    assert np.array_equal(restored[:, :, 0], restored[:, :, 1])
+    assert np.array_equal(restored[:, :, 1], restored[:, :, 2])
+
+    color_original = color_result.copy()
+    unchanged = _restore_grayscale_if_mono(color_original, color_result)
+
+    assert np.array_equal(unchanged, color_result)
 
 
 def test_inpaint_crop_supports_dark_panel_fill_method():

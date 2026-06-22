@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageChops, ImageFilter
 
+from .balloons import aot_inpaint as balloons_aot_inpaint
 from .balloons import lama_large_inpaint as balloons_lama_large_inpaint
 from .balloons import patchmatch_inpaint as balloons_patchmatch_inpaint
 from .models import NonBubbleInpaintResult
@@ -69,6 +70,8 @@ def inpaint_crop(
         return "flat_median_fill", flat_median_fill(crop, text_mask)
     if method == "dark_panel_fill":
         return "dark_panel_fill", dark_panel_fill(crop, text_mask)
+    if method == "bt_aot":
+        return "bt_aot_inpaint", balloons_aot_inpaint(crop, text_mask)
     if method == "bt_lama_large":
         return "bt_lama_large_inpaint", balloons_lama_large_inpaint(crop, text_mask)
     if method == "bt_patchmatch":

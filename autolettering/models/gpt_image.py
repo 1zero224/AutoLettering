@@ -48,8 +48,11 @@ def gpt_image_edit_prompt(translated_text: str) -> str:
         [
             "Edit only the transparent masked text area.",
             "Remove the original Japanese manga text and preserve the surrounding artwork.",
-            "Place the Chinese translation naturally in the edited area.",
-            f"Chinese translation: {translated_text}",
+            "Render the Chinese replacement text naturally in the edited area.",
+            "The text must exactly match the target string below.",
+            "Do not omit, add, reorder, paraphrase, translate, or keep any Japanese characters.",
+            "If the area is vertical, keep a natural vertical manga lettering layout.",
+            f"Target Chinese text: {translated_text}",
         ]
     )
 
