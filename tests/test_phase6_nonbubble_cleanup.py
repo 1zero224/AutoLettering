@@ -325,6 +325,37 @@ def test_run_phase6_nonbubble_cleanup_uses_tight_text_bbox(tmp_path: Path):
     assert rows[0]["cleanup"]["bbox"] == [35, 25, 62, 55]
 
 
+def test_run_phase6_nonbubble_cleanup_uses_body_bbox_below_diamond(tmp_path: Path):
+    image_path = _write_decorated_nonbubble_caption(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(
+        detection_run / "detections.jsonl",
+        image_path,
+        rows=[
+            {
+                "record_id": "page.png#2",
+                "group_name": "框外",
+                "selected_text_box_xyxy": [10, 10, 68, 250],
+                "candidate_boxes": [
+                    {"xyxy": [10, 10, 68, 250], "score": 0.95, "polarity": "dark_on_light"},
+                ],
+            },
+        ],
+    )
+
+    run_dir = run_phase6_nonbubble_cleanup(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-nonbubble-body-bbox",
+        sample_limit=1,
+        inpaint_method="local_diffusion",
+    )
+
+    rows = _read_jsonl(run_dir / "cleanup-results.jsonl")
+    assert rows[0]["cleanup"]["bbox"] == [10, 80, 68, 250]
+
+
 def test_run_phase6_nonbubble_cleanup_uses_selected_candidate_polarity(tmp_path: Path):
     image_path = _write_light_nonbubble_image(tmp_path / "dark-panel.png")
     detection_run = tmp_path / "phase2"
@@ -433,6 +464,17 @@ def _write_light_nonbubble_image(path: Path) -> Path:
     image = Image.new("RGB", (120, 100), (20, 20, 20))
     draw = ImageDraw.Draw(image)
     draw.rectangle((40, 30, 70, 50), fill="white")
+    image.save(path)
+    return path
+
+
+def _write_decorated_nonbubble_caption(path: Path) -> Path:
+    image = Image.new("RGB", (80, 280), "white")
+    draw = ImageDraw.Draw(image)
+    draw.polygon([(39, 16), (64, 41), (39, 66), (14, 41)], fill="black")
+    for y in (80, 126, 172, 218):
+        draw.rectangle((24, y, 54, y + 6), fill="black")
+        draw.rectangle((36, y, 42, y + 30), fill="black")
     image.save(path)
     return path
 

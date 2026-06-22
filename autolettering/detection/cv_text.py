@@ -24,6 +24,7 @@ def detect_text_region(
     min_area: int = 20,
     min_dark_pixels: int = 10,
 ) -> DetectionResult:
+    radius_y = _effective_radius_y(label, image_width, image_height, radius_y)
     search_region = build_search_region(label.x_px, label.y_px, image_width, image_height, radius_x, radius_y)
     gray = _load_gray_crop(image_path, search_region)
     dark_mask = gray < dark_threshold
@@ -223,6 +224,16 @@ def _connected_components(
             )
 
     return sorted(candidates, key=lambda item: item.score, reverse=True)
+
+
+def _effective_radius_y(label: ManifestLabel, image_width: int, image_height: int, radius_y: int) -> int:
+    if label.group_name == "框内":
+        return radius_y
+    edge_margin = max(1, int(round(image_width * 0.12)))
+    near_side_edge = label.x_px <= edge_margin or label.x_px >= image_width - edge_margin
+    if not near_side_edge:
+        return radius_y
+    return min(image_height, max(radius_y, 560))
 
 
 def _local_dark_ratio(gray: np.ndarray, x: int, y: int, radius: int = 36) -> float:

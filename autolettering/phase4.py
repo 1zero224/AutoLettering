@@ -11,6 +11,9 @@ from .layout.measure import search_fitting_layout
 from .layout.render_text import measure_preview_alignment, render_layout_preview
 from .record_selection import normalize_record_ids, row_matches_record_ids
 from .text_bbox import selected_text_bbox, selected_text_polarity
+from .text_body_bbox import selected_text_body_bbox
+
+MIN_APPLIED_ANGLE_DEGREES = 3.0
 
 
 def run_phase4(
@@ -82,8 +85,16 @@ def _layout_record(
     angle = angle_rows.get(row["record_id"])
     layout, target_bbox, target_size = _search_layout_for_record(row, font_path, angle, detection_rows)
     text_color = _text_color_for_record(row["record_id"], detection_rows, target_bbox)
+    vertical_align = _vertical_align_for_record(detection_rows.get(row["record_id"]), target_bbox)
     preview_path = run_dir / "debug" / "layout_candidates" / f"{_safe_name(row['record_id'])}.png"
-    render_layout_preview(layout, font_path, preview_path, canvas_size=target_size, text_color=text_color)
+    render_layout_preview(
+        layout,
+        font_path,
+        preview_path,
+        canvas_size=target_size,
+        text_color=text_color,
+        vertical_align=vertical_align,
+    )
     alignment = measure_preview_alignment(preview_path)
     return {
         "record_id": row["record_id"],
@@ -91,7 +102,7 @@ def _layout_record(
         "translated_text": row.get("translated_text", ""),
         "status": "layout_generated" if layout.status == "ok" else "layout_failed",
         "selected_font_id": row.get("selected_font_id"),
-        "layout": _layout_payload(layout, preview_path, alignment, target_bbox, text_color),
+        "layout": _layout_payload(layout, preview_path, alignment, target_bbox, text_color, vertical_align),
     }
 
 
@@ -150,7 +161,10 @@ def _layout_target_bboxes(row: dict, detection_rows: dict[str, dict]) -> list[li
     detection = detection_rows.get(row["record_id"])
     if detection is None:
         return []
+    full_text_bbox = selected_text_bbox(detection)
     tight_bbox = _text_bbox(detection)
+    if tight_bbox != full_text_bbox:
+        return [list(tight_bbox)]
     selected_bbox = tuple(int(value) for value in detection["selected_text_box_xyxy"])
     return [list(bbox) for bbox in _expand_target_bboxes(tight_bbox, selected_bbox)]
 
@@ -163,7 +177,7 @@ def _layout_target_bbox(row: dict, detection_rows: dict[str, dict]) -> list[int]
 
 
 def _text_bbox(detection: dict) -> tuple[int, int, int, int]:
-    return selected_text_bbox(detection)
+    return selected_text_body_bbox(detection)
 
 
 def _text_color_for_record(
@@ -180,6 +194,14 @@ def _text_color_for_record(
     return (0, 0, 0, 255)
 
 
+def _vertical_align_for_record(detection: dict | None, target_bbox: list[int] | None) -> str:
+    if detection is None or target_bbox is None:
+        return "center"
+    full_bbox = selected_text_bbox(detection)
+    body_bbox = selected_text_body_bbox(detection)
+    return "top" if body_bbox != full_bbox and tuple(target_bbox) == body_bbox else "center"
+
+
 def _bbox_size(bbox: list[int]) -> tuple[int, int]:
     x1, y1, x2, y2 = bbox
     return x2 - x1, y2 - y1
@@ -193,16 +215,37 @@ def _max_font_size(
 ) -> int:
     if orientation != "vertical" or detection is None or target_bbox is None:
         return 72
+    decorated_limit = _decorated_title_font_limit(detection, tuple(target_bbox), translated_text)
     column_width = _source_column_width(detection, tuple(target_bbox))
     if column_width is None:
-        return 72
+        return decorated_limit or 72
     if _short_vertical_translation(translated_text):
         multiplier = 1.0
     elif _explicit_multicolumn_translation(translated_text):
         multiplier = 0.92
     else:
         multiplier = 1.18
-    return max(12, min(72, int(round(column_width * multiplier))))
+    width_limit = int(round(column_width * multiplier))
+    limits = [72, width_limit]
+    if decorated_limit is not None:
+        limits.append(decorated_limit)
+    return max(12, min(limits))
+
+
+def _decorated_title_font_limit(
+    detection: dict,
+    target_bbox: tuple[int, int, int, int],
+    translated_text: str,
+) -> int | None:
+    full_bbox = selected_text_bbox(detection)
+    body_bbox = selected_text_body_bbox(detection)
+    if body_bbox == full_bbox or target_bbox != body_bbox:
+        return None
+    compact = "".join(str(translated_text).split())
+    if len(compact) <= 0:
+        return None
+    per_char_height = _height(target_bbox) / len(compact)
+    return int(round(per_char_height * 0.82))
 
 
 def _short_vertical_translation(translated_text: str) -> bool:
@@ -238,6 +281,10 @@ def _inside(inner: tuple[int, int, int, int], outer: tuple[int, int, int, int]) 
 
 def _width(bbox: tuple[int, int, int, int]) -> int:
     return max(0, bbox[2] - bbox[0])
+
+
+def _height(bbox: tuple[int, int, int, int]) -> int:
+    return max(0, bbox[3] - bbox[1])
 
 
 def _expand_target_bboxes(
@@ -303,11 +350,13 @@ def _layout_payload(
     alignment: dict,
     target_bbox: list[int] | None = None,
     text_color: tuple[int, int, int, int] = (0, 0, 0, 255),
+    vertical_align: str = "center",
 ) -> dict:
     payload = asdict(layout)
     payload["preview_path"] = str(preview_path)
     payload["target_bbox"] = target_bbox
     payload["text_color"] = list(text_color)
+    payload["vertical_align"] = vertical_align
     payload["alignment"] = alignment
     payload["validation"] = {
         "status": "deterministic_only",
@@ -350,7 +399,8 @@ def _angle_override(angle: dict | None) -> float:
 def _selected_angle_degrees(orientation: str, angle: dict | None) -> float:
     if orientation != _orientation_override(angle) or _angle_confidence(angle) < 0.8:
         return 0.0
-    return _angle_override(angle)
+    value = _angle_override(angle)
+    return 0.0 if abs(value) < MIN_APPLIED_ANGLE_DEGREES else value
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:

@@ -18,7 +18,7 @@ def selected_text_bbox(detection: dict, area_ratio_limit: float = 0.35, score_ma
     if _is_tight_anchor(selected, search_region):
         cluster = _expand_cluster(cluster, _score_filtered(candidates, score_margin + 0.04), selected_polarity)
     if selected_polarity != "light_on_dark":
-        cluster = _expand_local_vertical_columns(cluster, candidates, selected, selected_polarity)
+        cluster = _expand_local_vertical_columns(cluster, candidates, selected, search_region, selected_polarity)
     if selected_polarity == "light_on_dark":
         cluster = _cluster_with_selected(cluster, selected)
     return _union_bbox([candidate["bbox"] for candidate in cluster or strong_candidates])
@@ -124,9 +124,10 @@ def _expand_local_vertical_columns(
     cluster: list[dict],
     candidates: list[dict],
     selected: tuple[int, int, int, int],
+    search_region: tuple[int, int, int, int],
     polarity: str | None,
 ) -> list[dict]:
-    local_candidates = _local_text_candidates(candidates, selected, cluster)
+    local_candidates = _local_text_candidates(candidates, selected, search_region, cluster)
     previous_len = -1
     while len(cluster) != previous_len:
         previous_len = len(cluster)
@@ -142,6 +143,7 @@ def _expand_local_vertical_columns(
 def _local_text_candidates(
     candidates: list[dict],
     selected: tuple[int, int, int, int],
+    search_region: tuple[int, int, int, int],
     cluster: list[dict],
 ) -> list[dict]:
     if not cluster:
@@ -153,11 +155,30 @@ def _local_text_candidates(
     return [
         candidate
         for candidate in candidates
-        if _inside(candidate["bbox"], selected)
+        if _inside(candidate["bbox"], search_region)
+        and _near_selected_column(candidate["bbox"], selected, cluster_bbox)
         and _area(candidate["bbox"]) <= max_area
         and _width(candidate["bbox"]) <= max_width
         and _height(candidate["bbox"]) <= max_height
     ]
+
+
+def _near_selected_column(
+    bbox: tuple[int, int, int, int],
+    selected: tuple[int, int, int, int],
+    cluster: tuple[int, int, int, int],
+) -> bool:
+    if _inside(bbox, selected):
+        return True
+    if (
+        _horizontal_overlap_ratio(bbox, selected) >= 0.45
+        and _vertical_relation(bbox, selected) <= max(360, int(round(_height(selected) * 1.35)))
+    ):
+        return True
+    return (
+        _horizontal_overlap_ratio(bbox, cluster) >= 0.45
+        and _vertical_relation(bbox, cluster) <= max(24, int(round(_height(cluster) * 0.08)))
+    )
 
 
 def _vertical_column_continuation(

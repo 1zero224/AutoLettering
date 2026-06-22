@@ -167,6 +167,47 @@ def test_run_phase3_filters_detections_by_record_id_before_sample_limit(tmp_path
     assert [row["record_id"] for row in rows] == ["page.png#2"]
 
 
+def test_run_phase3_crops_body_bbox_for_decorated_nonbubble_caption(tmp_path: Path):
+    font_dir = tmp_path / "fonts"
+    font_dir.mkdir()
+    _copy_test_font(font_dir)
+    project_dir = tmp_path / "sample_project"
+    project_dir.mkdir()
+    image_path = _write_decorated_caption_page(project_dir / "page.png")
+    labelplus_file = project_dir / "翻译_0.txt"
+    _write_sample_labelplus_file(labelplus_file)
+    detection_run = tmp_path / "detections"
+    detection_run.mkdir()
+    row = {
+        "record_id": "page.png#1",
+        "status": "ok",
+        "image_name": "page.png",
+        "image_path": str(image_path),
+        "translated_text": "标题文字",
+        "group_name": "框外",
+        "selected_text_box_xyxy": [10, 10, 68, 250],
+        "candidate_boxes": [
+            {"xyxy": [10, 10, 68, 250], "score": 0.95, "polarity": "dark_on_light"},
+        ],
+    }
+    (detection_run / "detections.jsonl").write_text(json.dumps(row, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    run_dir = run_phase3(
+        labelplus_file,
+        detection_run_dir=detection_run,
+        font_dir=font_dir,
+        output_root=tmp_path / "outputs",
+        run_id="phase3-decorated-caption",
+        sample_limit=1,
+        font_limit=1,
+    )
+
+    rows = [json.loads(line) for line in (run_dir / "font-comparisons.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert rows[0]["source_text_bbox"] == [10, 80, 68, 250]
+    with Image.open(rows[0]["source_crop_path"]) as crop:
+        assert crop.size == (58, 170)
+
+
 def _write_phase3_fixture(tmp_path: Path) -> tuple[Path, Path]:
     project_dir = tmp_path / "sample_project"
     project_dir.mkdir()
@@ -185,6 +226,17 @@ def _write_sample_page(project_dir: Path) -> Path:
     ImageDraw.Draw(image).rectangle((88, 70, 118, 154), fill="black")
     image.save(image_path)
     return image_path
+
+
+def _write_decorated_caption_page(path: Path) -> Path:
+    image = Image.new("RGB", (80, 280), "white")
+    draw = ImageDraw.Draw(image)
+    draw.polygon([(39, 16), (64, 41), (39, 66), (14, 41)], fill="black")
+    for y in (80, 126, 172, 218):
+        draw.rectangle((24, y, 54, y + 6), fill="black")
+        draw.rectangle((36, y, 42, y + 30), fill="black")
+    image.save(path)
+    return path
 
 
 def _write_sample_labelplus_file(path: Path) -> None:

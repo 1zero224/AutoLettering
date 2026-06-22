@@ -12,7 +12,8 @@ from .models.gpt_image import (
     gpt_image_request_summary,
     normalize_gpt_output_to_crop,
 )
-from .text_bbox import selected_text_bbox, selected_text_polarity
+from .text_bbox import selected_text_polarity
+from .text_body_bbox import selected_text_body_bbox
 
 
 def run_phase6_nonbubble_cleanup(
@@ -57,7 +58,7 @@ def _cleanup_one(
     client: GptImageEditClient | None,
     inpaint_method: str,
 ) -> dict:
-    bbox = selected_text_bbox(detection)
+    bbox = selected_text_body_bbox(detection)
     result = inpaint_nonbubble_text(
         image_path=detection["image_path"],
         bbox=bbox,

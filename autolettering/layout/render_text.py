@@ -14,17 +14,20 @@ def render_layout_preview(
     canvas_size: tuple[int, int] | None = None,
     text_color: tuple[int, int, int, int] = (0, 0, 0, 255),
     vertical_column_order: str = "rtl",
+    vertical_align: str = "center",
 ) -> Path:
     if vertical_column_order not in {"rtl", "ltr"}:
         raise ValueError("vertical_column_order must be 'rtl' or 'ltr'")
+    if vertical_align not in {"center", "top"}:
+        raise ValueError("vertical_align must be 'center' or 'top'")
 
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     size = canvas_size or (layout.target_width, layout.target_height)
-    image = _render_text_layer(layout, font_path, size, text_color, vertical_column_order)
+    image = _render_text_layer(layout, font_path, size, text_color, vertical_column_order, vertical_align)
     if abs(layout.angle_degrees) >= 0.1:
         image = _rotate_within_canvas(image, layout.angle_degrees, size)
-    image = _recenter_visible_ink(image)
+    image = _recenter_visible_ink(image, recenter_y=vertical_align == "center")
     image.save(output)
     return output
 
@@ -63,7 +66,7 @@ def _alignment_metrics(size: tuple[int, int], bbox: tuple[int, int, int, int] | 
     }
 
 
-def _recenter_visible_ink(image: Image.Image) -> Image.Image:
+def _recenter_visible_ink(image: Image.Image, recenter_y: bool = True) -> Image.Image:
     bbox = image.getchannel("A").getbbox()
     if bbox is None:
         return image
@@ -74,7 +77,8 @@ def _recenter_visible_ink(image: Image.Image) -> Image.Image:
     if offset_x is None or offset_y is None:
         return image
 
-    return _translate_layer(image, -round(offset_x), -round(offset_y))
+    dy = -round(offset_y) if recenter_y else 0
+    return _translate_layer(image, -round(offset_x), dy)
 
 
 def _translate_layer(image: Image.Image, dx: int, dy: int) -> Image.Image:
@@ -89,12 +93,13 @@ def _render_text_layer(
     size: tuple[int, int],
     text_color: tuple[int, int, int, int],
     vertical_column_order: str,
+    vertical_align: str,
 ) -> Image.Image:
     image = Image.new("RGBA", size, (255, 255, 255, 0))
     font = ImageFont.truetype(str(font_path), layout.font_size)
     draw = ImageDraw.Draw(image)
     if layout.orientation == "vertical":
-        _draw_vertical(draw, layout, font, size, text_color, vertical_column_order)
+        _draw_vertical(draw, layout, font, size, text_color, vertical_column_order, vertical_align)
         return image
 
     _draw_horizontal(draw, layout, font, size, text_color)
@@ -130,6 +135,7 @@ def _draw_vertical(
     size: tuple[int, int],
     text_color: tuple[int, int, int, int],
     vertical_column_order: str,
+    vertical_align: str,
 ) -> None:
     columns = [[char for char in column if char.strip()] for column in layout.line_breaks.splitlines()]
     columns = [column for column in columns if column]
@@ -139,14 +145,14 @@ def _draw_vertical(
     if vertical_column_order == "ltr":
         x = left
         for column, metrics in zip(columns, column_metrics):
-            _draw_vertical_column(draw, column, metrics, font, layout.line_spacing, x, size[1], text_color)
+            _draw_vertical_column(draw, column, metrics, font, layout.line_spacing, x, size[1], text_color, vertical_align)
             x += metrics["width"] + layout.line_spacing
         return
 
     x = left + total_width
     for column, metrics in zip(columns, column_metrics):
         x -= metrics["width"]
-        _draw_vertical_column(draw, column, metrics, font, layout.line_spacing, x, size[1], text_color)
+        _draw_vertical_column(draw, column, metrics, font, layout.line_spacing, x, size[1], text_color, vertical_align)
         x -= layout.line_spacing
 
 
@@ -177,8 +183,9 @@ def _draw_vertical_column(
     x_left: int,
     canvas_height: int,
     text_color: tuple[int, int, int, int],
+    vertical_align: str,
 ) -> None:
-    y = max(0, (canvas_height - metrics["height"]) // 2)
+    y = 0 if vertical_align == "top" else max(0, (canvas_height - metrics["height"]) // 2)
     center_x = x_left + metrics["width"] // 2
     for char, box, width, height in zip(chars, metrics["boxes"], metrics["widths"], metrics["heights"]):
         x = max(0, center_x - width // 2 - box[0])

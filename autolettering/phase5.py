@@ -10,6 +10,7 @@ from .layout.orientation import (
     orientation_estimate_to_dict,
 )
 from .record_selection import normalize_record_ids, row_matches_record_ids
+from .text_body_bbox import selected_text_body_bbox
 
 
 def run_phase5_orientation(
@@ -63,7 +64,7 @@ def _orientation_row(run_dir: Path, detection: dict) -> dict:
 
 
 def _angle_bbox(detection: dict) -> tuple[int, int, int, int]:
-    selected = tuple(detection["selected_text_box_xyxy"])
+    selected = selected_text_body_bbox(detection)
     selected_area = _area(selected)
     text_candidates = [_candidate_xyxy(item) for item in detection.get("candidate_boxes") or []]
     text_candidates = [

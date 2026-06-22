@@ -1,4 +1,9 @@
+from pathlib import Path
+
+from PIL import Image, ImageDraw
+
 from autolettering.text_bbox import selected_text_bbox
+from autolettering.text_body_bbox import selected_text_body_bbox
 
 
 def test_selected_text_bbox_unions_small_text_candidates_inside_large_detection():
@@ -192,3 +197,68 @@ def test_selected_text_bbox_keeps_adjacent_column_when_selected_column_is_tight(
     }
 
     assert selected_text_bbox(detection) == (157, 1158, 230, 1347)
+
+
+def test_selected_text_bbox_extends_down_same_vertical_caption_for_gbc06_01_16():
+    detection = {
+        "selected_text_box_xyxy": [1349, 121, 1407, 378],
+        "search_region_xyxy": [1203, 0, 1440, 765],
+        "candidate_boxes": [
+            {"xyxy": [1349, 121, 1407, 378], "area": 10352, "score": 0.9407, "polarity": "dark_on_light"},
+            {"xyxy": [1353, 382, 1403, 426], "area": 1775, "score": 0.8089, "polarity": "dark_on_light"},
+            {"xyxy": [1351, 427, 1406, 532], "area": 5024, "score": 0.7396, "polarity": "dark_on_light"},
+            {"xyxy": [1353, 534, 1403, 578], "area": 1769, "score": 0.6686, "polarity": "dark_on_light"},
+            {"xyxy": [1350, 578, 1406, 684], "area": 5200, "score": 0.5988, "polarity": "dark_on_light"},
+            {"xyxy": [1203, 711, 1324, 765], "area": 4276, "score": 0.479, "polarity": "dark_on_light"},
+        ],
+    }
+
+    assert selected_text_bbox(detection) == (1349, 121, 1407, 684)
+
+
+def test_selected_text_body_bbox_excludes_top_diamond_decoration(tmp_path: Path):
+    image_path = _write_decorated_vertical_caption(tmp_path / "decorated.png")
+    detection = {
+        "image_path": str(image_path),
+        "group_name": "框外",
+        "selected_text_box_xyxy": [10, 10, 68, 250],
+        "search_region_xyxy": [0, 0, 200, 600],
+        "candidate_boxes": [
+            {"xyxy": [10, 10, 68, 250], "score": 0.95, "polarity": "dark_on_light"},
+            {"xyxy": [15, 260, 63, 330], "score": 0.75, "polarity": "dark_on_light"},
+        ],
+    }
+
+    assert selected_text_bbox(detection) == (10, 10, 68, 330)
+    assert selected_text_body_bbox(detection) == (10, 80, 68, 330)
+
+
+def test_selected_text_body_bbox_keeps_plain_vertical_text_without_diamond(tmp_path: Path):
+    image_path = tmp_path / "plain.png"
+    image = Image.new("RGB", (80, 240), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((24, 20, 54, 48), outline="black", width=4)
+    draw.line((39, 20, 39, 160), fill="black", width=5)
+    image.save(image_path)
+    detection = {
+        "image_path": str(image_path),
+        "group_name": "框外",
+        "selected_text_box_xyxy": [10, 10, 68, 190],
+        "candidate_boxes": [
+            {"xyxy": [10, 10, 68, 190], "score": 0.95, "polarity": "dark_on_light"},
+        ],
+    }
+
+    assert selected_text_body_bbox(detection) == selected_text_bbox(detection)
+
+
+def _write_decorated_vertical_caption(path: Path) -> Path:
+    image = Image.new("RGB", (80, 360), "white")
+    draw = ImageDraw.Draw(image)
+    draw.polygon([(39, 16), (64, 41), (39, 66), (14, 41)], fill="black")
+    for y in (80, 126, 172, 218, 264, 302):
+        draw.rectangle((24, y, 54, y + 6), fill="black")
+        draw.rectangle((36, y, 42, y + 30), fill="black")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(path)
+    return path

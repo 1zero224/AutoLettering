@@ -11,6 +11,7 @@ from .assets.font_render import render_text_preview
 from .assets.fonts import FontRecord, font_record_to_dict, scan_font_directory, select_font_candidates
 from .labelplus.parser import parse_labelplus_project
 from .record_selection import normalize_record_ids, row_matches_record_ids
+from .text_body_bbox import selected_text_body_bbox
 
 
 def run_phase3(
@@ -85,7 +86,8 @@ def _build_comparison(run_dir: Path, detection: dict, fonts: list[FontRecord]) -
     record_id = str(detection["record_id"])
     safe_record_id = _safe_name(record_id)
     crop_path = run_dir / "crops" / "source_text" / f"{safe_record_id}.png"
-    _crop_source_text(detection["image_path"], detection["selected_text_box_xyxy"], crop_path)
+    source_bbox = selected_text_body_bbox(detection)
+    _crop_source_text(detection["image_path"], source_bbox, crop_path)
     candidate_rows = _render_candidates(run_dir, safe_record_id, str(detection.get("translated_text", "")), fonts)
     comparison_path = run_dir / "debug" / "font_comparison" / f"{safe_record_id}.png"
     build_font_comparison_grid(
@@ -93,10 +95,10 @@ def _build_comparison(run_dir: Path, detection: dict, fonts: list[FontRecord]) -
         [(row["font_id"], row["preview_path"]) for row in candidate_rows],
         comparison_path,
     )
-    return _comparison_row(detection, crop_path, comparison_path, candidate_rows)
+    return _comparison_row(detection, crop_path, comparison_path, candidate_rows, source_bbox)
 
 
-def _crop_source_text(image_path: str, bbox: list[int], output_path: Path) -> None:
+def _crop_source_text(image_path: str, bbox: tuple[int, int, int, int], output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with Image.open(image_path) as image:
         image.convert("RGB").crop(tuple(bbox)).save(output_path)
@@ -118,6 +120,7 @@ def _comparison_row(
     crop_path: Path,
     comparison_path: Path,
     candidates: list[dict],
+    source_bbox: tuple[int, int, int, int],
 ) -> dict:
     return {
         "record_id": detection["record_id"],
@@ -125,6 +128,7 @@ def _comparison_row(
         "translated_text": detection.get("translated_text", ""),
         "group_name": detection.get("group_name"),
         "status": "candidates_generated" if candidates else "no_candidate_fonts",
+        "source_text_bbox": list(source_bbox),
         "source_crop_path": str(crop_path),
         "comparison_image_path": str(comparison_path),
         "candidate_fonts": candidates,

@@ -15,6 +15,7 @@ def _label(
     x_px: int = 100,
     y_px: int = 100,
     record_index: int = 1,
+    group_name: str = "框内",
 ) -> ManifestLabel:
     return ManifestLabel(
         id=f"{image_name}#{record_index}",
@@ -25,7 +26,7 @@ def _label(
         x_px=x_px,
         y_px=y_px,
         group_id=1,
-        group_name="框内",
+        group_name=group_name,
         translated_text="测试",
     )
 
@@ -109,6 +110,28 @@ def test_detect_text_region_reports_no_dark_pixels_on_blank_image(tmp_path: Path
     assert result.selected_text_box_xyxy is None
     assert result.candidate_boxes == []
     assert result.failure_reason == "no_dark_pixels"
+
+
+def test_detect_text_region_expands_vertical_search_for_nonbubble_edge_caption(tmp_path: Path):
+    image_path = tmp_path / "edge-caption.png"
+    image = Image.new("RGB", (300, 900), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((245, 70, 270, 220), fill="black")
+    draw.rectangle((246, 360, 269, 500), fill="black")
+    image.save(image_path)
+
+    result = detect_text_region(
+        image_path=image_path,
+        label=_label(image_name="edge-caption.png", x_px=286, y_px=120, group_name="框外"),
+        image_width=300,
+        image_height=900,
+        radius_x=70,
+        radius_y=80,
+    )
+
+    assert result.status == "ok"
+    assert result.search_region_xyxy[3] >= 680
+    assert any(candidate.xyxy[1] >= 340 for candidate in result.candidate_boxes)
 
 
 def test_run_phase2_writes_detections_and_debug_overlays(tmp_path: Path):

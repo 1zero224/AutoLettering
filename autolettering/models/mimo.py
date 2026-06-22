@@ -65,8 +65,14 @@ class MimoVisionClient:
         return payload
 
     def choose_font(self, comparison_image_path: str | Path, prompt: str) -> dict:
-        system_prompt = "You select manga lettering fonts from labeled comparison images."
-        return self.analyze_image(comparison_image_path, prompt, kind="font_selection", system_prompt=system_prompt)
+        system_prompt = "You select manga lettering fonts from labeled comparison images. Return only compact JSON."
+        return self.analyze_image(
+            comparison_image_path,
+            prompt,
+            kind="font_selection",
+            system_prompt=system_prompt,
+            max_completion_tokens=max(1024, self.config.max_completion_tokens),
+        )
 
     def analyze_image(
         self,

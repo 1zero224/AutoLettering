@@ -3,7 +3,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from PIL import Image, ImageChops
+from PIL import Image, ImageChops, ImageDraw
 
 from autolettering.layout.candidates import generate_line_break_candidates
 from autolettering.layout.measure import measure_text_layout, search_fitting_layout
@@ -413,6 +413,33 @@ def test_run_phase4_ignores_low_confidence_rotation_angle(tmp_path: Path):
     assert layout["angle_degrees"] == 0.0
 
 
+def test_run_phase4_ignores_high_confidence_micro_rotation_angle(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+    source_crop_path = tmp_path / "source-crop.png"
+    Image.new("RGB", (375, 342), "white").save(source_crop_path)
+    phase2_run = tmp_path / "phase2-detection"
+    phase3_run = tmp_path / "phase3-selection"
+    phase5_run = tmp_path / "phase5-angle"
+    for path in [phase2_run, phase3_run, phase5_run]:
+        path.mkdir()
+    _write_font_selection(phase3_run / "font-selections.jsonl", font_path, source_crop_path)
+    _write_detection_with_tight_candidates(phase2_run / "detections.jsonl")
+    _write_micro_angle_result(phase5_run / "angle-results.jsonl")
+
+    run_dir = run_phase4(
+        selection_run_dir=phase3_run,
+        angle_run_dir=phase5_run,
+        detection_run_dir=phase2_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase4-micro-angle",
+        sample_limit=1,
+    )
+
+    layout = _read_jsonl(run_dir / "layout-results.jsonl")[0]["layout"]
+    assert layout["orientation"] == "vertical"
+    assert layout["angle_degrees"] == 0.0
+
+
 def test_run_phase4_prefers_high_confidence_angle_orientation_for_wide_multicolumn_text(tmp_path: Path):
     font_path = _copy_font(tmp_path)
     source_crop_path = tmp_path / "source-crop.png"
@@ -438,7 +465,7 @@ def test_run_phase4_prefers_high_confidence_angle_orientation_for_wide_multicolu
     layout = _read_jsonl(run_dir / "layout-results.jsonl")[0]["layout"]
     assert layout["target_bbox"] == [50, 40, 250, 170]
     assert layout["orientation"] == "vertical"
-    assert layout["angle_degrees"] == 1.5
+    assert layout["angle_degrees"] == 5.0
 
 
 def test_run_phase4_expands_tight_target_inside_selected_box_when_layout_overflows(tmp_path: Path):
@@ -476,6 +503,38 @@ def test_run_phase4_expands_tight_target_inside_selected_box_when_layout_overflo
     assert layout["target_bbox"][0] >= 20
     assert layout["target_bbox"][2] <= 230
     assert layout["orientation"] == "vertical"
+
+
+def test_run_phase4_uses_body_bbox_below_diamond_for_decorated_caption(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+    source_crop_path = tmp_path / "source-crop.png"
+    Image.new("RGB", (58, 170), "white").save(source_crop_path)
+    phase3_run = tmp_path / "phase3"
+    phase3_run.mkdir()
+    _write_font_selection(
+        phase3_run / "font-selections.jsonl",
+        font_path,
+        source_crop_path,
+        translated_text="来自桃香的唐突的提案",
+    )
+    phase2_run = tmp_path / "phase2"
+    phase2_run.mkdir()
+    _write_decorated_caption_detection(phase2_run / "detections.jsonl", tmp_path / "page.png")
+
+    run_dir = run_phase4(
+        selection_run_dir=phase3_run,
+        detection_run_dir=phase2_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase4-decorated-caption",
+        sample_limit=1,
+    )
+
+    layout = _read_jsonl(run_dir / "layout-results.jsonl")[0]["layout"]
+    assert layout["target_bbox"] == [10, 80, 68, 250]
+    assert layout["orientation"] == "vertical"
+    assert layout["vertical_align"] == "top"
+    assert layout["alignment"]["ink_bbox"][1] <= 2
+    assert layout["alignment"]["ink_height"] < layout["target_height"]
 
 
 def test_run_phase4_caps_short_vertical_text_to_source_column_width(tmp_path: Path):
@@ -699,8 +758,21 @@ def _write_high_confidence_vertical_angle_result(path: Path) -> None:
         "status": "angle_estimated",
         "orientation": {
             "detected_orientation": "vertical",
-            "selected_angle_degrees": 1.5,
+            "selected_angle_degrees": 5.0,
             "confidence": 0.86,
+        },
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _write_micro_angle_result(path: Path) -> None:
+    payload = {
+        "record_id": "page.png#1",
+        "status": "angle_estimated",
+        "orientation": {
+            "detected_orientation": "vertical",
+            "selected_angle_degrees": 2.4,
+            "confidence": 0.88,
         },
     }
     path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -728,6 +800,28 @@ def _write_detection_with_tight_candidates(path: Path) -> None:
             {"xyxy": [674, 0, 1049, 342], "area": 87035},
             {"xyxy": [840, 145, 874, 300], "area": 3858},
             {"xyxy": [799, 145, 837, 271], "area": 3481},
+        ],
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _write_decorated_caption_detection(path: Path, image_path: Path) -> None:
+    image = Image.new("RGB", (80, 280), "white")
+    draw = ImageDraw.Draw(image)
+    draw.polygon([(39, 16), (64, 41), (39, 66), (14, 41)], fill="black")
+    for y in (80, 126, 172, 218):
+        draw.rectangle((24, y, 54, y + 6), fill="black")
+        draw.rectangle((36, y, 42, y + 30), fill="black")
+    image.save(image_path)
+    payload = {
+        "record_id": "page.png#1",
+        "status": "ok",
+        "image_name": "page.png",
+        "image_path": str(image_path),
+        "group_name": "框外",
+        "selected_text_box_xyxy": [10, 10, 68, 250],
+        "candidate_boxes": [
+            {"xyxy": [10, 10, 68, 250], "score": 0.95, "polarity": "dark_on_light"},
         ],
     }
     path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")

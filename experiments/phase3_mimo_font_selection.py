@@ -56,6 +56,8 @@ def _mimo_config_from_env() -> MimoVisionConfig:
         base_url=os.environ["MIMO_BASE_URL"],
         api_key=os.environ["MIMO_API_KEY"],
         model=os.environ["MIMO_VISION_MODEL"],
+        max_completion_tokens=1024,
+        thinking_type="disabled",
     )
 
 
