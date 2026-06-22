@@ -54,6 +54,7 @@ def build_pipeline_coverage(
     base_stage, base_ids = _base_records(detection_run_dir, detection_all, phase1_ids)
     quality = build_quality_summary(phase7_preview_evaluation_run_dir, phase8_export_audit_run_dir)
     records = _record_coverage(base_ids, meta, stages, quality_issues_by_record(quality))
+    phase1_pending_detection = _phase1_pending_detection_records(phase1_ids, detection_all, meta, next_limit)
     return {
         "summary": _summary(base_stage, base_ids, records),
         "stages": _stage_summary(stages, base_ids),
@@ -61,6 +62,8 @@ def build_pipeline_coverage(
         "group_summary": _group_summary(base_ids, records),
         "records": records,
         "next_records": _next_records(base_ids, records, next_limit),
+        "phase1_pending_detection_count": max(0, len(phase1_ids) - len(set(detection_all))),
+        "phase1_pending_detection_records": phase1_pending_detection,
     }
 
 
@@ -209,6 +212,25 @@ def _next_records(base_ids: list[str], records: dict[str, dict], limit: int) -> 
                 "first_quality_issue": row["quality_issues"][0],
             })
     return items[: max(0, limit)]
+
+
+def _phase1_pending_detection_records(
+    phase1_ids: list[str],
+    detection_all: list[str],
+    meta: dict[str, dict],
+    limit: int,
+) -> list[dict]:
+    detected = set(detection_all)
+    records = [
+        {
+            "record_id": record_id,
+            "group_name": meta.get(record_id, {}).get("group_name"),
+            "image_name": meta.get(record_id, {}).get("image_name"),
+        }
+        for record_id in phase1_ids
+        if record_id not in detected
+    ]
+    return records[: max(0, limit)]
 
 
 def _cleanup_ids(run_dirs: Iterable[str | Path] | None) -> list[str]:

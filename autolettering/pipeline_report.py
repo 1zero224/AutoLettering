@@ -23,6 +23,9 @@ def pipeline_markdown_lines(report: dict, stage_order: list[str]) -> list[str]:
     lines.extend(quality_markdown_lines(report.get("quality", {})))
     lines.extend(["", "## Next Records", ""])
     lines.extend(_next_record_lines(report["next_records"]))
+    lines.extend(["", "## Phase 1 Pending Detection", ""])
+    lines.append(f"- Pending count: {report.get('phase1_pending_detection_count', 0)}")
+    lines.extend(_phase1_pending_detection_lines(report.get("phase1_pending_detection_records", [])))
     return lines
 
 
@@ -35,3 +38,12 @@ def _next_record_lines(records: list[dict]) -> list[str]:
 def _next_record_line(row: dict) -> str:
     label = row.get("first_missing_stage") or row.get("first_quality_issue")
     return f"- `{row['record_id']}` ({row.get('group_name') or 'unknown'}): `{label}`"
+
+
+def _phase1_pending_detection_lines(records: list[dict]) -> list[str]:
+    if not records:
+        return ["- None"]
+    return [
+        f"- `{row['record_id']}` ({row.get('group_name') or 'unknown'}, {row.get('image_name') or 'unknown image'})"
+        for row in records
+    ]

@@ -87,6 +87,12 @@ Current v13 keeps the v12 structural scope and adds Phase 7 MIMO preview evaluat
 --run-id phase0-8-gbc06-pipeline-coverage-v13 --next-limit 12
 ```
 
+Current v14 keeps the v13 structural and quality scope, but the coverage tool now also reports Phase 1 records that have not yet entered Phase 2 detection. This fixes the previous blind spot where `next_records=[]` could be misread as no remaining project work, even though the Phase 1 manifest still contains many parsed labels outside the Phase 2 base set.
+
+```powershell
+--run-id phase0-8-gbc06-pipeline-coverage-v14-phase1-pending --next-limit 12
+```
+
 ## Generated Artifacts
 
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage/pipeline-coverage.json`
@@ -115,6 +121,8 @@ Current v13 keeps the v12 structural scope and adds Phase 7 MIMO preview evaluat
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v12/reports/pipeline-coverage-report.md`
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v13/pipeline-coverage.json`
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v13/reports/pipeline-coverage-report.md`
+- `outputs/runs/phase0-8-gbc06-pipeline-coverage-v14-phase1-pending/pipeline-coverage.json`
+- `outputs/runs/phase0-8-gbc06-pipeline-coverage-v14-phase1-pending/reports/pipeline-coverage-report.md`
 
 `outputs/` remains ignored by Git. The source-backed summary below records the key numbers so the experiment is traceable in the repository.
 
@@ -198,7 +206,30 @@ The v13 report has no pending records in the current base set:
 next_records=[]
 ```
 
-The current base set is still only the 30 records that have Phase 2 detection output. The Phase 1 manifest has 180 labels on available images, so 150 available-image labels are not yet in the Phase 2-8 coverage base. The next expansion should intentionally leave the first two pages and cover mixed layout types:
+The current base set is still only the 30 records that have Phase 2 detection output. The v14 report makes the remaining parsed-but-undetected Phase 1 scope explicit:
+
+```text
+phase1_pending_detection_count=150
+```
+
+The first `next-limit=12` Phase 1 records missing detection in v14 are:
+
+```text
+GBC06_02.png#14  框外  GBC06_02.png
+GBC06_03.png#1   框内  GBC06_03.png
+GBC06_03.png#2   框内  GBC06_03.png
+GBC06_03.png#3   框内  GBC06_03.png
+GBC06_03.png#4   框内  GBC06_03.png
+GBC06_03.png#5   框外  GBC06_03.png
+GBC06_03.png#6   框内  GBC06_03.png
+GBC06_03.png#7   框内  GBC06_03.png
+GBC06_03.png#8   框内  GBC06_03.png
+GBC06_03.png#9   框内  GBC06_03.png
+GBC06_03.png#10  框内  GBC06_03.png
+GBC06_03.png#11  框内  GBC06_03.png
+```
+
+For quality and diversity, the next expansion should intentionally go beyond the first sequential records and cover mixed layout types:
 
 ```text
 GBC06_18.png#3   框内  -快看 / 接下来登场的乐队 / 竟然！        first obvious diamond/announcer-style block candidate

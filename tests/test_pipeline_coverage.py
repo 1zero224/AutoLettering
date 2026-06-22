@@ -103,6 +103,27 @@ def test_build_pipeline_coverage_merges_multiple_runs_per_stage(tmp_path: Path):
     ]
 
 
+def test_build_pipeline_coverage_reports_phase1_records_missing_detection(tmp_path: Path):
+    phase1 = tmp_path / "phase1"
+    phase2 = tmp_path / "phase2"
+    _write_phase1_manifest(phase1 / "manifest.json")
+    _write_jsonl(phase2 / "detections.jsonl", [_row("r1", "ok")])
+
+    report = build_pipeline_coverage(
+        phase1_run_dir=phase1,
+        detection_run_dir=phase2,
+        next_limit=2,
+    )
+
+    assert report["summary"]["base_stage"] == "phase2_detection"
+    assert report["summary"]["base_record_count"] == 1
+    assert report["phase1_pending_detection_count"] == 2
+    assert report["phase1_pending_detection_records"] == [
+        {"record_id": "r2", "group_name": "框外", "image_name": "page1.png"},
+        {"record_id": "r3", "group_name": "框内", "image_name": "page2.png"},
+    ]
+
+
 def test_write_pipeline_coverage_report_writes_json_and_markdown(tmp_path: Path):
     phase1 = tmp_path / "phase1"
     phase2 = tmp_path / "phase2"
@@ -120,6 +141,8 @@ def test_write_pipeline_coverage_report_writes_json_and_markdown(tmp_path: Path)
     markdown = (run_dir / "reports" / "pipeline-coverage-report.md").read_text(encoding="utf-8")
     assert payload["summary"]["base_record_count"] == 1
     assert "phase2_detection" in markdown
+    assert "## Phase 1 Pending Detection" in markdown
+    assert "`r2`" in markdown
 
 
 def _row(record_id: str, status: str) -> dict:
@@ -138,8 +161,8 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
 def _write_phase1_manifest(path: Path) -> None:
     payload = {
         "images": [
-            {"labels": [{"id": "r1", "group_name": "框内"}, {"id": "r2", "group_name": "框外"}]},
-            {"labels": [{"id": "r3", "group_name": "框内"}]},
+            {"image_name": "page1.png", "labels": [{"id": "r1", "group_name": "框内"}, {"id": "r2", "group_name": "框外"}]},
+            {"image_name": "page2.png", "labels": [{"id": "r3", "group_name": "框内"}]},
         ]
     }
     path.parent.mkdir(parents=True, exist_ok=True)
