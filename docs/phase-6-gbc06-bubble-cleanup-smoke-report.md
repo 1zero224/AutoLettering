@@ -167,6 +167,64 @@ GBC06_02.png#3  score=10 usable=true
 
 An attempted vertical-column top-alignment optimization was tested in `phase7-8-gbc06-02-batch-1-3-preview-v4`, but MIMO score dropped to `5`, so that rendering change was reverted and kept only as a negative experiment artifact.
 
+## Multi-column Cleanup Crop Update
+
+The `GBC06_02.png#4-#6` batch exposed another cleanup-range mismatch:
+
+- `GBC06_02.png#5` Phase 2 selected bbox was only `[245, 516, 280, 636]`, covering the rightmost source text column.
+- Phase 4 correctly expanded the layout/text target to `[167, 511, 280, 732]`, covering the full multi-column source text area.
+- Phase 6 still cleaned only the selected bbox, so the final text overlay occupied a region that had not been fully cleaned.
+
+Phase 6 now cleans the union of:
+
+```text
+detection.selected_text_box_xyxy
+selected_text_bbox(detection)
+```
+
+This keeps the large crop/context and mask-aware composition behavior from the previous update, while ensuring the actual cleaned crop is at least as large as the derived text region used by layout and preview.
+
+Baseline failed run:
+
+```text
+outputs/runs/phase7-8-gbc06-02-batch-4-6-preview-v1
+```
+
+MIMO result:
+
+```json
+{
+  "score": 2,
+  "usable": false
+}
+```
+
+Best follow-up run:
+
+```text
+outputs/runs/phase7-8-gbc06-02-batch-4-6-preview-v2
+```
+
+MIMO result:
+
+```json
+{
+  "score": 8,
+  "usable": true,
+  "original_text_removed": true,
+  "art_preserved": true,
+  "lettering_readable": true
+}
+```
+
+Per-record MIMO scores:
+
+```text
+GBC06_02.png#4  score=9 usable=true
+GBC06_02.png#5  score=8 usable=true
+GBC06_02.png#6  score=9 usable=true
+```
+
 ## MIMO Evaluation
 
 MIMO vision model: `mimo-v2.5`
