@@ -122,7 +122,7 @@ def _search_layout(
 ):
     orientation = _selected_orientation(target_size, angle)
     angle_degrees = _selected_angle_degrees(orientation, angle)
-    max_font_size = _max_font_size(orientation, detection, target_bbox)
+    max_font_size = _max_font_size(orientation, detection, target_bbox, row.get("translated_text", ""))
     return search_fitting_layout(
         row.get("translated_text", ""),
         font_path,
@@ -185,13 +185,24 @@ def _bbox_size(bbox: list[int]) -> tuple[int, int]:
     return x2 - x1, y2 - y1
 
 
-def _max_font_size(orientation: str, detection: dict | None, target_bbox: list[int] | None) -> int:
+def _max_font_size(
+    orientation: str,
+    detection: dict | None,
+    target_bbox: list[int] | None,
+    translated_text: str = "",
+) -> int:
     if orientation != "vertical" or detection is None or target_bbox is None:
         return 72
     column_width = _source_column_width(detection, tuple(target_bbox))
     if column_width is None:
         return 72
-    return max(12, min(72, int(round(column_width * 1.18))))
+    multiplier = 1.0 if _short_vertical_translation(translated_text) else 1.18
+    return max(12, min(72, int(round(column_width * multiplier))))
+
+
+def _short_vertical_translation(translated_text: str) -> bool:
+    text = "".join(str(translated_text).split())
+    return 0 < len(text) <= 4
 
 
 def _source_column_width(detection: dict, target_bbox: tuple[int, int, int, int]) -> int | None:

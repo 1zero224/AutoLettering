@@ -69,6 +69,22 @@ Current limitations:
 
 The current real smoke record still selects `horizontal` because its source crop is not tall and narrow enough for the deterministic vertical rule. The next iteration should add vision-model validation and richer vertical punctuation/multi-column behavior.
 
+## Follow-up: Short Vertical Translation Cap
+
+The `GBC06_02.png#7-#9` expansion exposed a deterministic search weakness on short vertical translations. For `GBC06_02.png#8`, the translated text is only `循环器`, so the previous search accepted a larger font size by filling the target height instead of preserving the source glyph column width. The v1 integrated preview was still marked usable by MIMO, but the per-record assessment called the text significantly oversized and outside the original text area.
+
+The follow-up fix caps short vertical translations using the detected source column width with a conservative multiplier. Longer vertical translations keep the existing wider multiplier so multi-column text can still use the available region.
+
+Evidence:
+
+```text
+v1 layout for GBC06_02.png#8: font_size=43 measured_height=127
+v2 layout for GBC06_02.png#8: font_size=38 measured_height=114
+v2 integrated MIMO score: 9
+v2 per-record scores: #7=9, #8=9, #9=9
+best contact sheet: outputs/runs/phase7-8-gbc06-02-batch-7-9-preview-v2/runs/phase7-preview/debug/evaluation_contact_sheets/GBC06-02-png.png
+```
+
 ## Verification
 
 Fresh verification before this report was written:
