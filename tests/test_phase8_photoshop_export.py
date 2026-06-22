@@ -22,6 +22,9 @@ def test_run_phase8_photoshop_export_writes_manifest_and_jsx(tmp_path: Path):
     assert layer["font"]["photoshop_font_name"] == "TestFontPS"
     assert layer["font"]["font_name_candidates"] == ["TestFontPS", "TestFont"]
     assert layer["layout"]["angle_degrees"] == -10.5
+    assert layer["layout"]["vertical_align"] == "top"
+    assert layer["photoshop"]["vertical_top_anchor_y_px"] == 40
+    assert layer["photoshop"]["text_layer_name_suffix"] == " vertical_align=top"
     assert layer["layout"]["text_color"] == [255, 255, 255, 255]
     assert layer["cleanup"]["method"] == "bubble_fill"
     assert layer["cleanup"]["effective_method"] == "bubble_fill"
@@ -35,6 +38,7 @@ def test_run_phase8_photoshop_export_writes_manifest_and_jsx(tmp_path: Path):
     assert "paragraph text layer" in report
     assert "layout.line_spacing" in report
     assert "layout.text_color" in report
+    assert "layout.vertical_align" in report
     assert "font.photoshop_font_name" in report
     assert "JSON font mapping file" in report
     checklist = (run_dir / "reports" / "photoshop-validation-checklist.md").read_text(encoding="utf-8")
@@ -43,6 +47,7 @@ def test_run_phase8_photoshop_export_writes_manifest_and_jsx(tmp_path: Path):
     assert "- Expected editable text layers: 1" in checklist
     assert "- Expected cleanup patch layers: 1" in checklist
     assert "Font mapping file: none" in checklist
+    assert "vertical_align=top" in checklist
 
 
 def test_run_phase8_photoshop_export_preserves_replacement_cleanup(tmp_path: Path):
@@ -205,6 +210,9 @@ def _assert_rich_jsx_importer(jsx: str) -> None:
         "item.width = UnitValue(layerData.text_bbox.width, 'px')",
         "item.height = UnitValue(layerData.text_bbox.height, 'px')",
         "layerData.text_position.x_px",
+        "layerData.photoshop.vertical_top_anchor_y_px",
+        "function applyVerticalTopAnchor",
+        "moveLayerTop(layer, layerData.photoshop.vertical_top_anchor_y_px)",
         "function setTextSpacing",
         "function setTextColor",
         "var color = new SolidColor()",
@@ -214,6 +222,7 @@ def _assert_rich_jsx_importer(jsx: str) -> None:
         "layerData.font.photoshop_font_name || layerData.font.family_name",
     ]:
         assert expected in jsx
+    assert jsx.index("layer.rotate(layerData.layout.angle_degrees)") < jsx.rindex("applyVerticalTopAnchor(layer, layerData)")
 
 
 def _detection_payload(image_path: Path) -> dict:
@@ -258,6 +267,7 @@ def _layout_payload() -> dict:
             "target_width": 70,
             "target_height": 70,
             "target_bbox": [30, 40, 60, 85],
+            "vertical_align": "top",
             "text_color": [255, 255, 255, 255],
             "overflow_ratio": 0.0,
             "validation": {"status": "deterministic_only"},
