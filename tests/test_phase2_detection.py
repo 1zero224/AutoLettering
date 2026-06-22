@@ -180,5 +180,98 @@ Comment
     assert review_rows[0]["manual_decision"] == ""
     assert review_rows[0]["candidate_count"] == str(len(records[0]["candidate_boxes"]))
     assert review_rows[0]["selected_text_box_xyxy"] == json.dumps(records[0]["selected_text_box_xyxy"])
+    assert review_rows[0]["selected_text_full_xyxy"] == json.dumps(records[0]["selected_text_full_xyxy"])
+    assert review_rows[0]["selected_text_body_xyxy"] == json.dumps(records[0]["selected_text_body_xyxy"])
     assert Path(review_rows[0]["debug_image_path"]).exists()
     assert (run_dir / "reports" / "phase2-report.md").exists()
+
+
+def test_run_phase2_reports_full_and_body_text_bboxes(tmp_path: Path):
+    project_dir = tmp_path / "sample_project"
+    project_dir.mkdir()
+
+    image_path = project_dir / "edge-title.png"
+    image = Image.new("RGB", (240, 420), "white")
+    draw = ImageDraw.Draw(image)
+    draw.polygon([(200, 22), (224, 46), (200, 70), (176, 46)], fill="black")
+    for y in (94, 140, 186, 232, 278, 324):
+        draw.rectangle((188, y, 214, y + 6), fill="black")
+        draw.rectangle((198, y, 204, y + 30), fill="black")
+    image.save(image_path)
+
+    (project_dir / "翻译_0.txt").write_text(
+        """1,0
+-
+框外
+-
+Comment
+
+>>>>>>>>[edge-title.png]<<<<<<<<
+----------------[1]----------------[0.921,0.119,1]
+来自桃香的唐突的提案
+""",
+        encoding="utf-8",
+    )
+
+    run_dir = run_phase2(
+        project_dir / "翻译_0.txt",
+        output_root=tmp_path / "outputs",
+        run_id="phase2-derived-bbox-test",
+        sample_limit=1,
+        radius_x=70,
+        radius_y=70,
+    )
+
+    record = json.loads((run_dir / "detections.jsonl").read_text(encoding="utf-8").strip())
+    review_row = next(csv.DictReader((run_dir / "reports" / "manual-review.csv").read_text(encoding="utf-8").splitlines()))
+
+    assert record["selected_text_box_xyxy"][1] <= 22
+    assert record["selected_text_full_xyxy"][1] <= 22
+    assert record["selected_text_full_xyxy"][3] >= 350
+    assert record["selected_text_body_xyxy"][1] >= 90
+    assert record["selected_text_body_xyxy"][3] == record["selected_text_full_xyxy"][3]
+    assert review_row["selected_text_full_xyxy"] == json.dumps(record["selected_text_full_xyxy"])
+    assert review_row["selected_text_body_xyxy"] == json.dumps(record["selected_text_body_xyxy"])
+
+
+def test_run_phase2_can_filter_by_record_id(tmp_path: Path):
+    project_dir = tmp_path / "sample_project"
+    project_dir.mkdir()
+
+    image_path = project_dir / "page.png"
+    image = Image.new("RGB", (240, 240), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((35, 35, 55, 80), fill="black")
+    draw.rectangle((150, 125, 175, 200), fill="black")
+    image.save(image_path)
+
+    (project_dir / "翻译_0.txt").write_text(
+        """1,0
+-
+框内
+-
+Comment
+
+>>>>>>>>[page.png]<<<<<<<<
+----------------[1]----------------[0.188,0.240,1]
+第一条
+----------------[2]----------------[0.677,0.677,1]
+第二条
+""",
+        encoding="utf-8",
+    )
+
+    run_dir = run_phase2(
+        project_dir / "翻译_0.txt",
+        output_root=tmp_path / "outputs",
+        run_id="phase2-record-filter-test",
+        sample_limit=1,
+        radius_x=70,
+        radius_y=90,
+        record_ids=["page.png#2"],
+    )
+
+    records = [json.loads(line) for line in (run_dir / "detections.jsonl").read_text(encoding="utf-8").splitlines()]
+
+    assert [record["record_id"] for record in records] == ["page.png#2"]
+    assert records[0]["translated_text"] == "第二条"

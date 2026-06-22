@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import csv
 import json
+from collections.abc import Iterable
 from pathlib import Path
 
 from .detection.cv_text import detect_text_region, detection_result_to_dict, draw_detection_debug
 from .labelplus.models import ManifestImage, ManifestLabel
 from .labelplus.parser import parse_labelplus_project
 from .phase1 import _select_sample_records, _timestamp_run_id
+from .record_selection import normalize_record_ids
+from .text_bbox import selected_text_bbox
+from .text_body_bbox import selected_text_body_bbox
 
 
 def run_phase2(
@@ -17,12 +21,13 @@ def run_phase2(
     sample_limit: int = 30,
     radius_x: int = 220,
     radius_y: int = 180,
+    record_ids: Iterable[str] | None = None,
 ) -> Path:
     manifest = parse_labelplus_project(labelplus_file)
     run_dir = Path(output_root) / (run_id or _timestamp_run_id().replace("phase1", "phase2"))
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    selected = _select_sample_records(manifest, sample_limit)
+    selected = _select_detection_records(manifest, sample_limit, record_ids)
     ok_count, failed_count = _write_detections(run_dir, selected, radius_x, radius_y)
 
     _write_phase2_report(
@@ -35,6 +40,24 @@ def run_phase2(
         radius_y=radius_y,
     )
     return run_dir
+
+
+def _select_detection_records(
+    manifest,
+    sample_limit: int,
+    record_ids: Iterable[str] | None = None,
+) -> list[tuple[ManifestImage, ManifestLabel]]:
+    wanted = normalize_record_ids(record_ids)
+    if wanted is None:
+        return _select_sample_records(manifest, sample_limit)
+    selected: list[tuple[ManifestImage, ManifestLabel]] = []
+    for image in manifest.images:
+        for label in image.labels:
+            if label.id in wanted:
+                selected.append((image, label))
+                if len(selected) >= sample_limit:
+                    return selected
+    return selected
 
 
 def _write_detections(
@@ -65,7 +88,6 @@ def _detect_record(
 ) -> dict:
     result = detect_text_region(image.image_path, label, image.width, image.height, radius_x, radius_y)
     debug_path = run_dir / "debug" / "detection" / f"{Path(image.image_name).stem}-{label.record_index}.png"
-    draw_detection_debug(image.image_path, label, result, debug_path)
 
     payload = detection_result_to_dict(result)
     payload.update(
@@ -77,7 +99,29 @@ def _detect_record(
             "debug_image_path": str(debug_path),
         }
     )
+    full_bbox, body_bbox = _add_derived_text_bboxes(payload)
+    draw_detection_debug(
+        image.image_path,
+        label,
+        result,
+        debug_path,
+        selected_text_full_xyxy=full_bbox,
+        selected_text_body_xyxy=body_bbox,
+    )
     return payload
+
+
+def _add_derived_text_bboxes(payload: dict) -> tuple[tuple[int, int, int, int] | None, tuple[int, int, int, int] | None]:
+    if payload.get("status") != "ok" or not payload.get("selected_text_box_xyxy"):
+        payload["selected_text_full_xyxy"] = None
+        payload["selected_text_body_xyxy"] = None
+        return None, None
+
+    full_bbox = selected_text_bbox(payload)
+    body_bbox = selected_text_body_bbox(payload)
+    payload["selected_text_full_xyxy"] = list(full_bbox)
+    payload["selected_text_body_xyxy"] = list(body_bbox)
+    return full_bbox, body_bbox
 
 
 def _write_manual_review_csv(output_path: Path, rows: list[dict]) -> None:
@@ -88,6 +132,8 @@ def _write_manual_review_csv(output_path: Path, rows: list[dict]) -> None:
         "failure_reason",
         "candidate_count",
         "selected_text_box_xyxy",
+        "selected_text_full_xyxy",
+        "selected_text_body_xyxy",
         "debug_image_path",
         "manual_decision",
         "review_notes",
@@ -108,6 +154,8 @@ def _manual_review_row(row: dict) -> dict:
         "failure_reason": row.get("failure_reason") or "",
         "candidate_count": len(row.get("candidate_boxes", [])),
         "selected_text_box_xyxy": json.dumps(row.get("selected_text_box_xyxy"), ensure_ascii=False),
+        "selected_text_full_xyxy": json.dumps(row.get("selected_text_full_xyxy"), ensure_ascii=False),
+        "selected_text_body_xyxy": json.dumps(row.get("selected_text_body_xyxy"), ensure_ascii=False),
         "debug_image_path": row.get("debug_image_path", ""),
         "manual_decision": "",
         "review_notes": "",
@@ -140,6 +188,8 @@ def _write_phase2_report(
         "- `detections.jsonl`",
         "- `debug/detection/*.png`",
         "- `reports/manual-review.csv`",
+        "",
+        "Debug overlay colors: raw selected box = red, full text evidence box = green, body text box = purple.",
     ]
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")

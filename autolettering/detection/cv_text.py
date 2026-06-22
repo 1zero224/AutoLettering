@@ -120,6 +120,8 @@ def draw_detection_debug(
     label: ManifestLabel,
     result: DetectionResult,
     output_path: str | Path,
+    selected_text_full_xyxy: tuple[int, int, int, int] | None = None,
+    selected_text_body_xyxy: tuple[int, int, int, int] | None = None,
 ) -> Path:
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -139,6 +141,10 @@ def draw_detection_debug(
 
     if result.selected_text_box_xyxy:
         draw.rectangle(result.selected_text_box_xyxy, outline=(220, 30, 30), width=5)
+    if selected_text_full_xyxy:
+        draw.rectangle(selected_text_full_xyxy, outline=(20, 150, 60), width=4)
+    if selected_text_body_xyxy and selected_text_body_xyxy != selected_text_full_xyxy:
+        draw.rectangle(selected_text_body_xyxy, outline=(170, 40, 220), width=4)
 
     label_text = f"{label.record_index}:{result.status}"
     text_bbox = draw.textbbox((0, 0), label_text, font=font)
@@ -148,6 +154,7 @@ def draw_detection_debug(
     ty = min(max(label.y_px - 18, 0), canvas.height - text_h - 6)
     draw.rectangle((tx - 3, ty - 3, tx + text_w + 3, ty + text_h + 3), fill=(255, 255, 255))
     draw.text((tx, ty), label_text, fill=(220, 30, 30), font=font)
+    _draw_detection_legend(draw, font, sx1, sy1, canvas.width)
 
     canvas.save(output)
     return output
@@ -278,3 +285,20 @@ def _draw_cross(draw: ImageDraw.ImageDraw, x: int, y: int, color: tuple[int, int
     draw.line((x - radius, y, x + radius, y), fill=color, width=3)
     draw.line((x, y - radius, x, y + radius), fill=color, width=3)
     draw.ellipse((x - radius // 2, y - radius // 2, x + radius // 2, y + radius // 2), outline=color, width=3)
+
+
+def _draw_detection_legend(
+    draw: ImageDraw.ImageDraw,
+    font: ImageFont.ImageFont,
+    x: int,
+    y: int,
+    canvas_width: int,
+) -> None:
+    legend = "raw=red full=green body=purple"
+    text_bbox = draw.textbbox((0, 0), legend, font=font)
+    text_w = text_bbox[2] - text_bbox[0]
+    text_h = text_bbox[3] - text_bbox[1]
+    tx = min(max(x + 6, 0), canvas_width - text_w - 6)
+    ty = max(y + 6, 0)
+    draw.rectangle((tx - 3, ty - 3, tx + text_w + 3, ty + text_h + 3), fill=(255, 255, 255))
+    draw.text((tx, ty), legend, fill=(30, 30, 30), font=font)

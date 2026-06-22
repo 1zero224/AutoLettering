@@ -21,6 +21,7 @@ def main() -> None:
     parser.add_argument("--output-root", default="outputs/runs", help="Directory for run outputs.")
     parser.add_argument("--run-id", default=None, help="Optional deterministic run directory name.")
     parser.add_argument("--sample-limit", type=int, default=30, help="Maximum records to detect.")
+    parser.add_argument("--record-id", action="append", dest="record_ids", help="Record id to detect; repeatable.")
     parser.add_argument("--radius-x", type=int, default=220, help="Horizontal search radius in pixels.")
     parser.add_argument("--radius-y", type=int, default=180, help="Vertical search radius in pixels.")
     args = parser.parse_args()
@@ -32,6 +33,7 @@ def main() -> None:
         sample_limit=args.sample_limit,
         radius_x=args.radius_x,
         radius_y=args.radius_y,
+        record_ids=args.record_ids,
     )
     print(run_dir)
 
