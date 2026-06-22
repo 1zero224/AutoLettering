@@ -223,7 +223,10 @@ outputs/runs/phase7-gbc06-02-10-final-comparison-v3/debug/local-method-compariso
 outputs/runs/phase7-gbc06-02-batch-10-13-v7-v8-comparison/debug/local-method-comparison.png
 outputs/runs/phase7-gbc06-02-10-center-vs-top-align-v3/debug/local-method-comparison.png
 outputs/runs/phase7-gbc06-02-batch-10-13-v8-v9-top-align-comparison/debug/local-method-comparison.png
+outputs/runs/phase4-vertical-default-top-align-comparison-v1/GBC06-02-png-10-center-vs-default-top.png
 ```
+
+The final comparison above isolates the rendering default itself. It renders the same `GBC06_02.png#10` layout twice: once with explicit old-style `vertical_align=center`, and once without passing `vertical_align`. The new default resolves vertical text to `top`, moving the alpha ink bbox top from `10px` to `0px` while keeping horizontal centering unchanged.
 
 ## Code Changes
 
@@ -239,6 +242,8 @@ outputs/runs/phase7-gbc06-02-batch-10-13-v8-v9-top-align-comparison/debug/local-
   - Caps explicit multi-column vertical translations below the source column width to avoid oversized dense text.
   - Caps very short vertical translations more tightly than other short vertical translations, fixing the oversized `诶？` in `GBC06_02.png#10`.
   - Top-aligns vertical layouts by default instead of vertically centering them in the target text box.
+- `autolettering/layout/render_text.py`
+  - Resolves omitted `vertical_align` as `top` for vertical layouts and `center` for horizontal layouts, preventing direct preview-generation calls from falling back to centered vertical lettering.
 - `autolettering/phase6.py`
   - Uses the actual derived text bbox as the bubble cleanup crop, rather than unioning it with an often-large selected detection bbox.
 - `autolettering/phase7_evaluate.py`

@@ -4,6 +4,9 @@ import json
 from pathlib import Path
 from typing import Iterable
 
+from .pipeline_quality import build_quality_summary, quality_issues_by_record
+from .pipeline_report import pipeline_markdown_lines
+
 
 RunDirInput = str | Path | Iterable[str | Path] | None
 
@@ -29,6 +32,7 @@ def build_pipeline_coverage(
     cleanup_run_dirs: Iterable[str | Path] | None = None,
     preview_run_dir: RunDirInput = None,
     export_run_dir: RunDirInput = None,
+    phase8_export_audit_run_dir: RunDirInput = None,
     next_limit: int = 10,
 ) -> dict:
     meta, phase1_ids = _phase1_records(phase1_run_dir)
@@ -47,10 +51,12 @@ def build_pipeline_coverage(
         export_run_dir,
     )
     base_stage, base_ids = _base_records(detection_run_dir, detection_all, phase1_ids)
-    records = _record_coverage(base_ids, meta, stages)
+    quality = build_quality_summary(phase8_export_audit_run_dir)
+    records = _record_coverage(base_ids, meta, stages, quality_issues_by_record(quality))
     return {
         "summary": _summary(base_stage, base_ids, records),
         "stages": _stage_summary(stages, base_ids),
+        "quality": quality,
         "group_summary": _group_summary(base_ids, records),
         "records": records,
         "next_records": _next_records(base_ids, records, next_limit),
@@ -92,7 +98,12 @@ def _stage_records(
     }
 
 
-def _record_coverage(base_ids: list[str], meta: dict[str, dict], stages: dict[str, list[str]]) -> dict[str, dict]:
+def _record_coverage(
+    base_ids: list[str],
+    meta: dict[str, dict],
+    stages: dict[str, list[str]],
+    quality_issues: dict[str, list[str]],
+) -> dict[str, dict]:
     result: dict[str, dict] = {}
     stage_sets = {name: set(ids) for name, ids in stages.items() if ids}
     for record_id in base_ids:
@@ -103,6 +114,7 @@ def _record_coverage(base_ids: list[str], meta: dict[str, dict], stages: dict[st
             "image_name": meta.get(record_id, {}).get("image_name"),
             "covered_stages": [name for name in STAGE_ORDER if record_id in stage_sets.get(name, set())],
             "missing_stages": missing,
+            "quality_issues": quality_issues.get(record_id, []),
         }
     return result
 
@@ -144,7 +156,7 @@ def _base_records(
 
 
 def _summary(base_stage: str, base_ids: list[str], records: dict[str, dict]) -> dict:
-    complete = sum(1 for row in records.values() if not row["missing_stages"])
+    complete = sum(1 for row in records.values() if not row["missing_stages"] and not row["quality_issues"])
     return {
         "base_stage": base_stage,
         "base_record_count": len(base_ids),
@@ -173,19 +185,27 @@ def _group_summary(base_ids: list[str], records: dict[str, dict]) -> dict[str, d
         group = row.get("group_name") or "unknown"
         item = grouped.setdefault(group, {"base_count": 0, "complete_count": 0})
         item["base_count"] += 1
-        item["complete_count"] += 0 if row["missing_stages"] else 1
+        item["complete_count"] += 0 if row["missing_stages"] or row["quality_issues"] else 1
     return grouped
 
 
 def _next_records(base_ids: list[str], records: dict[str, dict], limit: int) -> list[dict]:
-    items: list[dict] = []
+    items = [
+        {
+            "record_id": record_id,
+            "group_name": records[record_id].get("group_name"),
+            "first_missing_stage": records[record_id]["missing_stages"][0],
+        }
+        for record_id in base_ids
+        if records[record_id]["missing_stages"]
+    ]
     for record_id in base_ids:
-        missing = records[record_id]["missing_stages"]
-        if missing:
+        row = records[record_id]
+        if not row["missing_stages"] and row["quality_issues"]:
             items.append({
                 "record_id": record_id,
-                "group_name": records[record_id].get("group_name"),
-                "first_missing_stage": missing[0],
+                "group_name": row.get("group_name"),
+                "first_quality_issue": row["quality_issues"][0],
             })
     return items[: max(0, limit)]
 
@@ -264,37 +284,6 @@ def _write_json(path: Path, payload: dict) -> None:
 
 
 def _write_markdown(path: Path, report: dict) -> None:
-    lines = _markdown_lines(report)
+    lines = pipeline_markdown_lines(report, STAGE_ORDER)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def _markdown_lines(report: dict) -> list[str]:
-    lines = ["# Pipeline Coverage Report", "", "## Summary", ""]
-    summary = report["summary"]
-    lines.extend([
-        f"- Base stage: `{summary['base_stage']}`",
-        f"- Base records: {summary['base_record_count']}",
-        f"- Complete records: {summary['complete_record_count']}",
-        f"- Incomplete records: {summary['incomplete_record_count']}",
-        "",
-        "## Stages",
-        "",
-        "| Stage | Covered | Missing |",
-        "| --- | ---: | ---: |",
-    ])
-    for name in STAGE_ORDER:
-        stage = report["stages"][name]
-        lines.append(f"| `{name}` | {stage['covered_count']} | {stage['missing_count']} |")
-    lines.extend(["", "## Next Records", ""])
-    lines.extend(_next_record_lines(report["next_records"]))
-    return lines
-
-
-def _next_record_lines(records: list[dict]) -> list[str]:
-    if not records:
-        return ["- None"]
-    return [
-        f"- `{row['record_id']}` ({row.get('group_name') or 'unknown'}): `{row['first_missing_stage']}`"
-        for row in records
-    ]

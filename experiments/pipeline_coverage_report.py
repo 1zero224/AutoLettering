@@ -21,6 +21,7 @@ def main() -> None:
     parser.add_argument("--cleanup-run-dir", action="append", default=None)
     parser.add_argument("--preview-run-dir", action="append", default=None)
     parser.add_argument("--export-run-dir", action="append", default=None)
+    parser.add_argument("--phase8-export-audit-run-dir", action="append", default=None)
     parser.add_argument("--output-root", default="outputs/runs")
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--next-limit", type=int, default=10)
@@ -37,6 +38,7 @@ def main() -> None:
         cleanup_run_dirs=[Path(value) for value in args.cleanup_run_dir or []],
         preview_run_dir=_optional_paths(args.preview_run_dir),
         export_run_dir=_optional_paths(args.export_run_dir),
+        phase8_export_audit_run_dir=_optional_paths(args.phase8_export_audit_run_dir),
         next_limit=args.next_limit,
     )
     print(run_dir)

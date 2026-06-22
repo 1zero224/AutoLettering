@@ -14,22 +14,29 @@ def render_layout_preview(
     canvas_size: tuple[int, int] | None = None,
     text_color: tuple[int, int, int, int] = (0, 0, 0, 255),
     vertical_column_order: str = "rtl",
-    vertical_align: str = "center",
+    vertical_align: str | None = None,
 ) -> Path:
     if vertical_column_order not in {"rtl", "ltr"}:
         raise ValueError("vertical_column_order must be 'rtl' or 'ltr'")
-    if vertical_align not in {"center", "top"}:
+    resolved_vertical_align = _resolve_vertical_align(layout, vertical_align)
+    if resolved_vertical_align not in {"center", "top"}:
         raise ValueError("vertical_align must be 'center' or 'top'")
 
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     size = canvas_size or (layout.target_width, layout.target_height)
-    image = _render_text_layer(layout, font_path, size, text_color, vertical_column_order, vertical_align)
+    image = _render_text_layer(layout, font_path, size, text_color, vertical_column_order, resolved_vertical_align)
     if abs(layout.angle_degrees) >= 0.1:
         image = _rotate_within_canvas(image, layout.angle_degrees, size)
-    image = _recenter_visible_ink(image, recenter_y=vertical_align == "center")
+    image = _recenter_visible_ink(image, recenter_y=resolved_vertical_align == "center")
     image.save(output)
     return output
+
+
+def _resolve_vertical_align(layout: LayoutResult, vertical_align: str | None) -> str:
+    if vertical_align is not None:
+        return vertical_align
+    return "top" if layout.orientation == "vertical" else "center"
 
 
 def measure_preview_alignment(image_path: str | Path) -> dict:

@@ -215,6 +215,26 @@ def test_render_layout_preview_supports_vertical_text(tmp_path: Path):
         assert layout.orientation == "vertical"
 
 
+def test_render_layout_preview_defaults_vertical_text_to_top_align(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+    output_path = tmp_path / "vertical-top-default.png"
+    layout = search_fitting_layout(
+        "街头演出？",
+        font_path,
+        (90, 260),
+        min_font_size=24,
+        max_font_size=24,
+        orientation="vertical",
+    )
+
+    render_layout_preview(layout, font_path, output_path, canvas_size=(90, 260))
+    alignment = measure_preview_alignment(output_path)
+
+    assert alignment["ink_bbox"] is not None
+    assert alignment["ink_bbox"][1] <= 2
+    assert alignment["vertical_center_offset_px"] < -20
+
+
 def test_render_layout_preview_supports_vertical_text_columns(tmp_path: Path):
     font_path = _copy_font(tmp_path)
     output_path = tmp_path / "vertical-columns.png"
