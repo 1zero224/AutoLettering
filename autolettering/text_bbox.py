@@ -5,7 +5,8 @@ def selected_text_bbox(detection: dict, area_ratio_limit: float = 0.35, score_ma
     selected, candidates, search_region = _selected_text_candidates(detection, area_ratio_limit)
     if not candidates:
         return selected
-    selected_polarity = _candidate_polarity(candidates, selected)
+    raw_candidates = [candidate for candidate in (_candidate(item) for item in detection.get("candidate_boxes") or []) if candidate]
+    selected_polarity = _candidate_polarity(raw_candidates, selected) or _candidate_polarity(candidates, selected)
     if selected_polarity:
         same_polarity = [candidate for candidate in candidates if candidate["polarity"] in {selected_polarity, None}]
         candidates = same_polarity or candidates
@@ -44,7 +45,7 @@ def _selected_text_candidates(detection: dict, area_ratio_limit: float = 0.35) -
     selected = tuple(int(value) for value in detection["selected_text_box_xyxy"])
     candidates = [_candidate(item) for item in detection.get("candidate_boxes") or []]
     search_region = _search_region(detection, selected, candidates)
-    max_text_area = min(_area(search_region) * area_ratio_limit, _area(selected) * 2.0)
+    max_text_area = min(_area(search_region) * area_ratio_limit, _area(selected) * 3.0)
     filtered = [
         candidate
         for candidate in candidates
@@ -218,7 +219,22 @@ def _touches_text_cluster(bbox: tuple[int, int, int, int], cluster: tuple[int, i
         _horizontal_gap(bbox, cluster) <= _adjacent_column_gap_limit(bbox, cluster)
         and _vertical_overlap_ratio(bbox, cluster) >= 0.35
     )
-    return same_column or adjacent_column
+    return same_column or adjacent_column or _vertical_glyph_continuation(bbox, cluster, polarity)
+
+
+def _vertical_glyph_continuation(
+    bbox: tuple[int, int, int, int],
+    cluster: tuple[int, int, int, int],
+    polarity: str | None = None,
+) -> bool:
+    return (
+        polarity != "light_on_dark"
+        and _vertical_cluster_like(cluster)
+        and _horizontal_overlap_ratio(bbox, cluster) >= 0.45
+        and _vertical_relation(bbox, cluster) <= 8
+        and _width(bbox) <= max(64, int(round(_width(cluster) * 1.8)))
+        and _height(bbox) <= max(64, int(round(_height(cluster) * 0.85)))
+    )
 
 
 def _adjacent_column_gap_limit(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> int:

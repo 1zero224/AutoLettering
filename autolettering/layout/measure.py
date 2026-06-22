@@ -49,9 +49,31 @@ def search_fitting_layout(
         max_font_size,
         selected_orientation,
         angle_degrees,
+        0.0,
     )
+    if best is None and allow_overflow_ratio > 0.0:
+        best = _search_best_candidate(
+            candidates,
+            font_path,
+            target_width,
+            target_height,
+            min_font_size,
+            max_font_size,
+            selected_orientation,
+            angle_degrees,
+            allow_overflow_ratio,
+        )
     if best is None:
-        return _fallback_layout(text, font_path, target_width, target_height, min_font_size, selected_orientation, angle_degrees)
+        return _fallback_layout(
+            text,
+            font_path,
+            target_width,
+            target_height,
+            min_font_size,
+            selected_orientation,
+            angle_degrees,
+            allow_overflow_ratio,
+        )
 
     line_breaks, font_size, measured = best
     return _layout_result(
@@ -76,13 +98,14 @@ def _search_best_candidate(
     max_font_size: int,
     orientation: str,
     angle_degrees: float,
+    allow_overflow_ratio: float,
 ) -> tuple[str, int, TextMeasurement] | None:
     best: tuple[str, int, TextMeasurement] | None = None
     for line_breaks in candidates:
         for font_size in range(max_font_size, min_font_size - 1, -1):
             measured = measure_text_layout(line_breaks, font_path, font_size, orientation=orientation)
             footprint = _rotation_footprint(measured, angle_degrees)
-            if footprint.width <= target_width and footprint.height <= target_height:
+            if _overflow_ratio(footprint.width, footprint.height, target_width, target_height) <= allow_overflow_ratio:
                 if best is None or font_size > best[1]:
                     best = (line_breaks, font_size, footprint)
                 break
@@ -97,6 +120,7 @@ def _fallback_layout(
     font_size: int,
     orientation: str,
     angle_degrees: float,
+    allow_overflow_ratio: float,
 ) -> LayoutResult:
     measured = measure_text_layout(text, font_path, font_size, orientation=orientation)
     return _layout_result(
@@ -107,7 +131,7 @@ def _fallback_layout(
         target_width,
         target_height,
         measured,
-        0.0,
+        allow_overflow_ratio,
         "overflow",
         angle_degrees,
     )
@@ -165,11 +189,17 @@ def _choose_orientation(target_width: int, target_height: int) -> str:
 
 
 def _candidate_texts(text: str, max_lines: int, orientation: str) -> list[str]:
+    compact = "".join(text.split())
+    if not compact:
+        return [""]
     if orientation == "vertical":
         stripped = "\n".join(part.strip() for part in text.splitlines() if part.strip())
-        if stripped:
-            return [stripped]
-        return ["".join(text.split())]
+        candidates = [stripped] if stripped else []
+        if len(compact) >= 8:
+            for candidate in generate_line_break_candidates(compact, max_lines=max_lines):
+                if candidate not in candidates:
+                    candidates.append(candidate)
+        return candidates or [compact]
     return generate_line_break_candidates(text, max_lines=max_lines)
 
 

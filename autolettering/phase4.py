@@ -196,13 +196,22 @@ def _max_font_size(
     column_width = _source_column_width(detection, tuple(target_bbox))
     if column_width is None:
         return 72
-    multiplier = 1.0 if _short_vertical_translation(translated_text) else 1.18
+    if _short_vertical_translation(translated_text):
+        multiplier = 1.0
+    elif _explicit_multicolumn_translation(translated_text):
+        multiplier = 0.92
+    else:
+        multiplier = 1.18
     return max(12, min(72, int(round(column_width * multiplier))))
 
 
 def _short_vertical_translation(translated_text: str) -> bool:
     text = "".join(str(translated_text).split())
     return 0 < len(text) <= 4
+
+
+def _explicit_multicolumn_translation(translated_text: str) -> bool:
+    return len([part for part in str(translated_text).splitlines() if part.strip()]) >= 2
 
 
 def _source_column_width(detection: dict, target_bbox: tuple[int, int, int, int]) -> int | None:

@@ -136,6 +136,11 @@ def test_build_preview_evaluation_prompt_lists_records_and_methods():
     assert "oversized" in prompt
     assert "outside the original text area" in prompt
     assert "covers nearby art" in prompt
+    assert "AFTER preview" in prompt
+    assert "Only judge original_text_removed on the AFTER preview side" in prompt
+    assert "tight crops" in prompt
+    assert "same scale" in prompt
+    assert "Do not penalize missing full speech-bubble outlines" in prompt
     assert "Do not echo the Records JSON" in prompt
     assert "Every returned object must include score and usable" in prompt
     assert "score" in prompt
@@ -187,6 +192,8 @@ def test_run_phase7_preview_evaluation_writes_results_and_api_summaries(tmp_path
     with Image.open(evaluation_path).convert("RGB") as sheet:
         split_x = 12 + 40
         assert sheet.getpixel((split_x, 58)) == (255, 0, 0)
+        assert _has_nonwhite_pixel(sheet, (12, 28, 50, 44))
+        assert _has_nonwhite_pixel(sheet, (58, 28, 104, 44))
     assert "bubble translation is too large" in evaluations[0]["issues"]
     assert api_calls[0]["image_name"] == "page.png"
     assert api_calls[0]["request"]["prompt_chars"] > 0
@@ -222,3 +229,12 @@ def _write_preview_results(path: Path, preview_page: Path, before_after_a: Path,
 
 def _read_jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def _has_nonwhite_pixel(image: Image.Image, box: tuple[int, int, int, int]) -> bool:
+    x1, y1, x2, y2 = box
+    for y in range(y1, y2):
+        for x in range(x1, x2):
+            if image.getpixel((x, y)) != (255, 255, 255):
+                return True
+    return False

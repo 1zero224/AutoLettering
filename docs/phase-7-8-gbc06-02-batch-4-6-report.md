@@ -8,7 +8,7 @@ This run extends the verified auto-lettering loop to the next three `GBC06_02.pn
 - `GBC06_02.png#5`
 - `GBC06_02.png#6`
 
-The baseline integrated preview failed because Phase 6 cleaned only the selected detection column for `#5`, while Phase 4 correctly expanded the text layout target to the full multi-column source text region. The successful fix makes bubble cleanup crops cover the union of the selected detection bbox and the derived text bbox.
+The baseline integrated preview failed because Phase 6 cleaned only the selected detection column for `#5`, while Phase 4 correctly expanded the text layout target to the full multi-column source text region. The current cleanup path uses the derived text bbox as the bubble crop, so the cleaned crop follows the actual text region rather than a possibly stale selected detection box.
 
 ## Commands
 
@@ -142,8 +142,8 @@ The Phase 6 v2 cleanup result confirms the fixed crop for `#5`:
 
 - `autolettering/phase6.py`
   - Computes `text_bbox = selected_text_bbox(detection)`.
-  - Cleans the union of the selected detection bbox and `text_bbox`.
-  - Keeps the existing mask-limited composition contract intact.
+  - Uses `text_bbox` as the bubble cleanup crop.
+  - Avoids large false-positive selected detection boxes while still covering adjacent columns included by the derived text bbox.
 - `tests/test_phase6_cleanup.py`
   - Adds a regression test for multi-column text where `text_bbox` extends outside the selected detection bbox.
 

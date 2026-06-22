@@ -142,3 +142,53 @@ def test_selected_text_bbox_includes_lower_score_adjacent_column_for_gbc06_02_re
     }
 
     assert selected_text_bbox(detection) == (906, 462, 1102, 728)
+
+
+def test_selected_text_bbox_uses_selected_candidate_polarity_over_light_bubble_false_positive():
+    detection = {
+        "selected_text_box_xyxy": [177, 1116, 617, 1376],
+        "search_region_xyxy": [177, 1116, 617, 1476],
+        "candidate_boxes": [
+            {"xyxy": [177, 1116, 617, 1376], "score": 0.934, "polarity": "dark_on_light"},
+            {"xyxy": [350, 1243, 380, 1302], "score": 0.8939, "polarity": "dark_on_light"},
+            {"xyxy": [490, 1142, 526, 1362], "score": 0.8425, "polarity": "dark_on_light"},
+            {"xyxy": [531, 1146, 566, 1298], "score": 0.7776, "polarity": "dark_on_light"},
+            {"xyxy": [338, 1209, 387, 1308], "score": 0.9328, "polarity": "light_on_dark"},
+            {"xyxy": [177, 1397, 617, 1476], "score": 0.8146, "polarity": "light_on_dark"},
+        ],
+    }
+
+    assert selected_text_bbox(detection) == (350, 1243, 380, 1302)
+
+
+def test_selected_text_bbox_joins_short_vertical_glyph_fragment_above_selected_column():
+    detection = {
+        "selected_text_box_xyxy": [177, 1116, 617, 1376],
+        "search_region_xyxy": [177, 1116, 617, 1476],
+        "candidate_boxes": [
+            {"xyxy": [177, 1116, 617, 1376], "score": 0.934, "polarity": "dark_on_light"},
+            {"xyxy": [350, 1243, 380, 1302], "score": 0.8939, "polarity": "dark_on_light"},
+            {"xyxy": [343, 1215, 381, 1243], "score": 0.7528, "polarity": "dark_on_light"},
+            {"xyxy": [338, 1209, 387, 1308], "score": 0.9328, "polarity": "light_on_dark"},
+            {"xyxy": [490, 1142, 526, 1362], "score": 0.8425, "polarity": "dark_on_light"},
+            {"xyxy": [531, 1146, 566, 1298], "score": 0.7776, "polarity": "dark_on_light"},
+        ],
+    }
+
+    assert selected_text_bbox(detection) == (343, 1215, 381, 1302)
+
+
+def test_selected_text_bbox_keeps_adjacent_column_when_selected_column_is_tight():
+    detection = {
+        "selected_text_box_xyxy": [196, 1158, 230, 1222],
+        "search_region_xyxy": [13, 1051, 453, 1411],
+        "candidate_boxes": [
+            {"xyxy": [196, 1158, 230, 1222], "area": 1796, "score": 0.9398, "polarity": "dark_on_light"},
+            {"xyxy": [157, 1158, 191, 1347], "area": 3908, "score": 0.9172, "polarity": "dark_on_light"},
+            {"xyxy": [350, 1243, 380, 1302], "area": 1184, "score": 0.7637, "polarity": "dark_on_light"},
+            {"xyxy": [116, 1402, 453, 1411], "area": 3033, "score": 0.7587, "polarity": "dark_on_light"},
+            {"xyxy": [343, 1215, 381, 1243], "area": 696, "score": 0.6823, "polarity": "dark_on_light"},
+        ],
+    }
+
+    assert selected_text_bbox(detection) == (157, 1158, 230, 1347)

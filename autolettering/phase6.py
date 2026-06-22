@@ -75,11 +75,10 @@ def _cleanup_one(run_dir: Path, detection: dict, layout: dict, cleanup_method: s
     if detection.get("group_name") != "框内":
         return _skipped_row(layout, "not_bubble_group")
 
-    selected_bbox = tuple(detection["selected_text_box_xyxy"])
     text_bbox = _text_bbox(detection)
     result = _clean_bubble_crop(
         image_path=detection["image_path"],
-        bbox=_union_bbox(selected_bbox, text_bbox),
+        bbox=text_bbox,
         text_bbox=text_bbox,
         output_dir=run_dir / "crops",
         record_id=detection["record_id"],
@@ -111,13 +110,6 @@ def _clean_bubble_crop(
 
 def _text_bbox(detection: dict) -> tuple[int, int, int, int]:
     return selected_text_bbox(detection)
-
-
-def _union_bbox(
-    a: tuple[int, int, int, int],
-    b: tuple[int, int, int, int],
-) -> tuple[int, int, int, int]:
-    return min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3])
 
 
 def _cleanup_payload(result) -> dict:

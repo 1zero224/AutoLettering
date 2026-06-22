@@ -99,6 +99,59 @@ def test_search_fitting_layout_preserves_vertical_line_breaks_as_columns(tmp_pat
     assert result.measured_height <= 188
 
 
+def test_search_fitting_layout_accepts_min_font_bounded_overflow(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+    measured = measure_text_layout("所谓的街头表演\n就是在别人面前唱歌吗？", font_path, 12, orientation="vertical")
+    target_height = measured.height - max(1, int(round(measured.height * 0.04)))
+
+    result = search_fitting_layout(
+        text="所谓的街头表演\n就是在别人面前唱歌吗？",
+        font_path=font_path,
+        target_size=(measured.width, target_height),
+        min_font_size=12,
+        max_font_size=12,
+        allow_overflow_ratio=0.08,
+        max_lines=1,
+        orientation="vertical",
+    )
+
+    assert result.status == "ok"
+    assert 0.0 < result.overflow_ratio <= 0.08
+
+
+def test_search_fitting_layout_reflows_long_vertical_text_into_more_columns(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+
+    result = search_fitting_layout(
+        text="所谓的街头表演\n就是在别人面前唱歌吗？",
+        font_path=font_path,
+        target_size=(112, 159),
+        min_font_size=12,
+        max_font_size=36,
+        orientation="vertical",
+    )
+
+    assert result.status == "ok"
+    assert result.font_size > 12
+    assert result.line_breaks.count("\n") >= 2
+
+
+def test_search_fitting_layout_keeps_short_vertical_text_single_column(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+
+    result = search_fitting_layout(
+        text="那是必然的",
+        font_path=font_path,
+        target_size=(73, 96),
+        min_font_size=12,
+        max_font_size=30,
+        orientation="vertical",
+    )
+
+    assert result.status == "ok"
+    assert "\n" not in result.line_breaks
+
+
 def test_render_layout_preview_writes_non_empty_transparent_png(tmp_path: Path):
     font_path = _copy_font(tmp_path)
     output_path = tmp_path / "preview.png"
@@ -372,7 +425,7 @@ def test_run_phase4_expands_tight_target_inside_selected_box_when_layout_overflo
         phase3_run / "font-selections.jsonl",
         font_path,
         source_crop_path,
-        translated_text="这是一段很长的测试文字\n这也是另一段很长文字",
+        translated_text="这是一段很长的测试文字这也是另一段很长文字还要更多内容\n第二列也继续补充更多测试内容",
     )
     _write_detection_with_short_tight_target(phase2_run / "detections.jsonl")
     _write_high_confidence_vertical_angle_result(phase5_run / "angle-results.jsonl")
@@ -454,6 +507,36 @@ def test_run_phase4_keeps_short_vertical_translation_close_to_source_glyph_width
     assert layout["target_bbox"] == [725, 1001, 802, 1128]
     assert layout["orientation"] == "vertical"
     assert layout["font_size"] <= 38
+
+
+def test_run_phase4_caps_multicolumn_vertical_translation_below_source_column_width(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+    source_crop_path = tmp_path / "source-crop.png"
+    Image.new("RGB", (90, 220), "white").save(source_crop_path)
+    phase2_run = tmp_path / "phase2-detection"
+    phase3_run = tmp_path / "phase3-selection"
+    for path in [phase2_run, phase3_run]:
+        path.mkdir()
+    _write_font_selection(
+        phase3_run / "font-selections.jsonl",
+        font_path,
+        source_crop_path,
+        translated_text="那个\n莫非是要…",
+    )
+    _write_detection_like_gbc06_02_record_11(phase2_run / "detections.jsonl")
+
+    run_dir = run_phase4(
+        selection_run_dir=phase3_run,
+        detection_run_dir=phase2_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase4-multicolumn-vertical-cap",
+        sample_limit=1,
+    )
+
+    layout = _read_jsonl(run_dir / "layout-results.jsonl")[0]["layout"]
+    assert layout["target_bbox"] == [157, 1158, 230, 1347]
+    assert layout["orientation"] == "vertical"
+    assert layout["font_size"] <= 31
 
 
 def test_run_phase4_renders_light_text_for_light_on_dark_detection(tmp_path: Path):
@@ -660,6 +743,22 @@ def _write_detection_like_gbc06_02_record_8(path: Path) -> None:
             {"xyxy": [725, 1002, 761, 1128], "area": 3221, "score": 0.9034, "polarity": "dark_on_light"},
             {"xyxy": [793, 903, 893, 959], "area": 4520, "score": 0.7959, "polarity": "dark_on_light"},
             {"xyxy": [594, 903, 679, 1263], "area": 13599, "score": 0.7658, "polarity": "dark_on_light"},
+        ],
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _write_detection_like_gbc06_02_record_11(path: Path) -> None:
+    payload = {
+        "record_id": "page.png#1",
+        "status": "ok",
+        "search_region_xyxy": [13, 1051, 453, 1411],
+        "selected_text_box_xyxy": [196, 1158, 230, 1222],
+        "candidate_boxes": [
+            {"xyxy": [196, 1158, 230, 1222], "area": 1796, "score": 0.9398, "polarity": "dark_on_light"},
+            {"xyxy": [157, 1158, 191, 1347], "area": 3908, "score": 0.9172, "polarity": "dark_on_light"},
+            {"xyxy": [350, 1243, 380, 1302], "area": 1184, "score": 0.7637, "polarity": "dark_on_light"},
+            {"xyxy": [116, 1402, 453, 1411], "area": 3033, "score": 0.7587, "polarity": "dark_on_light"},
         ],
     }
     path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")

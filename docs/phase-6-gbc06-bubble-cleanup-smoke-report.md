@@ -175,14 +175,13 @@ The `GBC06_02.png#4-#6` batch exposed another cleanup-range mismatch:
 - Phase 4 correctly expanded the layout/text target to `[167, 511, 280, 732]`, covering the full multi-column source text area.
 - Phase 6 still cleaned only the selected bbox, so the final text overlay occupied a region that had not been fully cleaned.
 
-Phase 6 now cleans the union of:
+Phase 6 now cleans the derived actual text box:
 
 ```text
-detection.selected_text_box_xyxy
 selected_text_bbox(detection)
 ```
 
-This keeps the large crop/context and mask-aware composition behavior from the previous update, while ensuring the actual cleaned crop is at least as large as the derived text region used by layout and preview.
+This keeps cleanup aligned with the derived text region used by layout and preview, while avoiding large false-positive selected boxes from polluting neighboring records or the per-record evaluation crops.
 
 Baseline failed run:
 

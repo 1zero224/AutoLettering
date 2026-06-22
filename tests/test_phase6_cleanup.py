@@ -157,6 +157,52 @@ def test_run_phase6_bubble_cleanup_expands_crop_to_full_text_bbox(tmp_path: Path
         assert cleaned.getpixel((50, 10)) > 245
 
 
+def test_run_phase6_bubble_cleanup_uses_actual_text_bbox_instead_of_large_selected_bbox(tmp_path: Path):
+    image = Image.new("RGB", (220, 140), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((50, 40, 80, 90), fill="black")
+    draw.rectangle((150, 30, 190, 100), fill="black")
+    image_path = tmp_path / "page.png"
+    image.save(image_path)
+    detection_run = tmp_path / "phase2"
+    layout_run = tmp_path / "phase4"
+    detection_run.mkdir()
+    layout_run.mkdir()
+    _write_jsonl(
+        detection_run / "detections.jsonl",
+        [
+            {
+                "record_id": "page.png#1",
+                "status": "ok",
+                "image_name": "page.png",
+                "image_path": str(image_path),
+                "group_name": "框内",
+                "search_region_xyxy": [0, 0, 200, 120],
+                "selected_text_box_xyxy": [0, 0, 200, 120],
+                "candidate_boxes": [
+                    {"xyxy": [0, 0, 200, 120], "area": 24000, "score": 0.96, "polarity": "dark_on_light"},
+                    {"xyxy": [50, 40, 80, 90], "area": 1500, "score": 0.92, "polarity": "dark_on_light"},
+                ],
+            }
+        ],
+    )
+    _write_layout(layout_run / "layout-results.jsonl")
+
+    run_dir = run_phase6_bubble_cleanup(
+        detection_run_dir=detection_run,
+        layout_run_dir=layout_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-tight-crop",
+        sample_limit=1,
+    )
+
+    cleanup = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]["cleanup"]
+    assert cleanup["bbox"] == [50, 40, 80, 90]
+    with Image.open(cleanup["cleaned_crop_path"]).convert("L") as cleaned:
+        assert cleaned.size == (30, 50)
+        assert cleaned.getpixel((15, 25)) > 245
+
+
 def test_run_phase6_bubble_cleanup_can_keep_mask_fill_for_comparison(tmp_path: Path):
     image_path = _write_sample_image(tmp_path / "page.png")
     detection_run = tmp_path / "phase2"

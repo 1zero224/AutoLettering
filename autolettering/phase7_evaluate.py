@@ -64,7 +64,11 @@ def build_preview_evaluation_prompt(row: dict) -> str:
     return "\n".join(
         [
             "Evaluate this manga auto-lettering contact sheet.",
-            "Each tile is a before/after crop for one record: left is original, right is generated preview.",
+            "Each record is shown as two labeled panels: BEFORE original on the left and AFTER preview on the right.",
+            "The BEFORE original panel intentionally contains Japanese text; the AFTER preview panel is the generated result.",
+            "Only judge original_text_removed on the AFTER preview side; the BEFORE original side intentionally contains Japanese text.",
+            "These are tight crops of the same original text area, sometimes enlarged for inspection; compare BEFORE and AFTER at the same scale.",
+            "Do not penalize missing full speech-bubble outlines or full bubble background when the tight crop only contains the text area.",
             "Focus on whether the original Japanese text was removed, nearby art/tones are preserved, and translated lettering is readable.",
             "Compare the generated lettering against the original text area, not only readability.",
             "Mark it unusable or lower the score if translated lettering is oversized, outside the original text area, or covers nearby art.",
@@ -241,7 +245,7 @@ def _build_evaluation_contact_sheet(row: dict) -> str:
         return str(row["preview"]["evaluation_image_path"])
 
     font = ImageFont.load_default()
-    label_height = 26
+    label_height = 44
     padding = 12
     loaded = [(_record_label(record), Image.open(record["preview_before_after_path"]).convert("RGB")) for record in records]
     width = max(image.width for _, image in loaded) + padding * 2
@@ -251,6 +255,8 @@ def _build_evaluation_contact_sheet(row: dict) -> str:
     y = padding
     for label, image in loaded:
         draw.text((padding, y), label[:120], fill="black", font=font)
+        draw.text((padding, y + 18), "BEFORE original", fill=(40, 40, 40), font=font)
+        draw.text((padding + image.width // 2 + 4, y + 18), "AFTER preview", fill=(40, 40, 40), font=font)
         y += label_height
         draw.rectangle((padding - 1, y - 1, padding + image.width, y + image.height), outline=(180, 180, 180), width=1)
         sheet.paste(image, (padding, y))
