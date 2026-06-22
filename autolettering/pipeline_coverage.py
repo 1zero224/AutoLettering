@@ -32,6 +32,7 @@ def build_pipeline_coverage(
     cleanup_run_dirs: Iterable[str | Path] | None = None,
     preview_run_dir: RunDirInput = None,
     export_run_dir: RunDirInput = None,
+    phase7_preview_evaluation_run_dir: RunDirInput = None,
     phase8_export_audit_run_dir: RunDirInput = None,
     next_limit: int = 10,
 ) -> dict:
@@ -51,7 +52,7 @@ def build_pipeline_coverage(
         export_run_dir,
     )
     base_stage, base_ids = _base_records(detection_run_dir, detection_all, phase1_ids)
-    quality = build_quality_summary(phase8_export_audit_run_dir)
+    quality = build_quality_summary(phase7_preview_evaluation_run_dir, phase8_export_audit_run_dir)
     records = _record_coverage(base_ids, meta, stages, quality_issues_by_record(quality))
     return {
         "summary": _summary(base_stage, base_ids, records),

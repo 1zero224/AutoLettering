@@ -72,6 +72,21 @@ Current v12 keeps the v11 structural scope and adds the Phase 8 Photoshop export
 --phase8-export-audit-run-dir outputs/runs/phase8-gbc06-02-batch-10-13-top-align-export-audit-v1 --run-id phase0-8-gbc06-pipeline-coverage-v12 --next-limit 12
 ```
 
+Current v13 keeps the v12 structural scope and adds Phase 7 MIMO preview evaluation as a coverage quality gate. It passes the Phase 7 evaluation run paired with each retained preview run:
+
+```powershell
+--phase7-preview-evaluation-run-dir outputs/runs/phase7-8-gbc06-region-fill-layout-smoke/runs/phase7-evaluation
+--phase7-preview-evaluation-run-dir outputs/runs/phase7-8-gbc06-bubble-batch-preview-v6/runs/phase7-evaluation
+--phase7-preview-evaluation-run-dir outputs/runs/phase7-8-gbc06-bubble-batch-7-13-preview-v2/runs/phase7-evaluation
+--phase7-preview-evaluation-run-dir outputs/runs/phase7-8-gbc06-batch-14-15-preview-v5/runs/phase7-evaluation
+--phase7-preview-evaluation-run-dir outputs/runs/phase7-8-gbc06-batch-17-lama-white-preview-v1/runs/phase7-evaluation
+--phase7-preview-evaluation-run-dir outputs/runs/phase7-8-gbc06-02-batch-1-3-preview-v3/runs/phase7-evaluation
+--phase7-preview-evaluation-run-dir outputs/runs/phase7-8-gbc06-02-batch-4-6-preview-v2/runs/phase7-evaluation
+--phase7-preview-evaluation-run-dir outputs/runs/phase7-8-gbc06-02-batch-7-9-preview-v2/runs/phase7-evaluation
+--phase7-preview-evaluation-run-dir outputs/runs/phase7-8-gbc06-02-batch-10-13-preview-v9-top-align/runs/phase7-evaluation
+--run-id phase0-8-gbc06-pipeline-coverage-v13 --next-limit 12
+```
+
 ## Generated Artifacts
 
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage/pipeline-coverage.json`
@@ -98,6 +113,8 @@ Current v12 keeps the v11 structural scope and adds the Phase 8 Photoshop export
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v11/reports/pipeline-coverage-report.md`
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v12/pipeline-coverage.json`
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v12/reports/pipeline-coverage-report.md`
+- `outputs/runs/phase0-8-gbc06-pipeline-coverage-v13/pipeline-coverage.json`
+- `outputs/runs/phase0-8-gbc06-pipeline-coverage-v13/reports/pipeline-coverage-report.md`
 
 `outputs/` remains ignored by Git. The source-backed summary below records the key numbers so the experiment is traceable in the repository.
 
@@ -127,6 +144,7 @@ phase8_export          covered=30 missing=0
 Quality audits:
 
 ```text
+phase7_preview evaluations=9 evaluated=9 usable=9/9 failed=0 low_score=0 records=30 record_issues=0
 phase8_export audits=1 passed=1/1 records=4 vertical_top_layers=4 missing_anchor=0 unexpected_anchor=0 record_issues=0 missing_jsx_anchor_logic=0
 ```
 
@@ -139,7 +157,7 @@ Group coverage:
 
 ## Next Records
 
-The v12 coverage report counts these records as complete across all tracked stages and the attached Phase 8 export quality gate:
+The v13 coverage report counts these records as complete across all tracked stages and the attached Phase 7/8 quality gates:
 
 ```text
 GBC06_01.png#1
@@ -174,15 +192,27 @@ GBC06_02.png#12
 GBC06_02.png#13
 ```
 
-The v12 report has no pending records in the current base set:
+The v13 report has no pending records in the current base set:
 
 ```text
 next_records=[]
 ```
 
+The current base set is still only the 30 records that have Phase 2 detection output. The Phase 1 manifest has 180 labels on available images, so 150 available-image labels are not yet in the Phase 2-8 coverage base. The next expansion should intentionally leave the first two pages and cover mixed layout types:
+
+```text
+GBC06_18.png#3   框内  -快看 / 接下来登场的乐队 / 竟然！        first obvious diamond/announcer-style block candidate
+GBC06_06.png#3   框内  毫无保留地 / 只要把现在的感受 / 唱出来就好了  long regular vertical bubble
+GBC06_17.png#3   框外  新川崎（暂）                              black-card/sign text, polarity-sensitive
+GBC06_29.png#2   框外  囚禁中挣脱而出！                          large non-bubble page text
+GBC06_33.png#1   框外  漫画第一卷 / 2026年6月29日发售！！          color promotional side text with numbers
+```
+
+The two current authoritative artifacts used for that selection, `phase1-gbc06-smoke/manifest.json` and `phase0-8-gbc06-pipeline-coverage-v12/pipeline-coverage.json`, do not provide source Japanese strings for the unprocessed candidates, so the candidate list records only translated text and positioning evidence.
+
 ## Interpretation
 
-The current detection prototype has already produced 30 candidate records across `GBC06_01.png` and `GBC06_02.png`. The v12 coverage tool counts all 30 records as complete across Phase 1 through Phase 8, and additionally treats Phase 8 export audit failures as quality issues that make affected records incomplete.
+The current detection prototype has already produced 30 candidate records across `GBC06_01.png` and `GBC06_02.png`. The v13 coverage tool counts all 30 records as complete across Phase 1 through Phase 8, and additionally treats Phase 7 MIMO preview evaluation failures plus Phase 8 export audit failures as quality issues that make affected records incomplete.
 
 The `GBC06_02.png#1-#3` expansion required two fixes: tighter adjacent-column text bbox selection and mask-aware page cleanup composition. The best MIMO-backed integrated run is `phase7-8-gbc06-02-batch-1-3-preview-v3`, with score `7` and `usable=true`; `#2` and `#3` each received per-record MIMO score `10`. A follow-up top-aligned vertical-column rendering experiment (`preview-v4`) dropped to score `5`, so it was not kept.
 
@@ -196,14 +226,14 @@ The `GBC06_01.png#14-#15` gap-closing run uses `phase4-gbc06-batch-14-15-layout-
 
 ## Verification
 
-Fresh verification for the coverage tool and the latest Phase 4 top-alignment regression:
+Fresh targeted verification for the coverage tool, Phase 7 evaluation failure preservation, and the latest Phase 4 top-alignment regression:
 
 ```powershell
-python -m pytest tests/test_pipeline_coverage.py tests/test_phase4_layout.py tests/test_phase8_export_quality_audit.py -q
+python -m pytest tests/test_pipeline_coverage.py tests/test_pipeline_quality_coverage.py tests/test_pipeline_quality_phase7.py tests/test_phase7_preview_evaluation.py tests/test_phase4_layout.py tests/test_phase8_export_quality_audit.py -q
 ```
 
 Observed result:
 
 ```text
-42 passed in 4.81s
+54 passed in 4.36s
 ```

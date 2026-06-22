@@ -231,7 +231,14 @@ def _failure_evaluation(row: dict, exc: Exception) -> dict:
         "preview_path": row.get("preview", {}).get("page_preview_path"),
         "evaluation_image_path": row.get("preview", {}).get("evaluation_image_path"),
         "record_count": row.get("preview", {}).get("record_count"),
-        "records": [],
+        "records": [
+            {
+                "record_id": record.get("record_id"),
+                "cleanup_method": record.get("cleanup_method"),
+                "translated_text": record.get("translated_text", ""),
+            }
+            for record in row.get("records", [])
+        ],
         "raw_model_text": None,
     }
 

@@ -54,6 +54,17 @@ class FakePreviewEvaluationClient:
         }
 
 
+class FailingPreviewEvaluationClient:
+    def analyze_image(
+        self,
+        image_path: str | Path,
+        prompt: str,
+        kind: str = "image_analysis",
+        max_completion_tokens: int | None = None,
+    ) -> dict:
+        raise TimeoutError("mimo timeout")
+
+
 def test_parse_preview_evaluation_response_extracts_structured_json():
     result = parse_preview_evaluation_response(
         '{"score":8,"usable":true,"original_text_removed":true,'
@@ -212,6 +223,32 @@ def test_run_phase7_preview_evaluation_writes_results_and_api_summaries(tmp_path
     assert api_calls[0]["request"]["prompt_chars"] > 0
     assert "api_key" not in json.dumps(api_calls[0]).lower()
     assert "Average score: 8.0" in report
+
+
+def test_run_phase7_preview_evaluation_preserves_records_when_api_fails(tmp_path: Path):
+    preview_run = tmp_path / "phase7"
+    preview_page = preview_run / "pages" / "page.png"
+    preview_page.parent.mkdir(parents=True)
+    Image.new("RGB", (64, 64), "white").save(preview_page)
+    before_after_a = tmp_path / "before-after-a.png"
+    before_after_b = tmp_path / "before-after-b.png"
+    Image.new("RGB", (80, 40), "white").save(before_after_a)
+    Image.new("RGB", (80, 40), "white").save(before_after_b)
+    _write_preview_results(preview_run / "preview-results.jsonl", preview_page, before_after_a, before_after_b)
+
+    run_dir = run_phase7_preview_evaluation(
+        preview_run_dir=preview_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase7-eval-failure-test",
+        sample_limit=1,
+        client=FailingPreviewEvaluationClient(),
+    )
+
+    evaluations = _read_jsonl(run_dir / "preview-evaluation.jsonl")
+
+    assert evaluations[0]["status"] == "failed"
+    assert evaluations[0]["failure_reason"] == "api_error:TimeoutError"
+    assert [record["record_id"] for record in evaluations[0]["records"]] == ["page.png#1", "page.png#16"]
 
 
 def _write_preview_results(path: Path, preview_page: Path, before_after_a: Path, before_after_b: Path) -> None:
