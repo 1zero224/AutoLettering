@@ -23,7 +23,7 @@ def run_phase6_nonbubble_cleanup(
     record_ids: list[str] | None = None,
     gpt_config: GptImageConfig | None = None,
     call_gpt_image: bool = False,
-    inpaint_method: str = "local_diffusion",
+    inpaint_method: str = "bt_lama_large",
 ) -> Path:
     run_dir = Path(output_root) / (run_id or "phase6-nonbubble-cleanup")
     run_dir.mkdir(parents=True, exist_ok=True)

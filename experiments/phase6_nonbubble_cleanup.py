@@ -24,8 +24,16 @@ def main() -> None:
     parser.add_argument("--call-gpt-image", action="store_true")
     parser.add_argument(
         "--inpaint-method",
-        default="local_diffusion",
-        choices=["local_diffusion", "opencv_telea", "opencv_ns", "dark_panel_fill", "bt_lama_large", "bt_patchmatch"],
+        default="bt_lama_large",
+        choices=[
+            "local_diffusion",
+            "flat_median_fill",
+            "opencv_telea",
+            "opencv_ns",
+            "dark_panel_fill",
+            "bt_lama_large",
+            "bt_patchmatch",
+        ],
     )
     args = parser.parse_args()
 

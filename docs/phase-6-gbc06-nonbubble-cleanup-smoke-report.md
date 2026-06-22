@@ -21,9 +21,9 @@ Relevant BallonsTranslator design points:
 Method options and tradeoffs:
 
 - `opencv-tela` / OpenCV inpaint: no model weights, fast, easy dependency; on this sample it left obvious ghosting/smearing and MIMO marked OpenCV variants unacceptable.
-- `patchmatch`: non-deep-learning algorithm similar to Photoshop healing/content-aware repair; needs native `data/libs` DLLs. After installing the BallonsTranslator Windows DLLs, it produced a very clean white background on this flat crop. Risk: native binary dependency and likely weaker on complex textured art.
+- `patchmatch`: non-deep-learning algorithm similar to Photoshop healing/content-aware repair; needs native `data/libs` DLLs. After installing the BallonsTranslator Windows DLLs, it produced a very clean white background on the flat crop and stayed competitive on the dark screentone phone crop. Risk: native binary dependency and Windows-specific local setup.
 - `aot`: manga-image-translator model; needs PyTorch and `aot_inpainter.ckpt`. Not selected first because LaMa is BallonsTranslator's current default and had a manga-specific large checkpoint.
-- `lama_mpe` / `lama_large_512px`: PyTorch checkpoint models; heavier than OpenCV/PatchMatch but most promising for non-flat manga backgrounds. `lama_large_512px` was selected for the main minimal integration experiment.
+- `lama_mpe` / `lama_large_512px`: PyTorch checkpoint models; heavier than OpenCV/PatchMatch and strongest in the final #17 candidate comparison. `lama_large_512px` is the current default because dependencies are acceptable and MIMO favored it on the harder screentone crop.
 - `flux2-klein`: much heavier diffusers/transformer/GGUF stack; not suitable for the first minimal local integration.
 
 ## Commands
@@ -61,12 +61,20 @@ Comparison images:
 - `outputs/runs/phase6-gbc06-inpaint-comparison/GBC06-01-png-16-inpaint-comparison.png`
 - `outputs/runs/phase6-gbc06-inpaint-comparison/GBC06-01-png-16-cleanup-only-x4.png`
 - `outputs/runs/phase6-gbc06-inpaint-comparison/GBC06-01-png-16-gpt-image2-x4.png`
+- Follow-up #16 method sheet after icon-mask fix: `outputs/runs/phase6-gbc06-01-16-inpainting-method-comparison-v4/debug/GBC06-01-png-16-inpainting-comparison.png`
+- Follow-up #17 method sheet on dark screentone: `outputs/runs/phase6-gbc06-01-17-inpainting-method-comparison-v2/debug/GBC06-01-png-17-inpainting-comparison.png`
+- Finalist #16 sheet: `outputs/runs/phase6-gbc06-01-16-inpainting-finalists-v2/debug/GBC06-01-png-16-inpainting-comparison.png`
+- Finalist #17 sheet: `outputs/runs/phase6-gbc06-01-17-inpainting-finalists-v2/debug/GBC06-01-png-17-inpainting-comparison.png`
 
 MIMO evaluation files:
 
 - `outputs/runs/phase6-gbc06-inpaint-comparison/reports/mimo-cleanup-only-x4-evaluation-0-10.json`
 - `outputs/runs/phase6-gbc06-inpaint-comparison/reports/mimo-gpt-image2-x4-evaluation.json`
 - Earlier mixed comparison kept for traceability: `outputs/runs/phase6-gbc06-inpaint-comparison/reports/mimo-inpaint-evaluation.json`
+- Follow-up #16 strict evaluation: `outputs/runs/phase6-gbc06-01-16-inpainting-method-comparison-v4/reports/mimo-inpainting-method-evaluation.json`
+- Follow-up #17 strict evaluation: `outputs/runs/phase6-gbc06-01-17-inpainting-method-comparison-v2/reports/mimo-inpainting-method-evaluation.json`
+- Finalist #16 evaluation: `outputs/runs/phase6-gbc06-01-16-inpainting-finalists-v2/reports/mimo-inpainting-method-evaluation.json`
+- Finalist #17 evaluation: `outputs/runs/phase6-gbc06-01-17-inpainting-finalists-v2/reports/mimo-inpainting-method-evaluation.json`
 
 ## Result Summary
 
@@ -151,22 +159,78 @@ GPT image direct replacement evaluation:
 
 MIMO summary: the black diamond was preserved, but the direct replacement hallucinated/overgenerated Chinese text, used an unmatched font style, changed the composition, and is not usable as a direct replacement for this crop.
 
+Follow-up strict cleanup comparison on `GBC06_01.png#16` after fixing the non-text diamond mask:
+
+```json
+{
+  "best_cleanup_method": "local_diffusion",
+  "ranking": [
+    "local_diffusion",
+    "flat_median_fill",
+    "bt_lama_large",
+    "opencv_telea",
+    "opencv_ns",
+    "bt_patchmatch",
+    "gpt_image2_direct_replacement"
+  ],
+  "unacceptable_methods": [
+    "gpt_image2_direct_replacement"
+  ]
+}
+```
+
+Follow-up strict cleanup comparison on dark screentone `GBC06_01.png#17`:
+
+```json
+{
+  "best_cleanup_method": "bt_lama_large",
+  "ranking": [
+    "bt_lama_large",
+    "bt_patchmatch",
+    "opencv_telea",
+    "opencv_ns",
+    "local_diffusion",
+    "flat_median_fill",
+    "gpt_image2_direct_replacement"
+  ],
+  "unacceptable_methods": [
+    "gpt_image2_direct_replacement"
+  ]
+}
+```
+
+Finalist-only MIMO runs reduced the wide-sheet noise:
+
+```json
+{
+  "GBC06_01.png#16": {
+    "best_cleanup_method": "bt_patchmatch",
+    "ranking": ["bt_patchmatch", "local_diffusion", "bt_lama_large", "gpt_image2_direct_replacement"]
+  },
+  "GBC06_01.png#17": {
+    "best_cleanup_method": "bt_lama_large",
+    "ranking": ["bt_lama_large", "bt_patchmatch", "gpt_image2_direct_replacement", "local_diffusion"]
+  }
+}
+```
+
+The #16 v2 run exposed a mask bug: the black diamond was correctly preserved, but the wide threshold treated the top glyph `桃` as a square solid icon and left it unmasked. The final fix detects non-text icons from a strict black-core mask, requires a diamond-like row profile, and subtracts only that icon region from the wider edit mask.
+
 ## Current Recommendation
 
-Use `bt_lama_large` as the preferred non-bubble cleanup method for the next integrated preview experiment.
+Use `bt_lama_large` as the current default non-bubble cleanup method.
 
 Rationale:
 
 - It is BallonsTranslator's current default model family.
-- It ran successfully in a minimal CPU experiment after installing PyTorch and downloading `lama_large_512px.ckpt`.
-- MIMO ranked it first on the zoomed cleanup-only comparison.
-- It should have better upside than PatchMatch on real textured manga backgrounds.
+- It ranked first on the final #17 screentone candidate comparison, where preserving halftone texture is harder than the white #16 crop.
+- On #16, MIMO judged all three local finalists usable; LaMa stayed in the high-score group while `gpt-image-2` remained unacceptable.
 
 Keep `bt_patchmatch` as the first fallback:
 
-- It was very clean on this flat-white crop.
 - It is fast and does not require PyTorch once DLLs are present.
-- It may be less robust on complex backgrounds, so it should not replace LaMa as the primary non-bubble choice yet.
+- It can preserve simple texture continuation well and remains useful when LaMa smears a region.
+- It can be selected explicitly with `--inpaint-method bt_patchmatch`.
 
 Do not use `gpt-image-2` direct replacement by default:
 
@@ -178,8 +242,10 @@ Do not use `gpt-image-2` direct replacement by default:
 Added non-bubble method choices:
 
 - `local_diffusion`
+- `flat_median_fill`
 - `opencv_telea`
 - `opencv_ns`
+- `dark_panel_fill`
 - `bt_lama_large`
 - `bt_patchmatch`
 
@@ -216,13 +282,15 @@ Fresh targeted verification:
 ```powershell
 python -m pytest tests/test_phase6_nonbubble_cleanup.py -q
 python -m pytest tests/test_phase6_nonbubble_cleanup.py tests/test_phase6_cleanup.py -q
+python -m pytest -q
 ```
 
 Observed results:
 
 ```text
-9 passed in 1.16s
-14 passed in 1.29s
+19 passed in 1.48s
+28 passed in 1.49s
+136 passed in 4.64s
 ```
 
 ## Notes

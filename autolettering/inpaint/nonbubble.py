@@ -15,7 +15,7 @@ def inpaint_nonbubble_text(
     bbox: tuple[int, int, int, int],
     output_dir: str | Path,
     record_id: str,
-    method: str = "local_diffusion",
+    method: str = "bt_lama_large",
     polarity: str = "dark_on_light",
     dark_threshold: int = 185,
     light_threshold: int = 210,
@@ -58,13 +58,15 @@ def inpaint_nonbubble_text(
 def inpaint_crop(
     crop: Image.Image,
     text_mask: Image.Image,
-    method: str = "local_diffusion",
+    method: str = "bt_lama_large",
     iterations: int = 80,
 ) -> tuple[str, Image.Image]:
     if method == "local_diffusion":
         return "local_diffusion_inpaint", diffuse_inpaint(crop, text_mask, iterations)
     if method in {"opencv_telea", "opencv_ns"}:
         return f"{method}_inpaint", opencv_inpaint(crop, text_mask, method)
+    if method == "flat_median_fill":
+        return "flat_median_fill", flat_median_fill(crop, text_mask)
     if method == "dark_panel_fill":
         return "dark_panel_fill", dark_panel_fill(crop, text_mask)
     if method == "bt_lama_large":
@@ -89,6 +91,7 @@ def build_text_mask(
         text = ImageChops.multiply(bright, text)
     else:
         text = gray.point(lambda value: 255 if value < dark_threshold else 0, mode="L")
+        text = _remove_large_solid_icon_components(text, gray)
     filter_size = max(3, dilate_px if dilate_px % 2 == 1 else dilate_px + 1)
     return text.filter(ImageFilter.MaxFilter(filter_size))
 
@@ -135,6 +138,103 @@ def dark_panel_fill(crop: Image.Image, text_mask: Image.Image) -> Image.Image:
     result = array.copy()
     result[mask] = fill_color
     return Image.fromarray(result, mode="RGB")
+
+
+def flat_median_fill(crop: Image.Image, text_mask: Image.Image) -> Image.Image:
+    array = np.array(crop.convert("RGB"), dtype=np.uint8)
+    mask = np.array(text_mask.convert("L")) > 0
+    if not bool(mask.any()):
+        return crop.convert("RGB")
+
+    background = ~mask
+    if not bool(background.any()):
+        fill_color = np.array([255, 255, 255], dtype=np.uint8)
+    else:
+        fill_color = np.median(array[background], axis=0).astype(np.uint8)
+    result = array.copy()
+    result[mask] = fill_color
+    return Image.fromarray(result, mode="RGB")
+
+
+def _remove_large_solid_icon_components(mask: Image.Image, gray: Image.Image | None = None) -> Image.Image:
+    array = np.array(mask.convert("L"), dtype=np.uint8)
+    binary = array > 0
+    if not bool(binary.any()):
+        return mask
+
+    height, width = binary.shape
+    min_area = max(400, int(height * width * 0.045))
+    strict_binary = binary
+    if gray is not None:
+        strict_binary = np.array(gray.convert("L"), dtype=np.uint8) < 80
+    visited = np.zeros_like(strict_binary, dtype=bool)
+    result = binary.copy()
+    for start_y, start_x in zip(*np.where(strict_binary & ~visited)):
+        pixels = _component_pixels(strict_binary, visited, int(start_x), int(start_y))
+        if _looks_like_solid_icon(pixels, min_area):
+            ys, xs = zip(*pixels)
+            margin = 1
+            y1 = max(0, min(ys) - margin)
+            y2 = min(height, max(ys) + margin + 1)
+            x1 = max(0, min(xs) - margin)
+            x2 = min(width, max(xs) + margin + 1)
+            result[y1:y2, x1:x2] = False
+
+    return Image.fromarray((result.astype(np.uint8) * 255), mode="L")
+
+
+def _component_pixels(binary: np.ndarray, visited: np.ndarray, start_x: int, start_y: int) -> list[tuple[int, int]]:
+    stack = [(start_x, start_y)]
+    visited[start_y, start_x] = True
+    pixels: list[tuple[int, int]] = []
+    height, width = binary.shape
+    while stack:
+        x, y = stack.pop()
+        pixels.append((y, x))
+        for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+            if nx < 0 or ny < 0 or nx >= width or ny >= height:
+                continue
+            if visited[ny, nx] or not binary[ny, nx]:
+                continue
+            visited[ny, nx] = True
+            stack.append((nx, ny))
+    return pixels
+
+
+def _looks_like_solid_icon(pixels: list[tuple[int, int]], min_area: int) -> bool:
+    area = len(pixels)
+    if area < min_area:
+        return False
+    ys, xs = zip(*pixels)
+    component_width = max(xs) - min(xs) + 1
+    component_height = max(ys) - min(ys) + 1
+    aspect = component_width / max(1, component_height)
+    fill_ratio = area / max(1, component_width * component_height)
+    return 0.65 <= aspect <= 1.55 and fill_ratio >= 0.38 and _has_diamond_profile(pixels)
+
+
+def _has_diamond_profile(pixels: list[tuple[int, int]]) -> bool:
+    ys, xs = zip(*pixels)
+    min_y, max_y = min(ys), max(ys)
+    min_x, max_x = min(xs), max(xs)
+    height = max_y - min_y + 1
+    width = max_x - min_x + 1
+    if height < 12 or width < 12:
+        return False
+    rows = np.zeros((height, width), dtype=bool)
+    rows[np.array(ys) - min_y, np.array(xs) - min_x] = True
+    row_widths = rows.sum(axis=1)
+    nonempty = row_widths[row_widths > 0]
+    if nonempty.size < 5:
+        return False
+    peak_index = int(np.argmax(row_widths))
+    peak_width = int(row_widths[peak_index])
+    if peak_width <= 0:
+        return False
+    edge_limit = peak_width * 0.45
+    peak_centered = height * 0.25 <= peak_index <= height * 0.75
+    narrow_edges = int(nonempty[0]) <= edge_limit and int(nonempty[-1]) <= edge_limit
+    return peak_centered and narrow_edges
 
 
 def _initial_fill(array: np.ndarray, mask: np.ndarray) -> np.ndarray:

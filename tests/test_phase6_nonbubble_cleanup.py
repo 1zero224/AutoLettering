@@ -23,6 +23,36 @@ def test_build_text_mask_and_gpt_mask_use_expected_alpha_convention():
     assert gpt_mask.getpixel((2, 2))[3] == 255
 
 
+def test_build_text_mask_excludes_large_solid_icon_on_light_background():
+    crop = Image.new("RGB", (80, 150), "white")
+    draw = ImageDraw.Draw(crop)
+    draw.polygon([(40, 6), (68, 34), (40, 62), (12, 34)], fill="black")
+    draw.line((22, 82, 58, 82), fill="black", width=6)
+    draw.line((40, 70, 40, 118), fill="black", width=6)
+    draw.line((25, 118, 55, 118), fill="black", width=6)
+
+    text_mask = build_text_mask(crop, dark_threshold=80, dilate_px=3)
+
+    assert text_mask.getpixel((40, 34)) == 0
+    assert text_mask.getpixel((40, 82)) == 255
+
+
+def test_build_text_mask_preserves_broad_square_glyph_below_icon():
+    crop = Image.new("RGB", (80, 180), "white")
+    draw = ImageDraw.Draw(crop)
+    draw.polygon([(40, 6), (68, 34), (40, 62), (12, 34)], fill="black")
+    draw.rectangle((18, 78, 62, 122), fill=(120, 120, 120))
+    draw.rectangle((26, 86, 34, 114), fill="white")
+    draw.rectangle((46, 86, 54, 114), fill="white")
+    draw.line((18, 100, 62, 100), fill=(40, 40, 40), width=4)
+
+    text_mask = build_text_mask(crop, dark_threshold=185, dilate_px=3)
+
+    assert text_mask.getpixel((40, 34)) == 0
+    assert text_mask.getpixel((40, 100)) == 255
+    assert text_mask.getpixel((20, 80)) == 255
+
+
 def test_build_text_mask_can_select_light_text_on_dark_background():
     crop = Image.new("RGB", (40, 30), (20, 20, 20))
     ImageDraw.Draw(crop).rectangle((15, 8, 25, 22), fill="white")
@@ -54,6 +84,7 @@ def test_inpaint_nonbubble_text_writes_artifacts_and_reduces_dark_text(tmp_path:
         bbox=(20, 15, 90, 75),
         output_dir=tmp_path / "nonbubble",
         record_id="page.png#2",
+        method="local_diffusion",
     )
 
     assert result.cleaned_crop_path.exists()
@@ -126,6 +157,21 @@ def test_inpaint_crop_supports_dark_panel_fill_method():
     assert result.getpixel((2, 2)) == (18, 18, 18)
 
 
+def test_inpaint_crop_supports_flat_median_fill_method():
+    crop = Image.new("RGB", (42, 32), (248, 248, 246))
+    draw = ImageDraw.Draw(crop)
+    draw.rectangle((14, 7, 26, 24), fill="black")
+    draw.line((0, 30, 41, 30), fill=(20, 20, 20), width=1)
+    mask = Image.new("L", crop.size, 0)
+    ImageDraw.Draw(mask).rectangle((14, 7, 26, 24), fill=255)
+
+    method, result = inpaint_crop(crop, mask, "flat_median_fill")
+
+    assert method == "flat_median_fill"
+    assert result.convert("L").getpixel((20, 15)) > 240
+    assert result.convert("L").getpixel((20, 30)) < 40
+
+
 def test_run_phase6_nonbubble_cleanup_writes_local_and_gpt_dry_run(tmp_path: Path):
     image_path = _write_nonbubble_image(tmp_path / "page.png")
     detection_run = tmp_path / "phase2"
@@ -148,6 +194,27 @@ def test_run_phase6_nonbubble_cleanup_writes_local_and_gpt_dry_run(tmp_path: Pat
     assert rows[0]["gpt_image2_edit"]["request"]["kind"] == "gpt_image_2_masked_edit"
     assert Path(rows[0]["cleanup"]["gpt_mask_path"]).exists()
     assert (run_dir / "reports" / "phase6-nonbubble-report.md").exists()
+
+
+def test_run_phase6_nonbubble_cleanup_defaults_to_lama_large(tmp_path: Path, monkeypatch):
+    image_path = _write_nonbubble_image(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(detection_run / "detections.jsonl", image_path)
+    monkeypatch.setattr(
+        "autolettering.inpaint.nonbubble.balloons_lama_large_inpaint",
+        lambda crop_arg, mask_arg: Image.new("RGB", crop_arg.size, "white"),
+    )
+
+    run_dir = run_phase6_nonbubble_cleanup(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-nonbubble-default",
+        sample_limit=1,
+    )
+
+    rows = _read_jsonl(run_dir / "cleanup-results.jsonl")
+    assert rows[0]["cleanup"]["method"] == "bt_lama_large_inpaint"
 
 
 def test_run_phase6_nonbubble_cleanup_can_filter_record_ids(tmp_path: Path):
@@ -236,6 +303,7 @@ def test_run_phase6_nonbubble_cleanup_uses_selected_candidate_polarity(tmp_path:
         output_root=tmp_path / "outputs",
         run_id="phase6-nonbubble-light-mask",
         sample_limit=1,
+        inpaint_method="local_diffusion",
     )
 
     rows = _read_jsonl(run_dir / "cleanup-results.jsonl")
@@ -251,6 +319,10 @@ def test_run_phase6_nonbubble_cleanup_records_gpt_success_with_fake_client(tmp_p
     detection_run.mkdir()
     _write_detection(detection_run / "detections.jsonl", image_path)
     monkeypatch.setattr("autolettering.phase6_nonbubble.GptImageEditClient", lambda config: _FakeGptClient())
+    monkeypatch.setattr(
+        "autolettering.inpaint.nonbubble.balloons_lama_large_inpaint",
+        lambda crop_arg, mask_arg: Image.new("RGB", crop_arg.size, "white"),
+    )
 
     run_dir = run_phase6_nonbubble_cleanup(
         detection_run_dir=detection_run,

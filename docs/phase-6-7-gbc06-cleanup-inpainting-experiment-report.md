@@ -28,10 +28,10 @@ Available methods and practical tradeoffs:
 | Method | Local availability | Strengths | Weaknesses | Decision |
 | --- | --- | --- | --- | --- |
 | OpenCV Telea / NS | Available through OpenCV | No model weights, fast, good enough on simple flat white areas | Weak on textured manga art; may smear or leave ghosts | Keep as light fallback |
-| PatchMatch | `BallonsTranslator/data/libs/patchmatch_inpaint.dll` exists | Fast native repair, often good on simple texture continuation | Platform DLL dependency; fallback quality uncertain on complex screentone | Keep as fallback |
+| PatchMatch | `BallonsTranslator/data/libs/patchmatch_inpaint.dll` exists | Fast native repair, strong on simple texture continuation | Platform DLL dependency; Windows-specific local setup | Keep as first fallback |
 | AOT | Weight missing locally | Manga-image-translator style deep inpaint path | Requires missing `aot_inpainter.ckpt`; more setup than LaMa | Not selected for minimal experiment |
 | LaMa MPE | Weight missing locally | BallonsTranslator-supported LaMa family | Requires missing `lama_mpe.ckpt` | Not selected |
-| LaMa large 512px | `BallonsTranslator/data/models/lama_large_512px.ckpt` exists | Best local deep inpaint candidate; works through current integration | Heavier PyTorch path | Selected for non-bubble primary |
+| LaMa large 512px | `BallonsTranslator/data/models/lama_large_512px.ckpt` exists | Best local deep inpaint candidate; won final #17 screentone candidate comparison; works through current integration | Heavier PyTorch path | Use as current default |
 | Flux2 Klein | Not used | Potentially stronger generative inpaint | Heavy diffusers/transformers/GGUF stack; large dependency surface | Not selected for minimal experiment |
 | `gpt-image-2` masked edit | API path already integrated experimentally | Can remove/replace the masked area in one generative call | On this sample, generated Chinese lettering is unreadable; not reliable for exact typesetting | Not selected as default |
 
@@ -120,6 +120,7 @@ The current integration already routes non-bubble cleanup through:
 - `bt_patchmatch`
 - `opencv_telea`
 - `opencv_ns`
+- `flat_median_fill`
 - `local_diffusion`
 - `gpt-image-2` masked edit path
 
@@ -165,12 +166,48 @@ Key artifacts:
 
 Decision:
 
-- Use `bt_lama_large` as the primary non-bubble inpainting method.
-- Keep `bt_patchmatch`, OpenCV Telea, and OpenCV NS as fallback/fast paths.
+- Earlier end-to-end preview evaluation favored `bt_lama_large` on #16.
+- Cleanup-only follow-ups showed MIMO ranking noise on wide multi-method sheets, so the final decision used a smaller finalist sheet with `local_diffusion`, `bt_patchmatch`, `bt_lama_large`, and `gpt-image-2`.
+- Use `bt_lama_large` as the current default non-bubble inpainting method.
+- Keep `bt_patchmatch`, OpenCV Telea, and OpenCV NS as explicit fallback/diagnostic paths.
 - Do not use `gpt-image-2` masked edit as the default for exact readable
   translated lettering. It may still be useful as a background cleanup or
   exploratory generative path, but not as an end-to-end lettering replacement
   for this sample.
+
+### Follow-up Cleanup-Only Comparison
+
+Additional method-comparison script:
+
+```powershell
+python experiments/phase6_inpainting_method_comparison.py --detection-run-dir outputs/runs/phase2-gbc06-smoke-v3 --run-id phase6-gbc06-01-16-inpainting-method-comparison-v4 --record-id "GBC06_01.png#16" --include-gpt-output outputs/runs/phase6-gbc06-nonbubble-gpt-image-smoke/gpt_image2_normalized/GBC06-01-png-16.png
+python experiments/phase6_inpainting_method_comparison.py --detection-run-dir outputs/runs/phase2-gbc06-smoke-v3 --run-id phase6-gbc06-01-17-inpainting-method-comparison-v2 --record-id "GBC06_01.png#17" --include-gpt-output outputs/runs/phase6-gbc06-batch-17-gpt-image2-polarity-v1/gpt_image2_normalized/GBC06-01-png-17.png
+python experiments/phase6_inpainting_method_comparison.py --detection-run-dir outputs/runs/phase2-gbc06-smoke-v3 --run-id phase6-gbc06-01-16-inpainting-finalists-v2 --record-id "GBC06_01.png#16" --method local_diffusion --method bt_patchmatch --method bt_lama_large --include-gpt-output outputs/runs/phase6-gbc06-nonbubble-gpt-image-smoke/gpt_image2_normalized/GBC06-01-png-16.png
+python experiments/phase6_inpainting_method_comparison.py --detection-run-dir outputs/runs/phase2-gbc06-smoke-v3 --run-id phase6-gbc06-01-17-inpainting-finalists-v2 --record-id "GBC06_01.png#17" --method local_diffusion --method bt_patchmatch --method bt_lama_large --include-gpt-output outputs/runs/phase6-gbc06-batch-17-gpt-image2-polarity-v1/gpt_image2_normalized/GBC06-01-png-17.png
+```
+
+Key artifacts:
+
+- #16 comparison sheet: `outputs/runs/phase6-gbc06-01-16-inpainting-method-comparison-v4/debug/GBC06-01-png-16-inpainting-comparison.png`
+- #16 MIMO result: `outputs/runs/phase6-gbc06-01-16-inpainting-method-comparison-v4/reports/mimo-inpainting-method-evaluation.json`
+- #17 comparison sheet: `outputs/runs/phase6-gbc06-01-17-inpainting-method-comparison-v2/debug/GBC06-01-png-17-inpainting-comparison.png`
+- #17 MIMO result: `outputs/runs/phase6-gbc06-01-17-inpainting-method-comparison-v2/reports/mimo-inpainting-method-evaluation.json`
+- #16 finalist MIMO result: `outputs/runs/phase6-gbc06-01-16-inpainting-finalists-v2/reports/mimo-inpainting-method-evaluation.json`
+- #17 finalist MIMO result: `outputs/runs/phase6-gbc06-01-17-inpainting-finalists-v2/reports/mimo-inpainting-method-evaluation.json`
+
+MIMO cleanup-only results:
+
+| Record | Best method | Ranking head | Unacceptable methods | Notes |
+| --- | --- | --- | --- | --- |
+| `GBC06_01.png#16` finalist | `bt_patchmatch` | `bt_patchmatch`, `local_diffusion`, `bt_lama_large` | `gpt_image2_direct_replacement` | White/smooth background; PatchMatch and LaMa both scored artifact_score=1 |
+| `GBC06_01.png#17` finalist | `bt_lama_large` | `bt_lama_large`, `bt_patchmatch`, `gpt_image2_direct_replacement` | `local_diffusion`, `gpt_image2_direct_replacement` | Dark screentone phone crop; LaMa preserved halftone best |
+
+Mask bug found and fixed during the follow-up:
+
+- `GBC06_01.png#16` contains a black diamond above the Japanese text.
+- The first icon-preservation attempt removed all large square solid components from the wide `dark_threshold=185` mask.
+- That preserved the diamond but also left the top glyph `桃` unmasked.
+- The fixed mask logic identifies solid non-text icons from a strict black-core mask, requires a diamond-like row profile, then subtracts only that icon region from the wider edit mask.
 
 ## Dark-Panel Text Cleanup
 
@@ -243,7 +280,8 @@ Dark-panel experiment artifacts:
 
 Decision:
 
-- Keep `bt_lama_large` as the default non-bubble cleanup method.
+- Keep `bt_lama_large` as the default non-bubble cleanup method after the finalist MIMO comparison.
+- Keep `bt_patchmatch` as the first fast/native fallback when LaMa smears a region.
 - Keep `dark_panel_fill` as a narrow fallback for dark UI/panel backgrounds
   when deep inpainting leaves visible residue.
 - Do not use `gpt-image-2` as the default exact-lettering path. On #17 it
@@ -288,4 +326,16 @@ Observed result:
 37 passed
 ```
 
-Fresh final verification should still be run before committing.
+Latest final verification:
+
+```powershell
+python -m pytest tests/test_phase6_nonbubble_cleanup.py tests/test_phase6_cleanup.py -q
+python -m pytest -q
+```
+
+Observed result:
+
+```text
+28 passed in 1.49s
+136 passed in 4.64s
+```
