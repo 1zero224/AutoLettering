@@ -85,7 +85,7 @@ def _layout_record(
     angle = angle_rows.get(row["record_id"])
     layout, target_bbox, target_size = _search_layout_for_record(row, font_path, angle, detection_rows)
     text_color = _text_color_for_record(row["record_id"], detection_rows, target_bbox)
-    vertical_align = _vertical_align_for_record(detection_rows.get(row["record_id"]), target_bbox)
+    vertical_align = _vertical_align_for_record(layout)
     preview_path = run_dir / "debug" / "layout_candidates" / f"{_safe_name(row['record_id'])}.png"
     render_layout_preview(
         layout,
@@ -194,12 +194,10 @@ def _text_color_for_record(
     return (0, 0, 0, 255)
 
 
-def _vertical_align_for_record(detection: dict | None, target_bbox: list[int] | None) -> str:
-    if detection is None or target_bbox is None:
+def _vertical_align_for_record(layout) -> str:
+    if layout.orientation != "vertical":
         return "center"
-    full_bbox = selected_text_bbox(detection)
-    body_bbox = selected_text_body_bbox(detection)
-    return "top" if body_bbox != full_bbox and tuple(target_bbox) == body_bbox else "center"
+    return "top"
 
 
 def _bbox_size(bbox: list[int]) -> tuple[int, int]:
@@ -219,7 +217,9 @@ def _max_font_size(
     column_width = _source_column_width(detection, tuple(target_bbox))
     if column_width is None:
         return decorated_limit or 72
-    if _short_vertical_translation(translated_text):
+    if _very_short_vertical_translation(translated_text):
+        multiplier = 0.9
+    elif _short_vertical_translation(translated_text):
         multiplier = 1.0
     elif _explicit_multicolumn_translation(translated_text):
         multiplier = 0.92
@@ -251,6 +251,11 @@ def _decorated_title_font_limit(
 def _short_vertical_translation(translated_text: str) -> bool:
     text = "".join(str(translated_text).split())
     return 0 < len(text) <= 4
+
+
+def _very_short_vertical_translation(translated_text: str) -> bool:
+    text = "".join(str(translated_text).split())
+    return 0 < len(text) <= 2
 
 
 def _explicit_multicolumn_translation(translated_text: str) -> bool:

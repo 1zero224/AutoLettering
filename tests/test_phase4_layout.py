@@ -597,6 +597,42 @@ def test_run_phase4_keeps_short_vertical_translation_close_to_source_glyph_width
     assert layout["font_size"] <= 38
 
 
+def test_run_phase4_caps_very_short_vertical_translation_below_source_glyph_width(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+    source_crop_path = tmp_path / "source-crop.png"
+    Image.new("RGB", (90, 120), "white").save(source_crop_path)
+    phase2_run = tmp_path / "phase2-detection"
+    phase3_run = tmp_path / "phase3-selection"
+    phase5_run = tmp_path / "phase5-angle"
+    for path in [phase2_run, phase3_run, phase5_run]:
+        path.mkdir()
+    _write_font_selection(
+        phase3_run / "font-selections.jsonl",
+        font_path,
+        source_crop_path,
+        translated_text="诶？",
+    )
+    _write_detection_like_gbc06_02_record_10(phase2_run / "detections.jsonl")
+    _write_micro_angle_result(phase5_run / "angle-results.jsonl")
+
+    run_dir = run_phase4(
+        selection_run_dir=phase3_run,
+        angle_run_dir=phase5_run,
+        detection_run_dir=phase2_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase4-very-short-vertical-source-scale",
+        sample_limit=1,
+    )
+
+    layout = _read_jsonl(run_dir / "layout-results.jsonl")[0]["layout"]
+    assert layout["target_bbox"] == [343, 1215, 381, 1302]
+    assert layout["orientation"] == "vertical"
+    assert layout["angle_degrees"] == 0.0
+    assert layout["vertical_align"] == "top"
+    assert layout["alignment"]["ink_bbox"][1] <= 2
+    assert layout["font_size"] <= 34
+
+
 def test_run_phase4_caps_multicolumn_vertical_translation_below_source_column_width(tmp_path: Path):
     font_path = _copy_font(tmp_path)
     source_crop_path = tmp_path / "source-crop.png"
@@ -866,6 +902,22 @@ def _write_detection_like_gbc06_02_record_8(path: Path) -> None:
             {"xyxy": [725, 1002, 761, 1128], "area": 3221, "score": 0.9034, "polarity": "dark_on_light"},
             {"xyxy": [793, 903, 893, 959], "area": 4520, "score": 0.7959, "polarity": "dark_on_light"},
             {"xyxy": [594, 903, 679, 1263], "area": 13599, "score": 0.7658, "polarity": "dark_on_light"},
+        ],
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _write_detection_like_gbc06_02_record_10(path: Path) -> None:
+    payload = {
+        "record_id": "page.png#1",
+        "status": "ok",
+        "search_region_xyxy": [177, 1116, 617, 1476],
+        "selected_text_box_xyxy": [177, 1116, 617, 1376],
+        "candidate_boxes": [
+            {"xyxy": [177, 1116, 617, 1376], "area": 44005, "score": 0.934, "polarity": "dark_on_light"},
+            {"xyxy": [350, 1243, 380, 1302], "area": 1184, "score": 0.8939, "polarity": "dark_on_light"},
+            {"xyxy": [343, 1215, 381, 1243], "area": 696, "score": 0.7528, "polarity": "dark_on_light"},
+            {"xyxy": [338, 1209, 387, 1308], "area": 3682, "score": 0.9328, "polarity": "light_on_dark"},
         ],
     }
     path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")

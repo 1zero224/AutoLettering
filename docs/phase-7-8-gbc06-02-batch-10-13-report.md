@@ -155,6 +155,76 @@ outputs/runs/phase7-8-gbc06-02-batch-10-13-preview-v7/runs/phase7-preview/debug/
 
 An attempted widened/upscaled evaluation-contact-sheet format caused MIMO to over-penalize tight crops as if full speech-bubble backgrounds were missing. That change was rejected; the selected artifact remains v7.
 
+### v8/v9: Very Short Vertical Cap and Top-Aligned Vertical Text
+
+Follow-up report:
+
+```text
+docs/phase-7-8-gbc06-02-10-short-vertical-cap-report.md
+```
+
+The v7 batch score made `#10` look worse than it was. A single-record MIMO evaluation confirmed that cleanup was already successful, but the rendered `诶？` was slightly too large and heavy:
+
+```json
+{
+  "score": 8,
+  "usable": true,
+  "original_text_removed": true,
+  "issues": [
+    "The lettering is noticeably thicker and heavier than the original text.",
+    "The lettering size is slightly larger than the original text."
+  ]
+}
+```
+
+Phase 4 now applies a stricter source-column-width cap for vertical translations of one or two non-whitespace characters. For `GBC06_02.png#10`, the automatic layout changed from `font_size=38` to `font_size=34` while keeping `angle_degrees=0.0`.
+
+The first v8 run still vertically centered short vertical text inside the target box. That looked wrong for manga vertical lettering, especially for `诶？`. The v9 follow-up changes Phase 4 so vertical layouts default to `vertical_align=top`, while horizontal layouts remain centered.
+
+Single-record top-align layout:
+
+```json
+{
+  "record_id": "GBC06_02.png#10",
+  "font_size": 34,
+  "angle_degrees": 0.0,
+  "vertical_align": "top",
+  "alignment": {
+    "ink_bbox": [2, 0, 36, 67]
+  }
+}
+```
+
+Single-record v9 MIMO:
+
+```json
+{
+  "score": 9,
+  "usable": true,
+  "original_text_removed": true,
+  "art_preserved": true,
+  "lettering_readable": true,
+  "issues": []
+}
+```
+
+Batch v9 integrated run:
+
+```text
+outputs/runs/phase7-8-gbc06-02-batch-10-13-preview-v9-top-align
+```
+
+Batch v9 MIMO score is `9`. It is usable, original text is removed, art is preserved, and lettering is readable. The remaining note is minor background fill blur/texture loss, not layout/read-order failure.
+
+Manual comparison artifacts:
+
+```text
+outputs/runs/phase7-gbc06-02-10-final-comparison-v3/debug/local-method-comparison.png
+outputs/runs/phase7-gbc06-02-batch-10-13-v7-v8-comparison/debug/local-method-comparison.png
+outputs/runs/phase7-gbc06-02-10-center-vs-top-align-v3/debug/local-method-comparison.png
+outputs/runs/phase7-gbc06-02-batch-10-13-v8-v9-top-align-comparison/debug/local-method-comparison.png
+```
+
 ## Code Changes
 
 - `autolettering/text_bbox.py`
@@ -167,6 +237,8 @@ An attempted widened/upscaled evaluation-contact-sheet format caused MIMO to ove
   - Keeps short vertical translations as one column.
 - `autolettering/phase4.py`
   - Caps explicit multi-column vertical translations below the source column width to avoid oversized dense text.
+  - Caps very short vertical translations more tightly than other short vertical translations, fixing the oversized `诶？` in `GBC06_02.png#10`.
+  - Top-aligns vertical layouts by default instead of vertically centering them in the target text box.
 - `autolettering/phase6.py`
   - Uses the actual derived text bbox as the bubble cleanup crop, rather than unioning it with an often-large selected detection bbox.
 - `autolettering/phase7_evaluate.py`
