@@ -106,3 +106,39 @@ def test_selected_text_bbox_does_not_bridge_light_text_to_separate_upper_art():
     }
 
     assert selected_text_bbox(detection) == (286, 277, 393, 361)
+
+
+def test_selected_text_bbox_excludes_panel_border_and_neighbor_text_for_gbc06_02_record_3():
+    detection = {
+        "selected_text_box_xyxy": [826, 490, 1192, 758],
+        "search_region_xyxy": [752, 490, 1192, 850],
+        "candidate_boxes": [
+            {"xyxy": [826, 490, 1192, 758], "area": 14882, "score": 0.9221},
+            {"xyxy": [906, 539, 940, 728], "area": 4859, "score": 0.9194},
+            {"xyxy": [866, 604, 901, 668], "area": 1571, "score": 0.8749},
+            {"xyxy": [1028, 520, 1061, 616], "area": 2380, "score": 0.8349},
+            {"xyxy": [987, 490, 1022, 590], "area": 2609, "score": 0.8232},
+            {"xyxy": [752, 784, 1192, 850], "area": 20603, "score": 0.8061},
+            {"xyxy": [1065, 490, 1102, 558], "area": 2117, "score": 0.7576},
+            {"xyxy": [752, 490, 824, 758], "area": 6260, "score": 0.7498},
+        ],
+    }
+
+    assert selected_text_bbox(detection) == (866, 539, 940, 728)
+
+
+def test_selected_text_bbox_includes_lower_score_adjacent_column_for_gbc06_02_record_2():
+    detection = {
+        "selected_text_box_xyxy": [892, 391, 1324, 751],
+        "search_region_xyxy": [892, 391, 1332, 751],
+        "candidate_boxes": [
+            {"xyxy": [892, 391, 1324, 751], "area": 18203, "score": 0.9947},
+            {"xyxy": [1065, 462, 1102, 558], "area": 3076, "score": 0.9112},
+            {"xyxy": [1028, 520, 1061, 616], "area": 2380, "score": 0.9109},
+            {"xyxy": [1027, 463, 1061, 519], "area": 1588, "score": 0.8615},
+            {"xyxy": [987, 463, 1022, 590], "area": 3267, "score": 0.8465},
+            {"xyxy": [906, 539, 940, 728], "area": 4859, "score": 0.7374},
+        ],
+    }
+
+    assert selected_text_bbox(detection) == (906, 462, 1102, 728)

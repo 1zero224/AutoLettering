@@ -122,6 +122,51 @@ Method options and tradeoffs:
 
 The switch to region fill fixes the remaining faint source-text ghosts from the mask-fill method while still avoiding heavyweight inpainting for flat white speech bubbles.
 
+## Overlapping Bubble Composition Update
+
+The `GBC06_02.png#1-#3` batch exposed a separate composition failure:
+
+- `GBC06_02.png#2` and `GBC06_02.png#3` use overlapping selected/crop regions.
+- Whole-crop page composition pasted `#3` after `#2`, restoring old Japanese pixels inside the part of `#2` that had already been cleaned.
+- MIMO scored that intermediate result `3`, unusable, even after the tight text bbox itself was corrected.
+
+The current bubble cleanup output therefore also writes:
+
+```text
+crops/mask/*.png
+cleanup.cleanup_mask_path
+```
+
+Phase 7 now pastes cleanup crops through that mask when available, and applies all cleanup layers before any text overlay. This keeps the large crop as context/debug evidence while limiting the actual page edit to the region that Phase 6 changed.
+
+Best follow-up run:
+
+```text
+outputs/runs/phase7-8-gbc06-02-batch-1-3-preview-v3
+```
+
+MIMO result:
+
+```json
+{
+  "score": 7,
+  "usable": true,
+  "original_text_removed": true,
+  "art_preserved": true,
+  "lettering_readable": true
+}
+```
+
+Per-record MIMO scores:
+
+```text
+GBC06_02.png#1  score=7  usable=true
+GBC06_02.png#2  score=10 usable=true
+GBC06_02.png#3  score=10 usable=true
+```
+
+An attempted vertical-column top-alignment optimization was tested in `phase7-8-gbc06-02-batch-1-3-preview-v4`, but MIMO score dropped to `5`, so that rendering change was reverted and kept only as a negative experiment artifact.
+
 ## MIMO Evaluation
 
 MIMO vision model: `mimo-v2.5`

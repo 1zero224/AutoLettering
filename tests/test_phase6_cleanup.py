@@ -132,6 +132,29 @@ def test_run_phase6_bubble_cleanup_can_keep_mask_fill_for_comparison(tmp_path: P
     assert rows[0]["cleanup"]["method"] == "bubble_mask_fill"
 
 
+def test_run_phase6_bubble_cleanup_filters_by_record_id_before_sample_limit(tmp_path: Path):
+    image_path = _write_sample_image(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    layout_run = tmp_path / "phase4"
+    detection_run.mkdir()
+    layout_run.mkdir()
+    _write_detection(detection_run / "detections.jsonl", image_path, record_ids=["page.png#1", "page.png#2"])
+    _write_layout(layout_run / "layout-results.jsonl", record_ids=["page.png#1", "page.png#2"])
+
+    run_dir = run_phase6_bubble_cleanup(
+        detection_run_dir=detection_run,
+        layout_run_dir=layout_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-filter-test",
+        sample_limit=1,
+        record_ids=["page.png#2"],
+    )
+
+    rows = _read_jsonl(run_dir / "cleanup-results.jsonl")
+    assert [row["record_id"] for row in rows] == ["page.png#2"]
+    assert rows[0]["status"] == "cleaned"
+
+
 def test_text_bbox_unions_small_text_candidates_inside_large_detection():
     detection = {
         "selected_text_box_xyxy": [0, 0, 200, 200],
@@ -152,29 +175,36 @@ def _write_sample_image(path: Path) -> Path:
     return path
 
 
-def _write_detection(path: Path, image_path: Path) -> None:
-    payload = {
-        "record_id": "page.png#1",
-        "status": "ok",
-        "image_name": "page.png",
-        "image_path": str(image_path),
-        "group_name": "框内",
-        "selected_text_box_xyxy": [35, 25, 80, 90],
-        "candidate_boxes": [
-            {"xyxy": [42, 35, 72, 85], "area": 1500, "dark_pixel_count": 600},
-            {"xyxy": [35, 25, 80, 90], "area": 2925, "dark_pixel_count": 700},
-        ],
-    }
-    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+def _write_detection(path: Path, image_path: Path, record_ids: list[str] | None = None) -> None:
+    rows = []
+    for record_id in record_ids or ["page.png#1"]:
+        rows.append(
+            {
+                "record_id": record_id,
+                "status": "ok",
+                "image_name": "page.png",
+                "image_path": str(image_path),
+                "group_name": "框内",
+                "selected_text_box_xyxy": [35, 25, 80, 90],
+                "candidate_boxes": [
+                    {"xyxy": [42, 35, 72, 85], "area": 1500, "dark_pixel_count": 600},
+                    {"xyxy": [35, 25, 80, 90], "area": 2925, "dark_pixel_count": 700},
+                ],
+            }
+        )
+    path.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8")
 
 
-def _write_layout(path: Path) -> None:
-    payload = {
-        "record_id": "page.png#1",
-        "status": "layout_generated",
-        "layout": {"preview_path": "unused.png"},
-    }
-    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+def _write_layout(path: Path, record_ids: list[str] | None = None) -> None:
+    rows = [
+        {
+            "record_id": record_id,
+            "status": "layout_generated",
+            "layout": {"preview_path": "unused.png"},
+        }
+        for record_id in record_ids or ["page.png#1"]
+    ]
+    path.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8")
 
 
 def _read_jsonl(path: Path) -> list[dict]:

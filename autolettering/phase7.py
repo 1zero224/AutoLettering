@@ -110,6 +110,7 @@ def _preview_record(detection: dict, cleanup: dict, layout: dict) -> dict:
         "text_bbox": text_bbox,
         "cleanup_method": _cleanup_method(cleanup["cleanup"]),
         "cleaned_crop_path": _cleanup_crop_path(cleanup["cleanup"]),
+        "cleanup_mask_path": _cleanup_mask_path(cleanup["cleanup"]),
         "layout_preview_path": layout["layout"]["preview_path"],
     }
 
@@ -158,6 +159,12 @@ def _record_summary(record: dict) -> dict:
 
 def _cleanup_crop_path(cleanup: dict) -> str:
     return cleanup.get("replacement_crop_path") or cleanup["cleaned_crop_path"]
+
+
+def _cleanup_mask_path(cleanup: dict) -> str | None:
+    if cleanup.get("replacement_crop_path"):
+        return None
+    return cleanup.get("cleanup_mask_path")
 
 
 def _cleanup_method(cleanup: dict) -> str | None:

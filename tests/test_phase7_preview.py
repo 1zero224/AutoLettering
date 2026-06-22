@@ -5,7 +5,7 @@ from pathlib import Path
 from PIL import Image, ImageChops, ImageDraw
 
 from autolettering.phase7 import run_phase7_preview
-from autolettering.rendering.compose import compose_page_preview
+from autolettering.rendering.compose import compose_page_preview, compose_page_records, compose_page_stages
 
 
 def test_compose_page_preview_pastes_cleaned_crop_and_text_overlay(tmp_path: Path):
@@ -67,6 +67,110 @@ def test_compose_page_preview_can_place_text_in_smaller_overlay_bbox(tmp_path: P
         assert preview.getpixel((50, 30)) == (255, 255, 255)
         assert preview.getpixel((68, 43)) == (0, 0, 0)
         assert preview.getpixel((90, 70)) == (255, 255, 255)
+
+
+def test_compose_page_stages_applies_all_cleanups_before_text_overlays(tmp_path: Path):
+    image_path = tmp_path / "page.png"
+    Image.new("RGB", (80, 80), "white").save(image_path)
+    cleaned_crop_path = _solid_rgb(tmp_path / "cleaned.png", (30, 30), "white")
+    red_overlay_path = _solid_rgba(tmp_path / "red-text.png", (10, 10), (255, 0, 0, 255))
+    transparent_overlay_path = _solid_rgba(tmp_path / "transparent-text.png", (10, 10), (255, 255, 255, 0))
+
+    records = [
+        {
+            "bbox": [10, 10, 40, 40],
+            "text_bbox": [20, 20, 30, 30],
+            "cleaned_crop_path": str(cleaned_crop_path),
+            "layout_preview_path": str(red_overlay_path),
+        },
+        {
+            "bbox": [15, 15, 45, 45],
+            "text_bbox": [50, 50, 60, 60],
+            "cleaned_crop_path": str(cleaned_crop_path),
+            "layout_preview_path": str(transparent_overlay_path),
+        },
+    ]
+
+    outputs = compose_page_stages(
+        image_path,
+        records,
+        tmp_path / "original.png",
+        tmp_path / "cleaned-page.png",
+        tmp_path / "final.png",
+    )
+
+    with Image.open(outputs["page_preview_path"]).convert("RGB") as final:
+        assert final.getpixel((25, 25)) == (255, 0, 0)
+
+
+def test_compose_page_records_applies_all_cleanups_before_text_overlays(tmp_path: Path):
+    image_path = tmp_path / "page.png"
+    Image.new("RGB", (80, 80), "white").save(image_path)
+    cleaned_crop_path = _solid_rgb(tmp_path / "cleaned.png", (30, 30), "white")
+    red_overlay_path = _solid_rgba(tmp_path / "red-text.png", (10, 10), (255, 0, 0, 255))
+    transparent_overlay_path = _solid_rgba(tmp_path / "transparent-text.png", (10, 10), (255, 255, 255, 0))
+
+    compose_page_records(
+        image_path,
+        [
+            {
+                "bbox": [10, 10, 40, 40],
+                "text_bbox": [20, 20, 30, 30],
+                "cleaned_crop_path": str(cleaned_crop_path),
+                "layout_preview_path": str(red_overlay_path),
+            },
+            {
+                "bbox": [15, 15, 45, 45],
+                "text_bbox": [50, 50, 60, 60],
+                "cleaned_crop_path": str(cleaned_crop_path),
+                "layout_preview_path": str(transparent_overlay_path),
+            },
+        ],
+        tmp_path / "records-preview.png",
+    )
+
+    with Image.open(tmp_path / "records-preview.png").convert("RGB") as final:
+        assert final.getpixel((25, 25)) == (255, 0, 0)
+
+
+def test_compose_page_records_can_apply_cleanup_crop_through_mask(tmp_path: Path):
+    image_path = tmp_path / "page.png"
+    source = Image.new("RGB", (80, 80), "white")
+    ImageDraw.Draw(source).rectangle((20, 20, 30, 30), fill="black")
+    source.save(image_path)
+
+    first_cleaned = _solid_rgb(tmp_path / "first-cleaned.png", (30, 30), "white")
+    first_mask = _solid_l(tmp_path / "first-mask.png", (30, 30), 255)
+    second_cleaned = Image.new("RGB", (30, 30), "white")
+    ImageDraw.Draw(second_cleaned).rectangle((5, 5, 15, 15), fill="black")
+    second_cleaned_path = tmp_path / "second-cleaned.png"
+    second_cleaned.save(second_cleaned_path)
+    second_mask = _solid_l(tmp_path / "second-mask.png", (30, 30), 0)
+    transparent_overlay_path = _solid_rgba(tmp_path / "transparent-text.png", (10, 10), (255, 255, 255, 0))
+
+    compose_page_records(
+        image_path,
+        [
+            {
+                "bbox": [20, 20, 50, 50],
+                "text_bbox": [60, 60, 70, 70],
+                "cleaned_crop_path": str(first_cleaned),
+                "cleanup_mask_path": str(first_mask),
+                "layout_preview_path": str(transparent_overlay_path),
+            },
+            {
+                "bbox": [15, 15, 45, 45],
+                "text_bbox": [60, 60, 70, 70],
+                "cleaned_crop_path": str(second_cleaned_path),
+                "cleanup_mask_path": str(second_mask),
+                "layout_preview_path": str(transparent_overlay_path),
+            },
+        ],
+        tmp_path / "masked-preview.png",
+    )
+
+    with Image.open(tmp_path / "masked-preview.png").convert("RGB") as final:
+        assert final.getpixel((25, 25)) == (255, 255, 255)
 
 
 def test_run_phase7_preview_groups_multiple_records_on_one_page(tmp_path: Path):
@@ -443,6 +547,21 @@ def _write_page(path: Path) -> Path:
 
 def _write_cleaned_crop(path: Path) -> Path:
     Image.new("RGB", (40, 50), "white").save(path)
+    return path
+
+
+def _solid_rgb(path: Path, size: tuple[int, int], color: str) -> Path:
+    Image.new("RGB", size, color).save(path)
+    return path
+
+
+def _solid_rgba(path: Path, size: tuple[int, int], color: tuple[int, int, int, int]) -> Path:
+    Image.new("RGBA", size, color).save(path)
+    return path
+
+
+def _solid_l(path: Path, size: tuple[int, int], value: int) -> Path:
+    Image.new("L", size, value).save(path)
     return path
 
 

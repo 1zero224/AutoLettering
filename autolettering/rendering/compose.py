@@ -35,15 +35,8 @@ def compose_page_records(image_path: str | Path, records: list[dict], output_pat
     with Image.open(image_path) as image:
         canvas = image.convert("RGB")
 
-    for record in records:
-        bbox = tuple(record["bbox"])
-        text_bbox = tuple(record.get("text_bbox") or record["bbox"])
-        cleaned = _resize_to_bbox(record["cleaned_crop_path"], bbox).convert("RGB")
-        overlay = _resize_to_bbox(record["layout_preview_path"], text_bbox).convert("RGBA")
-        x1, y1, _, _ = bbox
-        text_x1, text_y1, _, _ = text_bbox
-        canvas.paste(cleaned, (x1, y1))
-        canvas.paste(overlay, (text_x1, text_y1), overlay)
+    _paste_cleaned_crops(canvas, records)
+    _paste_text_overlays(canvas, records)
 
     canvas.save(output)
     return output
@@ -68,16 +61,9 @@ def compose_page_stages(
     cleaned_canvas = original.copy()
     final_canvas = original.copy()
 
-    for record in records:
-        bbox = tuple(record["bbox"])
-        text_bbox = tuple(record.get("text_bbox") or record["bbox"])
-        cleaned = _resize_to_bbox(record["cleaned_crop_path"], bbox).convert("RGB")
-        overlay = _resize_to_bbox(record["layout_preview_path"], text_bbox).convert("RGBA")
-        x1, y1, _, _ = bbox
-        text_x1, text_y1, _, _ = text_bbox
-        cleaned_canvas.paste(cleaned, (x1, y1))
-        final_canvas.paste(cleaned, (x1, y1))
-        final_canvas.paste(overlay, (text_x1, text_y1), overlay)
+    _paste_cleaned_crops(cleaned_canvas, records)
+    final_canvas = cleaned_canvas.copy()
+    _paste_text_overlays(final_canvas, records)
 
     original.save(original_path)
     cleaned_canvas.save(cleaned_path)
@@ -87,6 +73,30 @@ def compose_page_stages(
         "cleaned_page_path": cleaned_path,
         "page_preview_path": final_path,
     }
+
+
+def _paste_cleaned_crops(canvas: Image.Image, records: list[dict]) -> None:
+    for record in records:
+        bbox = tuple(record["bbox"])
+        cleaned = _resize_to_bbox(record["cleaned_crop_path"], bbox).convert("RGB")
+        mask = _cleanup_mask(record, bbox)
+        x1, y1, _, _ = bbox
+        canvas.paste(cleaned, (x1, y1), mask)
+
+
+def _paste_text_overlays(canvas: Image.Image, records: list[dict]) -> None:
+    for record in records:
+        text_bbox = tuple(record.get("text_bbox") or record["bbox"])
+        overlay = _resize_to_bbox(record["layout_preview_path"], text_bbox).convert("RGBA")
+        text_x1, text_y1, _, _ = text_bbox
+        canvas.paste(overlay, (text_x1, text_y1), overlay)
+
+
+def _cleanup_mask(record: dict, bbox: tuple[int, int, int, int]) -> Image.Image | None:
+    mask_path = record.get("cleanup_mask_path")
+    if not mask_path:
+        return None
+    return _resize_to_bbox(mask_path, bbox).convert("L")
 
 
 def _resize_to_bbox(image_path: str | Path, bbox: tuple[int, int, int, int]) -> Image.Image:

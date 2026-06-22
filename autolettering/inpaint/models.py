@@ -12,6 +12,7 @@ class BubbleFillResult:
     fill_color: tuple[int, int, int]
     before_crop_path: Path
     cleaned_crop_path: Path
+    cleanup_mask_path: Path | None
     before_after_path: Path
 
 

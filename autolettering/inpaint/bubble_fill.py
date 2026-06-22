@@ -41,9 +41,11 @@ def fill_text_box(
 
     before_path = output_root / "before" / f"{safe_id}.png"
     cleaned_path = output_root / "cleaned" / f"{safe_id}.png"
+    mask_path = output_root / "mask" / f"{safe_id}.png"
     before_after_path = output_root / "before_after" / f"{safe_id}.png"
     _save_crop(before_crop, before_path)
     _save_crop(cleaned_crop, cleaned_path)
+    _save_crop(Image.new("L", cleaned_crop.size, 255), mask_path)
     _save_before_after(before_crop, cleaned_crop, before_after_path)
 
     return BubbleFillResult(
@@ -53,6 +55,7 @@ def fill_text_box(
         fill_color=fill_color,
         before_crop_path=before_path,
         cleaned_crop_path=cleaned_path,
+        cleanup_mask_path=mask_path,
         before_after_path=before_after_path,
     )
 
@@ -81,9 +84,11 @@ def mask_fill_text_pixels(
 
     before_path = output_root / "before" / f"{safe_id}.png"
     cleaned_path = output_root / "cleaned" / f"{safe_id}.png"
+    mask_path = output_root / "mask" / f"{safe_id}.png"
     before_after_path = output_root / "before_after" / f"{safe_id}.png"
     _save_crop(before_crop, before_path)
     _save_crop(cleaned_crop, cleaned_path)
+    _save_crop(local_mask, mask_path)
     _save_before_after(before_crop, cleaned_crop, before_after_path)
 
     return BubbleFillResult(
@@ -93,6 +98,7 @@ def mask_fill_text_pixels(
         fill_color=fill_color,
         before_crop_path=before_path,
         cleaned_crop_path=cleaned_path,
+        cleanup_mask_path=mask_path,
         before_after_path=before_after_path,
     )
 
@@ -115,15 +121,19 @@ def region_fill_text_area(
         clean = source.copy()
         before_crop = source.crop(bbox)
         cleaned_crop = before_crop.copy()
+        cleanup_mask = Image.new("L", before_crop.size, 0)
         local_region = _offset_bbox(region, bbox)
         ImageDraw.Draw(cleaned_crop).rectangle(local_region, fill=fill_color)
+        ImageDraw.Draw(cleanup_mask).rectangle(local_region, fill=255)
         clean.paste(cleaned_crop, bbox[:2])
 
     before_path = output_root / "before" / f"{safe_id}.png"
     cleaned_path = output_root / "cleaned" / f"{safe_id}.png"
+    mask_path = output_root / "mask" / f"{safe_id}.png"
     before_after_path = output_root / "before_after" / f"{safe_id}.png"
     _save_crop(before_crop, before_path)
     _save_crop(cleaned_crop, cleaned_path)
+    _save_crop(cleanup_mask, mask_path)
     _save_before_after(before_crop, cleaned_crop, before_after_path)
 
     return BubbleFillResult(
@@ -133,6 +143,7 @@ def region_fill_text_area(
         fill_color=fill_color,
         before_crop_path=before_path,
         cleaned_crop_path=cleaned_path,
+        cleanup_mask_path=mask_path,
         before_after_path=before_after_path,
     )
 

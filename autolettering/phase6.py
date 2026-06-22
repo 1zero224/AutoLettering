@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from .inpaint.bubble_fill import mask_fill_text_pixels, region_fill_text_area
+from .record_selection import normalize_record_ids, row_matches_record_ids
 from .text_bbox import selected_text_bbox
 
 
@@ -15,12 +16,13 @@ def run_phase6_bubble_cleanup(
     run_id: str | None = None,
     sample_limit: int = 5,
     cleanup_method: str = "region_fill",
+    record_ids: list[str] | None = None,
 ) -> Path:
     run_dir = Path(output_root) / (run_id or "phase6-bubble-cleanup")
     run_dir.mkdir(parents=True, exist_ok=True)
     detections = _load_detection_rows(Path(detection_run_dir) / "detections.jsonl")
     layouts = _load_layout_rows(Path(layout_run_dir) / "layout-results.jsonl")
-    rows = _cleanup_rows(run_dir, detections, layouts, sample_limit, cleanup_method)
+    rows = _cleanup_rows(run_dir, detections, layouts, sample_limit, cleanup_method, record_ids)
     _write_jsonl(run_dir / "cleanup-results.jsonl", rows)
     _write_report(run_dir / "reports" / "phase6-report.md", detection_run_dir, layout_run_dir, rows)
     return run_dir
@@ -52,9 +54,13 @@ def _cleanup_rows(
     layouts: list[dict],
     sample_limit: int,
     cleanup_method: str,
+    record_ids: list[str] | None = None,
 ) -> list[dict]:
+    wanted = normalize_record_ids(record_ids)
     rows: list[dict] = []
     for layout in layouts:
+        if not row_matches_record_ids(layout, wanted):
+            continue
         if len(rows) >= sample_limit:
             break
         detection = detections.get(layout["record_id"])
@@ -111,6 +117,7 @@ def _cleanup_payload(result) -> dict:
     payload["fill_color"] = list(result.fill_color)
     payload["before_crop_path"] = str(result.before_crop_path)
     payload["cleaned_crop_path"] = str(result.cleaned_crop_path)
+    payload["cleanup_mask_path"] = str(result.cleanup_mask_path) if result.cleanup_mask_path else None
     payload["before_after_path"] = str(result.before_after_path)
     return payload
 
