@@ -54,6 +54,12 @@ Current v8 merged coverage command adds `GBC06_02.png#10-#13`. It is the v7 comm
 --font-selection-run-dir outputs/runs/phase3-gbc06-02-batch-10-13-mimo-font-selection --layout-run-dir outputs/runs/phase4-gbc06-02-batch-10-13-layout-v5 --angle-run-dir outputs/runs/phase5-gbc06-02-batch-10-13-angle --cleanup-run-dir outputs/runs/phase6-gbc06-02-batch-10-13-region-fill-v6 --preview-run-dir outputs/runs/phase7-8-gbc06-02-batch-10-13-preview-v7/runs/phase7-preview --export-run-dir outputs/runs/phase7-8-gbc06-02-batch-10-13-preview-v7/runs/phase8-export --run-id phase0-8-gbc06-pipeline-coverage-v8 --next-limit 12
 ```
 
+Current v10 merged coverage command adds the historical `GBC06_01.png#14-#15` gap-closing run. It is the v8 command plus:
+
+```powershell
+--layout-run-dir outputs/runs/phase4-gbc06-batch-14-15-layout-v2 --cleanup-run-dir outputs/runs/phase6-gbc06-batch-14-15-region-fill-v2 --preview-run-dir outputs/runs/phase7-8-gbc06-batch-14-15-preview-v5/runs/phase7-preview --export-run-dir outputs/runs/phase7-8-gbc06-batch-14-15-preview-v5/runs/phase8-export --run-id phase0-8-gbc06-pipeline-coverage-v10 --next-limit 12
+```
+
 ## Generated Artifacts
 
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage/pipeline-coverage.json`
@@ -72,6 +78,10 @@ Current v8 merged coverage command adds `GBC06_02.png#10-#13`. It is the v7 comm
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v7/reports/pipeline-coverage-report.md`
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v8/pipeline-coverage.json`
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v8/reports/pipeline-coverage-report.md`
+- `outputs/runs/phase0-8-gbc06-pipeline-coverage-v9/pipeline-coverage.json`
+- `outputs/runs/phase0-8-gbc06-pipeline-coverage-v9/reports/pipeline-coverage-report.md`
+- `outputs/runs/phase0-8-gbc06-pipeline-coverage-v10/pipeline-coverage.json`
+- `outputs/runs/phase0-8-gbc06-pipeline-coverage-v10/reports/pipeline-coverage-report.md`
 
 `outputs/` remains ignored by Git. The source-backed summary below records the key numbers so the experiment is traceable in the repository.
 
@@ -81,8 +91,8 @@ Base stage: `phase2_detection`
 
 ```text
 base_record_count=30
-complete_record_count=28
-incomplete_record_count=2
+complete_record_count=30
+incomplete_record_count=0
 ```
 
 Stage counts:
@@ -91,23 +101,23 @@ Stage counts:
 phase1_labelplus       covered=30 missing=0
 phase2_detection       covered=30 missing=0
 phase3_font_selection  covered=30 missing=0
-phase4_layout          covered=28 missing=2
+phase4_layout          covered=30 missing=0
 phase5_angle           covered=30 missing=0
-phase6_cleanup         covered=28 missing=2
-phase7_preview         covered=28 missing=2
-phase8_export          covered=28 missing=2
+phase6_cleanup         covered=30 missing=0
+phase7_preview         covered=30 missing=0
+phase8_export          covered=30 missing=0
 ```
 
 Group coverage:
 
 ```text
-框内: base=28 complete=26
+框内: base=28 complete=28
 框外: base=2  complete=2
 ```
 
 ## Next Records
 
-The v7 coverage report counts these records as complete across all tracked stages:
+The v10 coverage report counts these records as complete across all tracked stages:
 
 ```text
 GBC06_01.png#1
@@ -123,6 +133,8 @@ GBC06_01.png#10
 GBC06_01.png#11
 GBC06_01.png#12
 GBC06_01.png#13
+GBC06_01.png#14
+GBC06_01.png#15
 GBC06_01.png#16
 GBC06_01.png#17
 GBC06_02.png#1
@@ -140,16 +152,15 @@ GBC06_02.png#12
 GBC06_02.png#13
 ```
 
-The v8 report no longer has pending `GBC06_02.png` records in the current base set. The remaining coverage gaps are historical `GBC06_01.png` records:
+The v10 report has no pending records in the current base set:
 
 ```text
-GBC06_01.png#14 框内  first_missing_stage=phase4_layout
-GBC06_01.png#15 框内  first_missing_stage=phase4_layout
+next_records=[]
 ```
 
 ## Interpretation
 
-The current detection prototype has already produced 30 candidate records across `GBC06_01.png` and `GBC06_02.png`. The v8 coverage tool counts 28 complete records: the initial `GBC06_01.png#1`, both non-bubble records `GBC06_01.png#16` and `#17`, the bubble records `GBC06_01.png#2` through `#13`, and `GBC06_02.png#1` through `#13`.
+The current detection prototype has already produced 30 candidate records across `GBC06_01.png` and `GBC06_02.png`. The v9 coverage tool counts all 30 records as complete across Phase 1 through Phase 8.
 
 The `GBC06_02.png#1-#3` expansion required two fixes: tighter adjacent-column text bbox selection and mask-aware page cleanup composition. The best MIMO-backed integrated run is `phase7-8-gbc06-02-batch-1-3-preview-v3`, with score `7` and `usable=true`; `#2` and `#3` each received per-record MIMO score `10`. A follow-up top-aligned vertical-column rendering experiment (`preview-v4`) dropped to score `5`, so it was not kept.
 
@@ -159,7 +170,7 @@ The `GBC06_02.png#7-#9` expansion exposed a Phase 4 font-size issue: short verti
 
 The `GBC06_02.png#10-#13` expansion exposed three issues: mixed-polarity bbox selection on `#10`, overly tight adjacent-column filtering on `#11`, and vertical layout search that did not try balanced reflow for longer translations. The best integrated run is `phase7-8-gbc06-02-batch-10-13-preview-v7`, with MIMO `usable=true`; per-record scores were `4`, `8`, `7`, and `8`. The low `#10` score remains a future tuning target, but the run is sufficient to count the stage loop coverage.
 
-The v8 generated coverage report still lists `GBC06_01.png#14` and `#15` as missing Phase 4 in the next-record table. That is a coverage-command/history issue around older manual-readable runs, not a blocker for the new `GBC06_02.png#10-#13` evidence.
+The `GBC06_01.png#14-#15` gap-closing run uses `phase4-gbc06-batch-14-15-layout-v2`, `phase6-gbc06-batch-14-15-region-fill-v2`, and `phase7-8-gbc06-batch-14-15-preview-v5`. It closes the structural coverage gap and exports two Photoshop text layers. The visual artifacts show original text removal and translated lettering. MIMO remained unstable as a strict OCR/translation auditor on these tight vertical Chinese crops: an earlier integrated v4 evaluation scored `3` after critiquing vertical reading order and simplified/traditional Chinese. The final integrated v5 run scored `9` and `usable=true`, with only minor font-style and alignment notes. Treat MIMO here as auxiliary visual evidence, not as final typography acceptance.
 
 ## Verification
 

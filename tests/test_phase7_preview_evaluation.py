@@ -28,6 +28,10 @@ class FakePreviewEvaluationClient:
         assert "bubble_mask_fill" in prompt
         assert "bt_lama_large_inpaint" in prompt
         assert "contact sheet" in prompt
+        assert "green AFTER RESULT panel" in prompt
+        assert "gray BEFORE reference" in prompt
+        assert "Records JSON text field" in prompt
+        assert "Return exactly one page-level JSON object" in prompt
         return {
             "raw_text": json.dumps(
                 {
@@ -121,8 +125,8 @@ def test_build_preview_evaluation_prompt_lists_records_and_methods():
         {
             "records": [
                 {
-                    "record_id": "page.png#1",
-                    "translated_text": "街头演出？",
+                    "record_id": "page.png#15",
+                    "translated_text": "锵~锵",
                     "cleanup_method": "bubble_mask_fill",
                     "bbox": [1, 2, 3, 4],
                 }
@@ -130,19 +134,28 @@ def test_build_preview_evaluation_prompt_lists_records_and_methods():
         }
     )
 
-    assert "page.png#1" in prompt
-    assert "街头演出？" in prompt
+    assert "page.png#15" in prompt
+    assert "锵~锵" in prompt
     assert "bubble_mask_fill" in prompt
     assert "oversized" in prompt
     assert "outside the original text area" in prompt
     assert "covers nearby art" in prompt
     assert "AFTER preview" in prompt
     assert "Only judge original_text_removed on the AFTER preview side" in prompt
+    assert "green AFTER RESULT panel" in prompt
+    assert "gray BEFORE reference" in prompt
+    assert "Records JSON text field as the expected translation" in prompt
+    assert "Do not compare the translation meaning against the gray BEFORE reference Japanese source text" in prompt
+    assert "not a translation audit or strict OCR task" in prompt
+    assert "unless the mismatch is unmistakable" in prompt
+    assert "锵~锵" in prompt
+    assert "Chinese sound effects are valid translated lettering" in prompt
+    assert "Return exactly one page-level JSON object" in prompt
     assert "tight crops" in prompt
-    assert "same scale" in prompt
+    assert "not as same-size score targets" in prompt
     assert "Do not penalize missing full speech-bubble outlines" in prompt
     assert "Do not echo the Records JSON" in prompt
-    assert "Every returned object must include score and usable" in prompt
+    assert "That JSON object must include score and usable" in prompt
     assert "score" in prompt
 
 
@@ -190,10 +203,10 @@ def test_run_phase7_preview_evaluation_writes_results_and_api_summaries(tmp_path
     assert evaluation_path.parts[-3:] == ("debug", "evaluation_contact_sheets", "page-png.png")
     assert evaluation_path.exists()
     with Image.open(evaluation_path).convert("RGB") as sheet:
-        split_x = 12 + 40
-        assert sheet.getpixel((split_x, 58)) == (255, 0, 0)
-        assert _has_nonwhite_pixel(sheet, (12, 28, 50, 44))
-        assert _has_nonwhite_pixel(sheet, (58, 28, 104, 44))
+        assert sheet.width > 80
+        assert sheet.getpixel((11, 56)) == (0, 160, 80)
+        assert _has_nonwhite_pixel(sheet, (12, 16, 160, 38))
+        assert _has_nonwhite_pixel(sheet, (150, 16, sheet.width - 1, 38))
     assert "bubble translation is too large" in evaluations[0]["issues"]
     assert api_calls[0]["image_name"] == "page.png"
     assert api_calls[0]["request"]["prompt_chars"] > 0

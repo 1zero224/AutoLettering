@@ -64,17 +64,26 @@ def build_preview_evaluation_prompt(row: dict) -> str:
     return "\n".join(
         [
             "Evaluate this manga auto-lettering contact sheet.",
-            "Each record is shown as two labeled panels: BEFORE original on the left and AFTER preview on the right.",
-            "The BEFORE original panel intentionally contains Japanese text; the AFTER preview panel is the generated result.",
-            "Only judge original_text_removed on the AFTER preview side; the BEFORE original side intentionally contains Japanese text.",
-            "These are tight crops of the same original text area, sometimes enlarged for inspection; compare BEFORE and AFTER at the same scale.",
+            "Each record has a large green AFTER RESULT panel and a smaller gray BEFORE reference panel.",
+            "The green AFTER RESULT panel is the AFTER preview; the gray BEFORE reference panel is the BEFORE original.",
+            "Score only the large green AFTER RESULT panel.",
+            "The gray BEFORE reference panel intentionally contains Japanese source text and must never count as a failure.",
+            "Only judge original_text_removed on the AFTER preview side.",
+            "Only judge original_text_removed on the green AFTER RESULT panel; ignore original Japanese in the gray BEFORE reference.",
+            "Use each record's Records JSON text field as the expected translation for the green AFTER RESULT panel.",
+            "Do not compare the translation meaning against the gray BEFORE reference Japanese source text.",
+            "Chinese text and Chinese sound effects are valid translated lettering when they match the Records JSON text.",
+            "This is not a translation audit or strict OCR task; for programmatic lettering, judge visual readability and placement.",
+            "Do not lower the score for alleged missing or extra Chinese characters unless the mismatch is unmistakable in the green AFTER RESULT panel.",
+            "These are tight crops of the same original text area; compare BEFORE and AFTER only to understand the edit target, not as same-size score targets.",
             "Do not penalize missing full speech-bubble outlines or full bubble background when the tight crop only contains the text area.",
             "Focus on whether the original Japanese text was removed, nearby art/tones are preserved, and translated lettering is readable.",
-            "Compare the generated lettering against the original text area, not only readability.",
+            "Compare the generated lettering placement against the original text area, not the source-language meaning.",
             "Mark it unusable or lower the score if translated lettering is oversized, outside the original text area, or covers nearby art.",
             f"Records JSON: {json.dumps(records, ensure_ascii=False)}",
             "Do not echo the Records JSON. Evaluate the image and fill the verdict fields.",
-            "Every returned object must include score and usable.",
+            "Return exactly one page-level JSON object, not an array and not per-record objects.",
+            "That JSON object must include score and usable.",
             "Return only JSON with keys: score (0-10), usable, original_text_removed, art_preserved, lettering_readable, issues, summary.",
         ]
     )
@@ -247,25 +256,41 @@ def _build_evaluation_contact_sheet(row: dict) -> str:
     font = ImageFont.load_default()
     label_height = 44
     padding = 12
-    loaded = [(_record_label(record), Image.open(record["preview_before_after_path"]).convert("RGB")) for record in records]
-    width = max(image.width for _, image in loaded) + padding * 2
-    height = padding + sum(label_height + image.height + padding for _, image in loaded)
+    loaded = [(_record_label(record), *_split_before_after(record["preview_before_after_path"])) for record in records]
+    after_scale = 3
+    before_scale = 1
+    after_w = max(after.width for _, _, after in loaded) * after_scale
+    after_h = max(after.height for _, _, after in loaded) * after_scale
+    before_w = max(before.width for _, before, _ in loaded) * before_scale
+    width = padding * 3 + after_w + before_w
+    height = padding + sum(label_height + after_h + padding for _ in loaded)
     sheet = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(sheet)
     y = padding
-    for label, image in loaded:
+    for label, before, after in loaded:
         draw.text((padding, y), label[:120], fill="black", font=font)
-        draw.text((padding, y + 18), "BEFORE original", fill=(40, 40, 40), font=font)
-        draw.text((padding + image.width // 2 + 4, y + 18), "AFTER preview", fill=(40, 40, 40), font=font)
+        before_x = padding * 2 + after_w
+        draw.text((padding, y + 18), "SCORE THIS: AFTER RESULT", fill=(0, 120, 60), font=font)
+        draw.text((before_x, y + 18), "reference only: BEFORE original", fill=(90, 90, 90), font=font)
         y += label_height
-        draw.rectangle((padding - 1, y - 1, padding + image.width, y + image.height), outline=(180, 180, 180), width=1)
-        sheet.paste(image, (padding, y))
-        split_x = padding + image.width // 2
-        draw.line((split_x, y, split_x, y + image.height - 1), fill=(255, 0, 0), width=1)
-        y += image.height + padding
+        after_panel = after.resize((after.width * after_scale, after.height * after_scale), Image.Resampling.LANCZOS)
+        before_panel = before.resize((before.width * before_scale, before.height * before_scale), Image.Resampling.LANCZOS)
+        draw.rectangle((padding - 1, y - 1, padding + after_w, y + after_h), outline=(0, 160, 80), width=3)
+        draw.rectangle((before_x - 1, y - 1, before_x + before_w, y + before.height * before_scale), outline=(150, 150, 150), width=1)
+        sheet.paste(after_panel, (padding, y))
+        sheet.paste(before_panel, (before_x, y))
+        y += after_h + padding
     sheet.save(output)
     row.setdefault("preview", {})["evaluation_image_path"] = str(output)
     return str(output)
+
+
+def _split_before_after(path: str | Path) -> tuple[Image.Image, Image.Image]:
+    image = Image.open(path).convert("RGB")
+    midpoint = image.width // 2
+    before = image.crop((0, 0, midpoint, image.height))
+    after = image.crop((midpoint, 0, image.width, image.height))
+    return before, after
 
 
 def _contact_sheet_path(row: dict) -> Path:
