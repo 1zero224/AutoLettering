@@ -14,7 +14,7 @@ from autolettering.pipeline_coverage import write_pipeline_coverage_report
 def main() -> None:
     parser = argparse.ArgumentParser(description="Write a cross-phase pipeline coverage and gap report.")
     parser.add_argument("--phase1-run-dir", default=None)
-    parser.add_argument("--detection-run-dir", default=None)
+    parser.add_argument("--detection-run-dir", action="append", default=None)
     parser.add_argument("--font-selection-run-dir", action="append", default=None)
     parser.add_argument("--layout-run-dir", action="append", default=None)
     parser.add_argument("--angle-run-dir", action="append", default=None)
@@ -32,7 +32,7 @@ def main() -> None:
         output_root=Path(args.output_root),
         run_id=args.run_id,
         phase1_run_dir=_optional_path(args.phase1_run_dir),
-        detection_run_dir=_optional_path(args.detection_run_dir),
+        detection_run_dir=_optional_paths(args.detection_run_dir),
         font_selection_run_dir=_optional_paths(args.font_selection_run_dir),
         layout_run_dir=_optional_paths(args.layout_run_dir),
         angle_run_dir=_optional_paths(args.angle_run_dir),

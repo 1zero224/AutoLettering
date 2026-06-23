@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from experiments import pipeline_coverage_report
 from autolettering.pipeline_coverage import build_pipeline_coverage, write_pipeline_coverage_report
 
 
@@ -103,6 +104,35 @@ def test_build_pipeline_coverage_merges_multiple_runs_per_stage(tmp_path: Path):
     ]
 
 
+def test_build_pipeline_coverage_merges_multiple_detection_runs(tmp_path: Path):
+    phase1 = tmp_path / "phase1"
+    phase2a = tmp_path / "phase2a"
+    phase2b = tmp_path / "phase2b"
+    phase3 = tmp_path / "phase3"
+    _write_phase1_manifest(phase1 / "manifest.json")
+    _write_jsonl(phase2a / "detections.jsonl", [_row("r1", "ok")])
+    _write_jsonl(phase2b / "detections.jsonl", [_row("r2", "ok")])
+    _write_jsonl(phase3 / "font-selections.jsonl", [_row("r1", "selected"), _row("r2", "selected")])
+
+    report = build_pipeline_coverage(
+        phase1_run_dir=phase1,
+        detection_run_dir=[phase2a, phase2b],
+        font_selection_run_dir=phase3,
+        next_limit=3,
+    )
+
+    assert report["summary"]["base_stage"] == "phase2_detection"
+    assert report["summary"]["base_record_count"] == 2
+    assert report["stages"]["phase2_detection"]["covered_record_ids"] == ["r1", "r2"]
+    assert report["stages"]["phase3_font_selection"]["covered_record_ids"] == ["r1", "r2"]
+    assert report["group_summary"]["框内"]["base_count"] == 1
+    assert report["group_summary"]["框外"]["base_count"] == 1
+    assert report["phase1_pending_detection_count"] == 1
+    assert report["phase1_pending_detection_records"] == [
+        {"record_id": "r3", "group_name": "框内", "image_name": "page2.png"}
+    ]
+
+
 def test_build_pipeline_coverage_reports_phase1_records_missing_detection(tmp_path: Path):
     phase1 = tmp_path / "phase1"
     phase2 = tmp_path / "phase2"
@@ -143,6 +173,41 @@ def test_write_pipeline_coverage_report_writes_json_and_markdown(tmp_path: Path)
     assert "phase2_detection" in markdown
     assert "## Phase 1 Pending Detection" in markdown
     assert "`r2`" in markdown
+
+
+def test_pipeline_coverage_cli_accepts_multiple_detection_runs(tmp_path: Path, monkeypatch, capsys):
+    phase1 = tmp_path / "phase1"
+    phase2a = tmp_path / "phase2a"
+    phase2b = tmp_path / "phase2b"
+    output_root = tmp_path / "outputs"
+    _write_phase1_manifest(phase1 / "manifest.json")
+    _write_jsonl(phase2a / "detections.jsonl", [_row("r1", "ok")])
+    _write_jsonl(phase2b / "detections.jsonl", [_row("r2", "ok")])
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "pipeline_coverage_report.py",
+            "--phase1-run-dir",
+            str(phase1),
+            "--detection-run-dir",
+            str(phase2a),
+            "--detection-run-dir",
+            str(phase2b),
+            "--output-root",
+            str(output_root),
+            "--run-id",
+            "cli-coverage",
+        ],
+    )
+
+    pipeline_coverage_report.main()
+
+    captured = capsys.readouterr()
+    assert "cli-coverage" in captured.out
+    payload = json.loads((output_root / "cli-coverage" / "pipeline-coverage.json").read_text(encoding="utf-8"))
+    assert payload["summary"]["base_record_count"] == 2
+    assert payload["stages"]["phase2_detection"]["covered_record_ids"] == ["r1", "r2"]
 
 
 def _row(record_id: str, status: str) -> dict:

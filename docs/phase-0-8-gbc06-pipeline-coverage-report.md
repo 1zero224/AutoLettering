@@ -93,6 +93,23 @@ Current v14 keeps the v13 structural and quality scope, but the coverage tool no
 --run-id phase0-8-gbc06-pipeline-coverage-v14-phase1-pending --next-limit 12
 ```
 
+Current v15 adds support for multiple detection run directories and promotes the
+diverse expansion records into the same coverage base instead of treating them
+as side experiments. It keeps the v14 structural scope and adds:
+
+```powershell
+--detection-run-dir outputs/runs/phase2-gbc06-diverse-expansion-v2-color-light-text
+--font-selection-run-dir outputs/runs/phase3-gbc06-diverse-06-18-mimo-font-selection-v1
+--layout-run-dir outputs/runs/phase4-gbc06-18-phrase-aware-layout-v1
+--angle-run-dir outputs/runs/phase5-gbc06-diverse-06-18-angle-v1
+--cleanup-run-dir outputs/runs/phase6-gbc06-18-text-mask-bt-lama-large-d5-v1
+--preview-run-dir outputs/runs/phase7-gbc06-18-phrase-aware-layout-d5-v1
+--export-run-dir outputs/runs/phase8-gbc06-18-phrase-aware-d5-v1
+--phase7-preview-evaluation-run-dir outputs/runs/phase7-gbc06-18-phrase-aware-layout-d5-eval-v1
+--phase8-export-audit-run-dir outputs/runs/phase8-gbc06-18-phrase-aware-d5-audit-v1
+--run-id phase0-8-gbc06-pipeline-coverage-v15-diverse-detection --next-limit 12
+```
+
 ## Generated Artifacts
 
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage/pipeline-coverage.json`
@@ -123,6 +140,8 @@ Current v14 keeps the v13 structural and quality scope, but the coverage tool no
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v13/reports/pipeline-coverage-report.md`
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v14-phase1-pending/pipeline-coverage.json`
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v14-phase1-pending/reports/pipeline-coverage-report.md`
+- `outputs/runs/phase0-8-gbc06-pipeline-coverage-v15-diverse-detection/pipeline-coverage.json`
+- `outputs/runs/phase0-8-gbc06-pipeline-coverage-v15-diverse-detection/reports/pipeline-coverage-report.md`
 
 `outputs/` remains ignored by Git. The source-backed summary below records the key numbers so the experiment is traceable in the repository.
 
@@ -131,36 +150,36 @@ Current v14 keeps the v13 structural and quality scope, but the coverage tool no
 Base stage: `phase2_detection`
 
 ```text
-base_record_count=30
-complete_record_count=30
-incomplete_record_count=0
+base_record_count=35
+complete_record_count=31
+incomplete_record_count=4
 ```
 
 Stage counts:
 
 ```text
-phase1_labelplus       covered=30 missing=0
-phase2_detection       covered=30 missing=0
-phase3_font_selection  covered=30 missing=0
-phase4_layout          covered=30 missing=0
-phase5_angle           covered=30 missing=0
-phase6_cleanup         covered=30 missing=0
-phase7_preview         covered=30 missing=0
-phase8_export          covered=30 missing=0
+phase1_labelplus       covered=35 missing=0
+phase2_detection       covered=35 missing=0
+phase3_font_selection  covered=32 missing=3
+phase4_layout          covered=31 missing=4
+phase5_angle           covered=32 missing=3
+phase6_cleanup         covered=31 missing=4
+phase7_preview         covered=31 missing=4
+phase8_export          covered=31 missing=4
 ```
 
 Quality audits:
 
 ```text
-phase7_preview evaluations=9 evaluated=9 usable=9/9 failed=0 low_score=0 records=30 record_issues=0
-phase8_export audits=1 passed=1/1 records=4 vertical_top_layers=4 missing_anchor=0 unexpected_anchor=0 record_issues=0 missing_jsx_anchor_logic=0
+phase7_preview evaluations=10 evaluated=10 usable=10/10 failed=0 low_score=0 records=31 record_issues=0
+phase8_export audits=2 passed=2/2 records=5 vertical_top_layers=5 missing_anchor=0 unexpected_anchor=0 record_issues=0 missing_jsx_anchor_logic=0
 ```
 
 Group coverage:
 
 ```text
-框内: base=28 complete=28
-框外: base=2  complete=2
+框内: base=30 complete=29
+框外: base=5  complete=2
 ```
 
 ## Next Records
@@ -200,19 +219,25 @@ GBC06_02.png#12
 GBC06_02.png#13
 ```
 
-The v13 report has no pending records in the current base set:
+The v15 report promotes the five diverse expansion records into the coverage
+base. `GBC06_18.png#3` is complete across Phase 1-8 and all attached quality
+gates. The other four diverse records are now visible as next work:
 
 ```text
-next_records=[]
+GBC06_06.png#3   框内  first_missing_stage=phase4_layout
+GBC06_17.png#3   框外  first_missing_stage=phase3_font_selection
+GBC06_29.png#2   框外  first_missing_stage=phase3_font_selection
+GBC06_33.png#1   框外  first_missing_stage=phase3_font_selection
 ```
 
-The current base set is still only the 30 records that have Phase 2 detection output. The v14 report makes the remaining parsed-but-undetected Phase 1 scope explicit:
+The v15 report also keeps the remaining parsed-but-undetected Phase 1 scope
+explicit:
 
 ```text
-phase1_pending_detection_count=150
+phase1_pending_detection_count=145
 ```
 
-The first `next-limit=12` Phase 1 records missing detection in v14 are:
+The first `next-limit=12` Phase 1 records missing detection in v15 are:
 
 ```text
 GBC06_02.png#14  框外  GBC06_02.png
@@ -229,10 +254,11 @@ GBC06_03.png#10  框内  GBC06_03.png
 GBC06_03.png#11  框内  GBC06_03.png
 ```
 
-For quality and diversity, the next expansion should intentionally go beyond the first sequential records and cover mixed layout types:
+For quality and diversity, the next expansion should continue covering mixed
+layout types. `GBC06_18.png#3` has now moved from candidate to complete. The
+remaining diverse base records are:
 
 ```text
-GBC06_18.png#3   框内  -快看 / 接下来登场的乐队 / 竟然！        first obvious diamond/announcer-style block candidate
 GBC06_06.png#3   框内  毫无保留地 / 只要把现在的感受 / 唱出来就好了  long regular vertical bubble
 GBC06_17.png#3   框外  新川崎（暂）                              black-card/sign text, polarity-sensitive
 GBC06_29.png#2   框外  囚禁中挣脱而出！                          large non-bubble page text
@@ -243,7 +269,12 @@ The two current authoritative artifacts used for that selection, `phase1-gbc06-s
 
 ## Interpretation
 
-The current detection prototype has already produced 30 candidate records across `GBC06_01.png` and `GBC06_02.png`. The v13 coverage tool counts all 30 records as complete across Phase 1 through Phase 8, and additionally treats Phase 7 MIMO preview evaluation failures plus Phase 8 export audit failures as quality issues that make affected records incomplete.
+The current detection prototype has produced 35 candidate records across the
+core `GBC06_01.png`/`GBC06_02.png` batches plus the diverse expansion records.
+The v15 coverage tool can merge multiple detection run directories, counts 31
+records as complete across Phase 1 through Phase 8, and additionally treats
+Phase 7 MIMO preview evaluation failures plus Phase 8 export audit failures as
+quality issues that make affected records incomplete.
 
 The `GBC06_02.png#1-#3` expansion required two fixes: tighter adjacent-column text bbox selection and mask-aware page cleanup composition. The best MIMO-backed integrated run is `phase7-8-gbc06-02-batch-1-3-preview-v3`, with score `7` and `usable=true`; `#2` and `#3` each received per-record MIMO score `10`. A follow-up top-aligned vertical-column rendering experiment (`preview-v4`) dropped to score `5`, so it was not kept.
 
@@ -254,6 +285,15 @@ The `GBC06_02.png#7-#9` expansion exposed a Phase 4 font-size issue: short verti
 The `GBC06_02.png#10-#13` expansion exposed four issues: mixed-polarity bbox selection on `#10`, overly tight adjacent-column filtering on `#11`, vertical layout search that did not try balanced reflow for longer translations, and an unnatural default vertical centering for short vertical text. The current best integrated run is `phase7-8-gbc06-02-batch-10-13-preview-v9-top-align`, with MIMO score `9` and `usable=true`. The v9 run uses `phase4-gbc06-02-batch-10-13-layout-v9-top-align`, `phase6-gbc06-02-batch-10-13-region-fill-v9-top-align`, and top-aligned vertical layout previews. The v8 centered run scored `6`; the v9 top-aligned run removed the `#11/#12` layout/read-order complaint, leaving only a minor background-fill texture note. The v12 quality gate verifies that the `GBC06_02.png#10-#13` top-aligned Photoshop export carries the expected top-anchor contract.
 
 The `GBC06_01.png#14-#15` gap-closing run uses `phase4-gbc06-batch-14-15-layout-v2`, `phase6-gbc06-batch-14-15-region-fill-v2`, and `phase7-8-gbc06-batch-14-15-preview-v5`. It closes the structural coverage gap and exports two Photoshop text layers. The visual artifacts show original text removal and translated lettering. MIMO remained unstable as a strict OCR/translation auditor on these tight vertical Chinese crops: an earlier integrated v4 evaluation scored `3` after critiquing vertical reading order and simplified/traditional Chinese. The final integrated v5 run scored `9` and `usable=true`, with only minor font-style and alignment notes. Treat MIMO here as auxiliary visual evidence, not as final typography acceptance.
+
+The `GBC06_18.png#3` diverse run uses
+`phase4-gbc06-18-phrase-aware-layout-v1`,
+`phase6-gbc06-18-text-mask-bt-lama-large-d5-v1`,
+`phase7-gbc06-18-phrase-aware-layout-d5-v1`, and
+`phase8-gbc06-18-phrase-aware-d5-v1`. It validates the diamond announcer block
+with phrase-preserving vertical line breaks, `font_size=25`, `line_spacing=0`,
+`angle_degrees=0.0`, d5 text-mask LaMa cleanup, MIMO Phase 7 score `9`, and a
+Phase 8 export audit pass with one vertical top anchor.
 
 ## Verification
 
@@ -266,5 +306,5 @@ python -m pytest tests/test_pipeline_coverage.py tests/test_pipeline_quality_cov
 Observed result:
 
 ```text
-54 passed in 4.36s
+59 passed in 4.71s
 ```

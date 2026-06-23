@@ -25,7 +25,7 @@ STAGE_ORDER = [
 
 def build_pipeline_coverage(
     phase1_run_dir: str | Path | None = None,
-    detection_run_dir: str | Path | None = None,
+    detection_run_dir: RunDirInput = None,
     font_selection_run_dir: RunDirInput = None,
     layout_run_dir: RunDirInput = None,
     angle_run_dir: RunDirInput = None,
@@ -37,7 +37,7 @@ def build_pipeline_coverage(
     next_limit: int = 10,
 ) -> dict:
     meta, phase1_ids = _phase1_records(phase1_run_dir)
-    detection_rows = _jsonl_rows(_maybe_path(detection_run_dir, "detections.jsonl"))
+    detection_rows = _jsonl_at_many(detection_run_dir, "detections.jsonl")
     detection_all = _row_ids(detection_rows)
     detection_ok = _status_ids(detection_rows, "ok")
     _merge_row_meta(meta, detection_rows)
@@ -150,7 +150,7 @@ def _merge_row_meta(meta: dict[str, dict], rows: list[dict]) -> None:
 
 
 def _base_records(
-    detection_run_dir: str | Path | None,
+    detection_run_dir: RunDirInput,
     detection_all: list[str],
     phase1_ids: list[str],
 ) -> tuple[str, list[str]]:
