@@ -184,6 +184,37 @@ The v3 MIMO result:
 }
 ```
 
+## Phase 8 Follow-up: Photoshop Export
+
+The tight text bbox now also flows into Photoshop export:
+
+- Cleanup bitmap patch placement remains `cleanup.bbox = [1087, 1335, 1312, 1621]`, so the inpainted crop covers the full local context.
+- Editable Photoshop text placement uses `text_bbox = [1197, 1335, 1312, 1527]`, so the text layer does not cover neighboring speech-bubble text.
+- Vertical top anchoring uses `vertical_top_anchor_y_px = 1335`, matching `text_position.y_px`.
+- `cleanup.text_bbox`, `cleanup.mask_bbox`, and `cleanup.layout_text_bbox` are exported in `photoshop-manifest.json` for auditability.
+
+Current evidence:
+
+```text
+outputs/runs/phase8-gbc06-18-text-mask-lama-large-v1/photoshop-manifest.json
+outputs/runs/phase8-gbc06-18-text-mask-lama-large-v1/photoshop-import.jsx
+outputs/runs/phase8-gbc06-18-text-mask-lama-large-audit-v1/phase8-export-audit.json
+```
+
+Phase 8 audit result:
+
+```json
+{
+  "record_count": 1,
+  "vertical_top_layer_count": 1,
+  "missing_vertical_top_anchor_count": 0,
+  "unexpected_vertical_top_anchor_count": 0,
+  "record_issue_count": 0,
+  "jsx_anchor_logic_present": true,
+  "passed": true
+}
+```
+
 ## Preserved Evidence Runs
 
 The intermediate runs are intentionally preserved because they document the integration failures and fixes:

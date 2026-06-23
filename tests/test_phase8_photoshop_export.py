@@ -29,6 +29,9 @@ def test_run_phase8_photoshop_export_writes_manifest_and_jsx(tmp_path: Path):
     assert layer["cleanup"]["method"] == "bubble_fill"
     assert layer["cleanup"]["effective_method"] == "bubble_fill"
     assert layer["cleanup"]["effective_crop_path"] == str(tmp_path / "cleaned.png")
+    assert layer["cleanup"]["text_bbox"] is None
+    assert layer["cleanup"]["mask_bbox"] is None
+    assert layer["cleanup"]["layout_text_bbox"] is None
     jsx = (run_dir / "photoshop-import.jsx").read_text(encoding="utf-8")
     _assert_rich_jsx_importer(jsx)
     report = (run_dir / "reports" / "phase8-report.md").read_text(encoding="utf-8")
@@ -117,6 +120,52 @@ def test_run_phase8_photoshop_export_places_cleanup_patch_by_cleanup_bbox(tmp_pa
     jsx = (run_dir / "photoshop-import.jsx").read_text(encoding="utf-8")
     assert "var patchPosition = (layerData.cleanup && layerData.cleanup.position) || layerData.position" in jsx
     assert "moveLayerTopLeft(layer, patchPosition.x_px, patchPosition.y_px)" in jsx
+
+
+def test_run_phase8_photoshop_export_prefers_cleanup_layout_text_bbox(tmp_path: Path):
+    image_path = tmp_path / "page.png"
+    Image.new("RGB", (120, 160), "white").save(image_path)
+    detection_run = _mkdir(tmp_path / "phase2")
+    font_run = _mkdir(tmp_path / "phase3")
+    layout_run = _mkdir(tmp_path / "phase4")
+    cleanup_run = _mkdir(tmp_path / "phase6")
+    _write_jsonl(detection_run / "detections.jsonl", [_detection_payload(image_path)])
+    _write_jsonl(font_run / "font-selections.jsonl", [_font_payload(tmp_path / "font.ttf")])
+    _write_jsonl(layout_run / "layout-results.jsonl", [_layout_payload()])
+    _write_jsonl(
+        cleanup_run / "cleanup-results.jsonl",
+        [
+            _cleanup_payload(
+                tmp_path / "cleaned.png",
+                cleanup_bbox=[10, 20, 80, 90],
+                text_bbox=[10, 20, 80, 90],
+                mask_bbox=[42, 44, 70, 110],
+                layout_text_bbox=[42, 44, 70, 110],
+            )
+        ],
+    )
+
+    run_dir = run_phase8_photoshop_export(
+        detection_run,
+        font_run,
+        layout_run,
+        cleanup_run,
+        tmp_path / "outputs",
+        sample_limit=1,
+    )
+
+    manifest = json.loads((run_dir / "photoshop-manifest.json").read_text(encoding="utf-8"))
+    layer = manifest["pages"][0]["layers"][0]
+    assert layer["layout"]["target_width"] == 70
+    assert layer["layout"]["target_height"] == 70
+    assert layer["text_bbox"]["xyxy"] == [42, 44, 70, 110]
+    assert layer["text_position"]["x_px"] == 42
+    assert layer["text_position"]["y_px"] == 44
+    assert layer["photoshop"]["vertical_top_anchor_y_px"] == 44
+    assert layer["cleanup"]["bbox"]["xyxy"] == [10, 20, 80, 90]
+    assert layer["cleanup"]["text_bbox"]["xyxy"] == [10, 20, 80, 90]
+    assert layer["cleanup"]["mask_bbox"]["xyxy"] == [42, 44, 70, 110]
+    assert layer["cleanup"]["layout_text_bbox"]["xyxy"] == [42, 44, 70, 110]
 
 
 def test_run_phase8_photoshop_export_applies_font_mapping_file(tmp_path: Path):
@@ -275,7 +324,14 @@ def _layout_payload() -> dict:
     }
 
 
-def _cleanup_payload(cleaned_path: Path, replacement_path: Path | None = None, cleanup_bbox: list[int] | None = None) -> dict:
+def _cleanup_payload(
+    cleaned_path: Path,
+    replacement_path: Path | None = None,
+    cleanup_bbox: list[int] | None = None,
+    text_bbox: list[int] | None = None,
+    mask_bbox: list[int] | None = None,
+    layout_text_bbox: list[int] | None = None,
+) -> dict:
     cleanup = {
         "method": "bubble_fill",
         "cleaned_crop_path": str(cleaned_path),
@@ -283,6 +339,12 @@ def _cleanup_payload(cleaned_path: Path, replacement_path: Path | None = None, c
     }
     if cleanup_bbox is not None:
         cleanup["bbox"] = cleanup_bbox
+    if text_bbox is not None:
+        cleanup["text_bbox"] = text_bbox
+    if mask_bbox is not None:
+        cleanup["mask_bbox"] = mask_bbox
+    if layout_text_bbox is not None:
+        cleanup["layout_text_bbox"] = layout_text_bbox
     if replacement_path is not None:
         cleanup["method"] = "local_diffusion_inpaint"
         cleanup["replacement_method"] = "gpt_image2_masked_edit"

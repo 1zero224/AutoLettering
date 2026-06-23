@@ -65,7 +65,7 @@ def _layer_record(
 ) -> dict:
     bbox = detection["selected_text_box_xyxy"]
     layout = layout_row["layout"]
-    text_bbox = layout.get("target_bbox") or bbox
+    text_bbox = _text_bbox(layout, cleanup_row, bbox)
     image_size = _image_size(detection["image_path"])
     return {
         "record_id": detection["record_id"],
@@ -85,6 +85,11 @@ def _layer_record(
         "cleanup": _cleanup_payload(cleanup_row, image_size),
         "validation": layout.get("validation", {}),
     }
+
+
+def _text_bbox(layout: dict, cleanup_row: dict | None, fallback_bbox: list[int]) -> list[int]:
+    cleanup = cleanup_row.get("cleanup", {}) if cleanup_row else {}
+    return cleanup.get("layout_text_bbox") or layout.get("target_bbox") or fallback_bbox
 
 
 def _group_layers_by_page(layers: list[dict]) -> list[dict]:
@@ -207,6 +212,9 @@ def _cleanup_payload(cleanup_row: dict | None, image_size: tuple[int, int] | Non
             "status": "missing",
             "method": None,
             "bbox": None,
+            "text_bbox": None,
+            "mask_bbox": None,
+            "layout_text_bbox": None,
             "position": None,
             "cleaned_crop_path": None,
             "before_after_path": None,
@@ -225,6 +233,9 @@ def _cleanup_payload(cleanup_row: dict | None, image_size: tuple[int, int] | Non
         "status": cleanup_row.get("status"),
         "method": method,
         "bbox": _bbox_payload(bbox) if bbox else None,
+        "text_bbox": _optional_bbox_payload(cleanup.get("text_bbox")),
+        "mask_bbox": _optional_bbox_payload(cleanup.get("mask_bbox")),
+        "layout_text_bbox": _optional_bbox_payload(cleanup.get("layout_text_bbox")),
         "position": _position_payload(bbox, image_size) if bbox and image_size else None,
         "cleaned_crop_path": cleaned_crop_path,
         "before_after_path": cleanup.get("before_after_path"),
@@ -233,6 +244,12 @@ def _cleanup_payload(cleanup_row: dict | None, image_size: tuple[int, int] | Non
         "effective_method": replacement_method or method,
         "effective_crop_path": replacement_crop_path or cleaned_crop_path,
     }
+
+
+def _optional_bbox_payload(value: object) -> dict | None:
+    if not isinstance(value, list) or len(value) != 4:
+        return None
+    return _bbox_payload([int(item) for item in value])
 
 
 def _image_size(image_path: str | Path) -> tuple[int, int]:

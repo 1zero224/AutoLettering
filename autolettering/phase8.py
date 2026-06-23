@@ -101,6 +101,7 @@ def _write_report(
         "- Places `cleanup.effective_crop_path` as a bitmap patch layer when available.",
         "- Creates one editable Photoshop paragraph text layer per exported layer using `text_bbox` width, height, and initial position.",
         "- Keeps `bbox` for cleanup patch placement and `text_bbox` for editable text placement.",
+        "- Chooses editable text placement from `cleanup.layout_text_bbox` first, then `layout.target_bbox`, then the detected bbox.",
         "- Maps `layout.line_spacing` to Photoshop leading and `layout.letter_spacing` to best-effort tracking.",
         "- Applies `layout.text_color` to the editable text layer with Photoshop `SolidColor`.",
         "- Preserves `layout.vertical_align`; vertical top-aligned layers are labeled with `vertical_align=top` and translated after optional rotation so their rendered bounds top starts near `text_position.y_px`.",
