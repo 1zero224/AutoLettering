@@ -141,6 +141,49 @@ Use this as the next Phase 6 direction:
 6. Do not use `opencv_tela` for this case except as a negative baseline.
 7. Do not use raw `ysgyolo` output as a cleanup mask without post-filtering.
 
+## Phase 7 Follow-up: Tight Layout Target
+
+After connecting the best cleanup path into Phase 7, MIMO exposed a second issue: cleanup was fixed, but lettering was still using the large layout bbox.
+
+| Run | Cleanup bbox | Text/layout bbox | Layout source | MIMO score | Result |
+| --- | --- | --- | --- | ---: | --- |
+| `phase7-gbc06-18-text-mask-lama-large-v1` | `[1087, 1335, 1312, 1621]` | `[1087, 1335, 1312, 1621]` | old large layout | 4 | Text overlapped the adjacent `今日が初ライブ!` bubble text. |
+| `phase7-gbc06-18-text-mask-lama-large-v2` | `[1087, 1335, 1312, 1621]` | `[1197, 1335, 1312, 1527]` | old layout squeezed into tight bbox | 7 | No longer covered the neighbor text, but lettering was still slightly too large. |
+| `phase7-gbc06-18-text-mask-lama-large-v3` | `[1087, 1335, 1312, 1621]` | `[1197, 1335, 1312, 1527]` | tight-mask layout `115x192` | 8 | Text is readable and placed inside the intended area; remaining issues are minor inpaint edge artifacts and slightly tight spacing. |
+
+The fix is now shared across phases:
+
+- `autolettering/text_mask_bbox.py` contains the same-record text-mask clustering used for this case.
+- Phase 6 writes `cleanup.text_bbox`, `cleanup.mask_bbox`, and `cleanup.layout_text_bbox`.
+- Phase 7 prefers `cleanup.layout_text_bbox` over stale `layout.target_bbox` when composing the page.
+- Phase 4 also uses the same mask bbox for bubble layout targets when the selected/full bbox includes neighboring speech bubble text.
+
+Current evidence:
+
+```text
+outputs/runs/phase4-gbc06-diverse-06-18-layout-tight-mask-v2/layout-results.jsonl
+outputs/runs/phase6-gbc06-18-text-mask-bt-lama-large-v2/cleanup-results.jsonl
+outputs/runs/phase7-gbc06-18-text-mask-lama-large-v3/preview-results.jsonl
+outputs/runs/phase7-gbc06-18-text-mask-lama-large-eval-v3/preview-evaluation.jsonl
+outputs/runs/phase7-gbc06-18-text-mask-lama-large-v3/debug/evaluation_contact_sheets/GBC06-18-png.png
+```
+
+The v3 MIMO result:
+
+```json
+{
+  "score": 8,
+  "usable": true,
+  "original_text_removed": true,
+  "art_preserved": true,
+  "lettering_readable": true,
+  "issues": [
+    "Minor anti-aliasing artifacts visible around the text edges from the inpainting process.",
+    "The spacing between the second and third lines is slightly tight."
+  ]
+}
+```
+
 ## Preserved Evidence Runs
 
 The intermediate runs are intentionally preserved because they document the integration failures and fixes:

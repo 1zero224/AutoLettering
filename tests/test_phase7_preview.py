@@ -431,6 +431,36 @@ def test_run_phase7_preview_uses_layout_target_bbox_for_text_overlay(tmp_path: P
         assert preview.getpixel((90, 70)) == (255, 255, 255)
 
 
+def test_run_phase7_preview_prefers_cleanup_layout_text_bbox_for_text_overlay(tmp_path: Path):
+    page_path = _write_page(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    cleanup_run = tmp_path / "phase6"
+    layout_run = tmp_path / "phase4"
+    detection_run.mkdir()
+    cleanup_run.mkdir()
+    layout_run.mkdir()
+    _write_jsonl(
+        detection_run / "detections.jsonl",
+        [_detection_payload("page.png#1", page_path, [40, 20, 100, 80])],
+    )
+    cleanup = _cleanup_payload("page.png#1", _write_cleaned_crop(tmp_path / "cleaned.png"), [40, 20, 100, 80])
+    cleanup["cleanup"]["layout_text_bbox"] = [60, 30, 80, 60]
+    _write_jsonl(cleanup_run / "cleanup-results.jsonl", [cleanup])
+    layout = _layout_payload("page.png#1", _small_layout_preview(tmp_path))
+    layout["layout"]["target_bbox"] = [40, 20, 100, 80]
+    _write_jsonl(layout_run / "layout-results.jsonl", [layout])
+
+    run_dir = run_phase7_preview(detection_run, cleanup_run, layout_run, tmp_path / "outputs", "phase7-cleanup-text-bbox", 1)
+
+    row = _read_jsonl(run_dir / "preview-results.jsonl")[0]
+    record = row["records"][0]
+    assert record["bbox"] == [40, 20, 100, 80]
+    assert record["text_bbox"] == [60, 30, 80, 60]
+    with Image.open(row["preview"]["page_preview_path"]).convert("RGB") as preview:
+        assert preview.getpixel((68, 43)) == (0, 0, 0)
+        assert preview.getpixel((90, 70)) == (255, 255, 255)
+
+
 def test_run_phase7_preview_merges_multiple_cleanup_runs(tmp_path: Path):
     page_path = _write_page(tmp_path / "page.png")
     detection_run = tmp_path / "phase2"

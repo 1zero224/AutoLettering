@@ -683,6 +683,37 @@ def test_run_phase4_caps_multicolumn_vertical_translation_below_source_column_wi
     assert layout["font_size"] <= 31
 
 
+def test_run_phase4_uses_mask_bbox_for_overlapping_bubble_layout_target(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+    source_crop_path = tmp_path / "source-crop.png"
+    Image.new("RGB", (225, 286), "white").save(source_crop_path)
+    phase2_run = tmp_path / "phase2"
+    phase3_run = tmp_path / "phase3"
+    phase2_run.mkdir()
+    phase3_run.mkdir()
+    _write_font_selection(
+        phase3_run / "font-selections.jsonl",
+        font_path,
+        source_crop_path,
+        translated_text="-快看\n接下来登场的乐队\n竟然！",
+    )
+    _write_detection_like_gbc06_18_record_3(phase2_run / "detections.jsonl")
+
+    run_dir = run_phase4(
+        selection_run_dir=phase3_run,
+        detection_run_dir=phase2_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase4-gbc06-18-mask-layout",
+        sample_limit=1,
+    )
+
+    layout = _read_jsonl(run_dir / "layout-results.jsonl")[0]["layout"]
+    assert layout["target_bbox"] == [1197, 1335, 1312, 1527]
+    assert layout["target_width"] == 115
+    assert layout["target_height"] == 192
+    assert layout["orientation"] == "vertical"
+
+
 def test_run_phase4_renders_light_text_for_light_on_dark_detection(tmp_path: Path):
     font_path = _copy_font(tmp_path)
     source_crop_path = tmp_path / "source-crop.png"
@@ -954,6 +985,27 @@ def _write_detection_like_gbc06_02_record_11(path: Path) -> None:
             {"xyxy": [157, 1158, 191, 1347], "area": 3908, "score": 0.9172, "polarity": "dark_on_light"},
             {"xyxy": [350, 1243, 380, 1302], "area": 1184, "score": 0.7637, "polarity": "dark_on_light"},
             {"xyxy": [116, 1402, 453, 1411], "area": 3033, "score": 0.7587, "polarity": "dark_on_light"},
+        ],
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _write_detection_like_gbc06_18_record_3(path: Path) -> None:
+    payload = {
+        "record_id": "page.png#1",
+        "status": "ok",
+        "image_name": "page.png",
+        "group_name": "框内",
+        "search_region_xyxy": [1049, 1168, 1440, 1768],
+        "selected_text_box_xyxy": [1237, 1337, 1273, 1527],
+        "candidate_boxes": [
+            {"xyxy": [1237, 1337, 1273, 1527], "area": 5383, "score": 0.932, "polarity": "dark_on_light"},
+            {"xyxy": [1191, 1329, 1317, 1533], "area": 17522, "score": 0.9306, "polarity": "light_on_dark"},
+            {"xyxy": [1277, 1335, 1312, 1435], "area": 2342, "score": 0.9118, "polarity": "dark_on_light"},
+            {"xyxy": [1197, 1337, 1233, 1463], "area": 3087, "score": 0.8785, "polarity": "dark_on_light"},
+            {"xyxy": [1127, 1464, 1164, 1561], "area": 2813, "score": 0.8225, "polarity": "dark_on_light"},
+            {"xyxy": [1087, 1464, 1125, 1621], "area": 3745, "score": 0.7735, "polarity": "dark_on_light"},
+            {"xyxy": [1049, 1692, 1369, 1768], "area": 17534, "score": 0.7063, "polarity": "light_on_dark"},
         ],
     }
     path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")

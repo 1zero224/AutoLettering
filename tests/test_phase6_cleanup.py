@@ -325,6 +325,9 @@ def test_run_phase6_bubble_cleanup_can_use_text_mask_inpaint(tmp_path: Path):
 
     rows = _read_jsonl(run_dir / "cleanup-results.jsonl")
     assert rows[0]["cleanup"]["method"] == "bubble_text_mask_flat_median_fill"
+    assert rows[0]["cleanup"]["text_bbox"] == [35, 25, 80, 90]
+    assert rows[0]["cleanup"]["mask_bbox"] == [35, 25, 80, 90]
+    assert rows[0]["cleanup"]["layout_text_bbox"] == [35, 25, 80, 90]
 
 
 def test_run_phase6_bubble_cleanup_can_use_soft_region_fill_for_comparison(tmp_path: Path):
@@ -403,6 +406,64 @@ def test_mask_bbox_clusters_same_record_columns_without_neighbor_bubble_text():
     }
 
     assert _mask_bbox(detection) == (1197, 1335, 1312, 1527)
+
+
+def test_run_phase6_bubble_cleanup_records_tight_layout_text_bbox_for_text_mask_inpaint(tmp_path: Path):
+    image = Image.new("RGB", (1500, 1800), "white")
+    draw = ImageDraw.Draw(image)
+    for bbox in (
+        (1237, 1337, 1273, 1527),
+        (1277, 1335, 1312, 1435),
+        (1197, 1337, 1233, 1463),
+        (1127, 1464, 1164, 1561),
+        (1087, 1464, 1125, 1621),
+    ):
+        draw.rectangle(bbox, fill="black")
+    image_path = tmp_path / "page.png"
+    image.save(image_path)
+    detection_run = tmp_path / "phase2"
+    layout_run = tmp_path / "phase4"
+    detection_run.mkdir()
+    layout_run.mkdir()
+    _write_jsonl(
+        detection_run / "detections.jsonl",
+        [
+            {
+                "record_id": "page.png#1",
+                "status": "ok",
+                "image_name": "page.png",
+                "image_path": str(image_path),
+                "group_name": "框内",
+                "selected_text_box_xyxy": [1237, 1337, 1273, 1527],
+                "candidate_boxes": [
+                    {"xyxy": [1237, 1337, 1273, 1527], "area": 5383, "score": 0.932, "polarity": "dark_on_light"},
+                    {"xyxy": [1277, 1335, 1312, 1435], "area": 2342, "score": 0.912, "polarity": "dark_on_light"},
+                    {"xyxy": [1197, 1337, 1233, 1463], "area": 3087, "score": 0.879, "polarity": "dark_on_light"},
+                    {"xyxy": [1127, 1464, 1164, 1561], "area": 2813, "score": 0.823, "polarity": "dark_on_light"},
+                    {"xyxy": [1087, 1464, 1125, 1621], "area": 3745, "score": 0.774, "polarity": "dark_on_light"},
+                    {"xyxy": [1191, 1329, 1317, 1533], "area": 17522, "score": 0.931, "polarity": "light_on_dark"},
+                    {"xyxy": [1049, 1692, 1369, 1768], "area": 17534, "score": 0.706, "polarity": "light_on_dark"},
+                ],
+            }
+        ],
+    )
+    _write_layout(layout_run / "layout-results.jsonl")
+
+    run_dir = run_phase6_bubble_cleanup(
+        detection_run_dir=detection_run,
+        layout_run_dir=layout_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-layout-text-bbox",
+        sample_limit=1,
+        cleanup_method="text_mask_inpaint",
+        inpaint_method="flat_median_fill",
+    )
+
+    cleanup = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]["cleanup"]
+    assert cleanup["bbox"] == [1087, 1335, 1312, 1621]
+    assert cleanup["text_bbox"] == [1087, 1335, 1312, 1621]
+    assert cleanup["mask_bbox"] == [1197, 1335, 1312, 1527]
+    assert cleanup["layout_text_bbox"] == [1197, 1335, 1312, 1527]
 
 
 def _write_sample_image(path: Path) -> Path:

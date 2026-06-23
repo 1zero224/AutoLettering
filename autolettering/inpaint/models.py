@@ -14,6 +14,8 @@ class BubbleFillResult:
     cleaned_crop_path: Path
     cleanup_mask_path: Path | None
     before_after_path: Path
+    text_bbox: tuple[int, int, int, int] | None = None
+    mask_bbox: tuple[int, int, int, int] | None = None
 
 
 @dataclass(frozen=True)

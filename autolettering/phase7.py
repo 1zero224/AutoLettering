@@ -100,7 +100,7 @@ def _preview_records(
 
 def _preview_record(detection: dict, cleanup: dict, layout: dict) -> dict:
     bbox = cleanup["cleanup"]["bbox"]
-    text_bbox = layout["layout"].get("target_bbox") or bbox
+    text_bbox = _text_overlay_bbox(cleanup["cleanup"], layout["layout"], bbox)
     return {
         "record_id": detection["record_id"],
         "image_name": detection.get("image_name"),
@@ -113,6 +113,10 @@ def _preview_record(detection: dict, cleanup: dict, layout: dict) -> dict:
         "cleanup_mask_path": _cleanup_mask_path(cleanup["cleanup"]),
         "layout_preview_path": layout["layout"]["preview_path"],
     }
+
+
+def _text_overlay_bbox(cleanup: dict, layout: dict, bbox: list[int]) -> list[int]:
+    return cleanup.get("layout_text_bbox") or layout.get("target_bbox") or bbox
 
 
 def _preview_page(run_dir: Path, image_name: str, records: list[dict]) -> dict:

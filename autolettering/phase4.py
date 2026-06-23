@@ -12,6 +12,7 @@ from .layout.render_text import measure_preview_alignment, render_layout_preview
 from .record_selection import normalize_record_ids, row_matches_record_ids
 from .text_bbox import selected_text_bbox, selected_text_polarity
 from .text_body_bbox import selected_text_body_bbox
+from .text_mask_bbox import selected_text_mask_bbox
 
 MIN_APPLIED_ANGLE_DEGREES = 3.0
 
@@ -162,6 +163,9 @@ def _layout_target_bboxes(row: dict, detection_rows: dict[str, dict]) -> list[li
     if detection is None:
         return []
     full_text_bbox = selected_text_bbox(detection)
+    mask_bbox = selected_text_mask_bbox(detection)
+    if _prefer_mask_bbox_for_layout(detection, mask_bbox, full_text_bbox):
+        return [list(mask_bbox)]
     tight_bbox = _text_bbox(detection)
     if tight_bbox != full_text_bbox:
         return [list(tight_bbox)]
@@ -178,6 +182,19 @@ def _layout_target_bbox(row: dict, detection_rows: dict[str, dict]) -> list[int]
 
 def _text_bbox(detection: dict) -> tuple[int, int, int, int]:
     return selected_text_body_bbox(detection)
+
+
+def _prefer_mask_bbox_for_layout(
+    detection: dict,
+    mask_bbox: tuple[int, int, int, int],
+    full_text_bbox: tuple[int, int, int, int],
+) -> bool:
+    return (
+        detection.get("group_name") == "框内"
+        and mask_bbox != full_text_bbox
+        and _inside(mask_bbox, full_text_bbox)
+        and _area(mask_bbox) <= _area(full_text_bbox) * 0.75
+    )
 
 
 def _text_color_for_record(

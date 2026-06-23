@@ -9,6 +9,7 @@ from PIL import Image
 from .inpaint.bubble_fill import mask_fill_text_pixels, region_fill_text_area, soft_region_fill_text_area, text_mask_inpaint
 from .record_selection import normalize_record_ids, row_matches_record_ids
 from .text_bbox import selected_text_bbox
+from .text_mask_bbox import selected_text_mask_bbox
 
 
 def run_phase6_bubble_cleanup(
@@ -80,11 +81,12 @@ def _cleanup_one(run_dir: Path, detection: dict, layout: dict, cleanup_method: s
         return _skipped_row(layout, "not_bubble_group")
 
     text_bbox = _text_bbox(detection)
+    mask_bbox = _mask_bbox(detection)
     result = _clean_bubble_crop(
         image_path=detection["image_path"],
         bbox=text_bbox,
         text_bbox=text_bbox,
-        mask_bbox=_mask_bbox(detection),
+        mask_bbox=mask_bbox,
         output_dir=run_dir / "crops",
         record_id=detection["record_id"],
         cleanup_method=cleanup_method,
@@ -95,7 +97,7 @@ def _cleanup_one(run_dir: Path, detection: dict, layout: dict, cleanup_method: s
         "image_name": detection.get("image_name"),
         "translated_text": detection.get("translated_text", ""),
         "status": "cleaned",
-        "cleanup": _cleanup_payload(result),
+        "cleanup": _cleanup_payload(result, cleanup_method, text_bbox, mask_bbox),
     }
 
 
@@ -132,115 +134,15 @@ def _text_bbox(detection: dict) -> tuple[int, int, int, int]:
 
 
 def _mask_bbox(detection: dict) -> tuple[int, int, int, int]:
-    selected = _selected_bbox(detection)
-    if selected is None:
-        return _text_bbox(detection)
-    candidates = [_candidate(item) for item in detection.get("candidate_boxes") or []]
-    candidates = [candidate for candidate in candidates if candidate is not None]
-    selected_candidate = next((candidate for candidate in candidates if candidate["bbox"] == selected), None)
-    if selected_candidate is None:
-        return selected
-
-    cluster = [selected_candidate]
-    previous_len = -1
-    while previous_len != len(cluster):
-        previous_len = len(cluster)
-        cluster_bbox = _union_bbox([candidate["bbox"] for candidate in cluster])
-        for candidate in candidates:
-            if candidate in cluster:
-                continue
-            if _same_text_mask_cluster(candidate, selected_candidate, cluster_bbox):
-                cluster.append(candidate)
-    return _union_bbox([candidate["bbox"] for candidate in cluster])
+    return selected_text_mask_bbox(detection)
 
 
-def _selected_bbox(detection: dict) -> tuple[int, int, int, int] | None:
-    xyxy = detection.get("selected_text_box_xyxy")
-    if isinstance(xyxy, list) and len(xyxy) == 4:
-        return tuple(int(value) for value in xyxy)
-    return None
-
-
-def _candidate(item: dict) -> dict | None:
-    xyxy = item.get("xyxy")
-    if not isinstance(xyxy, list) or len(xyxy) != 4:
-        return None
-    score = item.get("score")
-    return {
-        "bbox": tuple(int(value) for value in xyxy),
-        "score": float(score) if isinstance(score, (int, float)) else None,
-        "polarity": item.get("polarity"),
-    }
-
-
-def _same_text_mask_cluster(
-    candidate: dict,
-    selected: dict,
-    cluster_bbox: tuple[int, int, int, int],
-    score_margin: float = 0.08,
-) -> bool:
-    bbox = candidate["bbox"]
-    selected_bbox = selected["bbox"]
-    if bbox == selected_bbox:
-        return True
-    if selected["polarity"] in {"dark_on_light", "light_on_dark"} and candidate["polarity"] != selected["polarity"]:
-        return False
-    if selected["score"] is not None and candidate["score"] is not None and candidate["score"] < selected["score"] - score_margin:
-        return False
-
-    selected_height = _height(selected_bbox)
-    top_slack = max(24, min(64, int(round(selected_height * 0.35))))
-    top_aligned_with_selected = (
-        abs(bbox[1] - selected_bbox[1]) <= top_slack
-        and _vertical_overlap_ratio(bbox, selected_bbox) >= 0.45
-    )
-    touches_cluster = (
-        _vertical_relation(bbox, cluster_bbox) <= max(24, int(round(selected_height * 0.15)))
-        and _vertical_overlap_ratio(bbox, cluster_bbox) >= 0.15
-    )
-    return (
-        (top_aligned_with_selected or touches_cluster)
-        and _horizontal_gap(bbox, cluster_bbox) <= max(36, int(round(_width(selected_bbox) * 1.25)))
-        and _width(bbox) <= max(96, int(round(_width(selected_bbox) * 2.5)))
-    )
-
-
-def _union_bbox(bboxes: list[tuple[int, int, int, int]]) -> tuple[int, int, int, int]:
-    return (
-        min(bbox[0] for bbox in bboxes),
-        min(bbox[1] for bbox in bboxes),
-        max(bbox[2] for bbox in bboxes),
-        max(bbox[3] for bbox in bboxes),
-    )
-
-
-def _width(bbox: tuple[int, int, int, int]) -> int:
-    return max(0, bbox[2] - bbox[0])
-
-
-def _height(bbox: tuple[int, int, int, int]) -> int:
-    return max(0, bbox[3] - bbox[1])
-
-
-def _horizontal_gap(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> int:
-    return max(0, max(a[0], b[0]) - min(a[2], b[2]))
-
-
-def _vertical_overlap_ratio(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
-    overlap = min(a[3], b[3]) - max(a[1], b[1])
-    if overlap <= 0:
-        return 0.0
-    return overlap / max(1, min(_height(a), _height(b)))
-
-
-def _vertical_relation(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> int:
-    overlap = min(a[3], b[3]) - max(a[1], b[1])
-    if overlap > 0:
-        return 0
-    return max(0, max(a[1], b[1]) - min(a[3], b[3]))
-
-
-def _cleanup_payload(result) -> dict:
+def _cleanup_payload(
+    result,
+    cleanup_method: str,
+    text_bbox: tuple[int, int, int, int] | None = None,
+    mask_bbox: tuple[int, int, int, int] | None = None,
+) -> dict:
     payload = asdict(result)
     payload["bbox"] = list(result.bbox)
     payload["fill_color"] = list(result.fill_color)
@@ -248,7 +150,24 @@ def _cleanup_payload(result) -> dict:
     payload["cleaned_crop_path"] = str(result.cleaned_crop_path)
     payload["cleanup_mask_path"] = str(result.cleanup_mask_path) if result.cleanup_mask_path else None
     payload["before_after_path"] = str(result.before_after_path)
+    if text_bbox is not None:
+        payload["text_bbox"] = list(text_bbox)
+    if mask_bbox is not None:
+        payload["mask_bbox"] = list(mask_bbox)
+    layout_text_bbox = _layout_text_bbox(cleanup_method, text_bbox, mask_bbox)
+    if layout_text_bbox is not None:
+        payload["layout_text_bbox"] = list(layout_text_bbox)
     return payload
+
+
+def _layout_text_bbox(
+    cleanup_method: str,
+    text_bbox: tuple[int, int, int, int] | None,
+    mask_bbox: tuple[int, int, int, int] | None,
+) -> tuple[int, int, int, int] | None:
+    if cleanup_method in {"mask_fill", "text_mask_inpaint"} and mask_bbox is not None:
+        return mask_bbox
+    return text_bbox
 
 
 def _skipped_row(layout: dict, reason: str) -> dict:
