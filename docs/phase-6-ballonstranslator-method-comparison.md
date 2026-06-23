@@ -129,6 +129,21 @@ MIMO inpaint ranking:
 
 Manual reading of the grid mostly matches the ranking. `opencv_tela` is clearly too weak for this bubble. `patchmatch`, `aot`, and `lama_large_512px` all preserve the left neighbor text and bottom art; `lama_large_512px` is the best candidate for higher-quality output, while `patchmatch` is much faster and good enough as a local fallback.
 
+## Method Label Mapping
+
+The experiment labels intentionally keep short CLI-safe names, while the routed
+implementation records the exact BallonsTranslator path used for each method.
+
+| Experiment label | Routed method | BallonsTranslator source | Directly instantiated BT class? | Note |
+| --- | --- | --- | --- | --- |
+| `ctd` | `ComicTextDetector` | `ballontranslator/modules/textdetector/detector_ctd.py` | yes | CPU path loads `comictextdetector.pt.onnx`. |
+| `ysgyolo` | `YSGYoloDetector` | `ballontranslator/modules/textdetector/detector_ysg.py` | yes | Current BT `_detect()` does not pass `detect size` into `model.predict()`. |
+| `opencv_tela` | `opencv-tela_INPAINT_NS` | `ballontranslator/modules/inpaint/inpaint_default.py` | behavior matched directly | BT registers `opencv-tela`, but the implementation calls `cv2.INPAINT_NS`, not `cv2.INPAINT_TELEA`. |
+| `patchmatch` | `bt_patchmatch_inpaint` | `ballontranslator/modules/inpaint/patch_match.py` | via project wrapper | Wrapper loads BT's native PatchMatch DLL path. |
+| `aot` | `bt_aot_inpaint` | `ballontranslator/modules/inpaint/aot.py` | via project wrapper | Wrapper loads BT's AOT checkpoint and tensor preprocessing path. |
+| `lama_mpe` | `lama_mpe_inpaint` | `ballontranslator/modules/inpaint/lama.py` | direct loader call | The script calls BT's `load_lama_mpe(..., use_mpe=True)`. |
+| `lama_large_512px` | `bt_lama_large_inpaint` | `ballontranslator/modules/inpaint/lama.py` | via project wrapper | Wrapper calls `load_lama_mpe(..., use_mpe=False, large_arch=True)`. |
+
 ## Integration Decision
 
 Use this as the next Phase 6 direction:
