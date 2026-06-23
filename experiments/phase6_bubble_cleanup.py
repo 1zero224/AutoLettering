@@ -28,6 +28,12 @@ def main() -> None:
         default="opencv_telea",
         choices=["local_diffusion", "flat_median_fill", "opencv_telea", "opencv_ns", "bt_patchmatch", "bt_aot", "bt_lama_large"],
     )
+    parser.add_argument(
+        "--mask-dilate-px",
+        type=int,
+        default=3,
+        help="Text-mask dilation size for cleanup-method=text_mask_inpaint.",
+    )
     parser.add_argument("--record-id", action="append", dest="record_ids", default=None)
     args = parser.parse_args()
 
@@ -40,6 +46,7 @@ def main() -> None:
         cleanup_method=args.cleanup_method,
         record_ids=args.record_ids,
         inpaint_method=args.inpaint_method,
+        mask_dilate_px=args.mask_dilate_px,
     )
     print(run_dir)
 

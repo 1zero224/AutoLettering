@@ -21,12 +21,13 @@ def run_phase6_bubble_cleanup(
     cleanup_method: str = "region_fill",
     record_ids: list[str] | None = None,
     inpaint_method: str = "opencv_telea",
+    mask_dilate_px: int = 3,
 ) -> Path:
     run_dir = Path(output_root) / (run_id or "phase6-bubble-cleanup")
     run_dir.mkdir(parents=True, exist_ok=True)
     detections = _load_detection_rows(Path(detection_run_dir) / "detections.jsonl")
     layouts = _load_layout_rows(Path(layout_run_dir) / "layout-results.jsonl")
-    rows = _cleanup_rows(run_dir, detections, layouts, sample_limit, cleanup_method, record_ids, inpaint_method)
+    rows = _cleanup_rows(run_dir, detections, layouts, sample_limit, cleanup_method, record_ids, inpaint_method, mask_dilate_px)
     _write_jsonl(run_dir / "cleanup-results.jsonl", rows)
     _write_report(run_dir / "reports" / "phase6-report.md", detection_run_dir, layout_run_dir, rows)
     return run_dir
@@ -60,6 +61,7 @@ def _cleanup_rows(
     cleanup_method: str,
     record_ids: list[str] | None = None,
     inpaint_method: str = "opencv_telea",
+    mask_dilate_px: int = 3,
 ) -> list[dict]:
     wanted = normalize_record_ids(record_ids)
     rows: list[dict] = []
@@ -72,11 +74,11 @@ def _cleanup_rows(
         if detection is None:
             rows.append(_skipped_row(layout, "missing_detection"))
             continue
-        rows.append(_cleanup_one(run_dir, detection, layout, cleanup_method, inpaint_method))
+        rows.append(_cleanup_one(run_dir, detection, layout, cleanup_method, inpaint_method, mask_dilate_px))
     return rows
 
 
-def _cleanup_one(run_dir: Path, detection: dict, layout: dict, cleanup_method: str, inpaint_method: str) -> dict:
+def _cleanup_one(run_dir: Path, detection: dict, layout: dict, cleanup_method: str, inpaint_method: str, mask_dilate_px: int) -> dict:
     if detection.get("group_name") != "框内":
         return _skipped_row(layout, "not_bubble_group")
 
@@ -91,13 +93,14 @@ def _cleanup_one(run_dir: Path, detection: dict, layout: dict, cleanup_method: s
         record_id=detection["record_id"],
         cleanup_method=cleanup_method,
         inpaint_method=inpaint_method,
+        mask_dilate_px=mask_dilate_px,
     )
     return {
         "record_id": detection["record_id"],
         "image_name": detection.get("image_name"),
         "translated_text": detection.get("translated_text", ""),
         "status": "cleaned",
-        "cleanup": _cleanup_payload(result, cleanup_method, text_bbox, mask_bbox),
+        "cleanup": _cleanup_payload(result, cleanup_method, text_bbox, mask_bbox, mask_dilate_px),
     }
 
 
@@ -110,6 +113,7 @@ def _clean_bubble_crop(
     record_id: str,
     cleanup_method: str,
     inpaint_method: str = "opencv_telea",
+    mask_dilate_px: int = 3,
 ):
     if cleanup_method == "region_fill":
         return region_fill_text_area(image_path, bbox, text_bbox, output_dir, record_id)
@@ -118,7 +122,7 @@ def _clean_bubble_crop(
     if cleanup_method == "mask_fill":
         return mask_fill_text_pixels(image_path, bbox, mask_bbox, output_dir, record_id)
     if cleanup_method == "text_mask_inpaint":
-        return text_mask_inpaint(image_path, bbox, text_bbox, output_dir, record_id, inpaint_method, mask_bbox=mask_bbox)
+        return text_mask_inpaint(image_path, bbox, text_bbox, output_dir, record_id, inpaint_method, mask_bbox=mask_bbox, dilate_px=mask_dilate_px)
     raise ValueError(f"unsupported_bubble_cleanup_method:{cleanup_method}")
 
 
@@ -142,6 +146,7 @@ def _cleanup_payload(
     cleanup_method: str,
     text_bbox: tuple[int, int, int, int] | None = None,
     mask_bbox: tuple[int, int, int, int] | None = None,
+    mask_dilate_px: int = 3,
 ) -> dict:
     payload = asdict(result)
     payload["bbox"] = list(result.bbox)
@@ -154,6 +159,8 @@ def _cleanup_payload(
         payload["text_bbox"] = list(text_bbox)
     if mask_bbox is not None:
         payload["mask_bbox"] = list(mask_bbox)
+    if cleanup_method == "text_mask_inpaint":
+        payload["mask_dilate_px"] = mask_dilate_px
     layout_text_bbox = _layout_text_bbox(cleanup_method, text_bbox, mask_bbox)
     if layout_text_bbox is not None:
         payload["layout_text_bbox"] = list(layout_text_bbox)

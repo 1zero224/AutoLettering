@@ -215,6 +215,29 @@ Phase 8 audit result:
 }
 ```
 
+## Phase 6 Follow-up: Mask Variant Tuning
+
+A follow-up experiment keeps the best `bt_lama_large` inpainter fixed and
+compares cleanup mask shapes/thresholds for the same hard record. The key
+result is that broad rectangular masks reproduce the visible white-block
+failure, while tight text-pixel masks remain the usable direction.
+
+Evidence:
+
+```text
+docs/phase-6-gbc06-18-mask-variant-experiment-report.md
+outputs/runs/phase6-gbc06-18-mask-variant-lama-large-v2/visuals/mask-variant-grid.png
+outputs/runs/phase6-gbc06-18-mask-variant-lama-large-v2/reports/mimo-mask-variant-evaluation.json
+outputs/runs/phase6-gbc06-18-mask-variant-tight-finalists-v2/visuals/mask-variant-mimo-grid.png
+outputs/runs/phase6-gbc06-18-mask-variant-tight-finalists-v2/reports/mimo-mask-variant-evaluation.json
+```
+
+Crop-level MIMO preferred `tight_t185_d5` among tight-mask finalists, so Phase 6
+now exposes `--mask-dilate-px` for explicit hard-case experiments. The default
+remains `3`: the d5 page-level preview is usable, but its MIMO score was `7`,
+below the previous d3/tight-layout page score `8`, because the remaining
+bottleneck is translated lettering size/weight rather than cleanup.
+
 ## Preserved Evidence Runs
 
 The intermediate runs are intentionally preserved because they document the integration failures and fixes:

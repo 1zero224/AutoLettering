@@ -328,6 +328,32 @@ def test_run_phase6_bubble_cleanup_can_use_text_mask_inpaint(tmp_path: Path):
     assert rows[0]["cleanup"]["text_bbox"] == [35, 25, 80, 90]
     assert rows[0]["cleanup"]["mask_bbox"] == [35, 25, 80, 90]
     assert rows[0]["cleanup"]["layout_text_bbox"] == [35, 25, 80, 90]
+    assert rows[0]["cleanup"]["mask_dilate_px"] == 3
+
+
+def test_run_phase6_bubble_cleanup_records_custom_text_mask_dilation(tmp_path: Path):
+    image_path = _write_sample_image(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    layout_run = tmp_path / "phase4"
+    detection_run.mkdir()
+    layout_run.mkdir()
+    _write_detection(detection_run / "detections.jsonl", image_path)
+    _write_layout(layout_run / "layout-results.jsonl")
+
+    run_dir = run_phase6_bubble_cleanup(
+        detection_run_dir=detection_run,
+        layout_run_dir=layout_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-text-mask-inpaint-d5-test",
+        sample_limit=1,
+        cleanup_method="text_mask_inpaint",
+        inpaint_method="flat_median_fill",
+        mask_dilate_px=5,
+    )
+
+    rows = _read_jsonl(run_dir / "cleanup-results.jsonl")
+    assert rows[0]["cleanup"]["method"] == "bubble_text_mask_flat_median_fill"
+    assert rows[0]["cleanup"]["mask_dilate_px"] == 5
 
 
 def test_run_phase6_bubble_cleanup_can_use_soft_region_fill_for_comparison(tmp_path: Path):
