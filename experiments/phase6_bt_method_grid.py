@@ -20,12 +20,13 @@ if str(BT_ROOT) not in sys.path:
     sys.path.insert(0, str(BT_ROOT))
 
 from autolettering.models.mimo import MimoVisionClient, MimoVisionConfig
+from autolettering.experiment_grid import near_square_columns
 from autolettering.phase6 import _mask_bbox, _text_bbox
 from autolettering.inpaint.nonbubble import build_text_mask, inpaint_crop
 
 
 INPAINT_METHODS = [
-    "opencv_tela",
+    "opencv-tela",
     "patchmatch",
     "aot",
     "lama_mpe",
@@ -171,7 +172,8 @@ def _run_inpainters(run_dir: Path, record: dict, methods: list[str]) -> list[dic
 
     for method in methods:
         started = time.perf_counter()
-        output_dir = run_dir / "inpaint" / method
+        method_label = _canonical_inpaint_method(method)
+        output_dir = run_dir / "inpaint" / method_label
         output_dir.mkdir(parents=True, exist_ok=True)
         try:
             routed_method, cleaned = _inpaint_with_method(crop, local_mask, method)
@@ -182,7 +184,7 @@ def _run_inpainters(run_dir: Path, record: dict, methods: list[str]) -> list[dic
             _save_before_after(crop, cleaned, before_after_path)
             records.append(
                 {
-                    "method": method,
+                    "method": method_label,
                     "routed_method": routed_method,
                     "status": "ok",
                     "elapsed_seconds": elapsed,
@@ -195,7 +197,7 @@ def _run_inpainters(run_dir: Path, record: dict, methods: list[str]) -> list[dic
         except Exception as exc:
             records.append(
                 {
-                    "method": method,
+                    "method": method_label,
                     "status": "failed",
                     "failure_reason": f"{type(exc).__name__}: {str(exc)[:500]}",
                     "input_crop_path": str(crop_path),
@@ -205,9 +207,15 @@ def _run_inpainters(run_dir: Path, record: dict, methods: list[str]) -> list[dic
     return records
 
 
-def _inpaint_with_method(crop: Image.Image, mask: Image.Image, method: str) -> tuple[str, Image.Image]:
+def _canonical_inpaint_method(method: str) -> str:
     if method == "opencv_tela":
-        return "opencv-tela_INPAINT_NS", _opencv_tela_bt(crop, mask)
+        return "opencv-tela"
+    return method
+
+
+def _inpaint_with_method(crop: Image.Image, mask: Image.Image, method: str) -> tuple[str, Image.Image]:
+    if method in {"opencv-tela", "opencv_tela"}:
+        return "bt_opencv-tela_actual_cv2_INPAINT_NS", _opencv_tela_bt(crop, mask)
     if method == "patchmatch":
         return inpaint_crop(crop, mask, "bt_patchmatch")
     if method == "aot":
@@ -298,7 +306,7 @@ def _write_detection_grid(run_dir: Path, record: dict, records: list[dict[str, A
             tiles.append((item["method"], item["overlay_path"]))
         else:
             tiles.append((f"{item['method']} failed", None))
-    return _write_grid(output, tiles, columns=2)
+    return _write_grid(output, tiles, columns=near_square_columns(len(tiles), cell_width=370, cell_height=334))
 
 
 def _write_inpaint_grid(run_dir: Path, record: dict, records: list[dict[str, Any]]) -> Path:
@@ -308,7 +316,7 @@ def _write_inpaint_grid(run_dir: Path, record: dict, records: list[dict[str, Any
     tiles = [("original", input_path), ("tight mask", mask_path)]
     for item in records:
         tiles.append((item["method"] if item["status"] == "ok" else f"{item['method']} failed", item.get("cleaned_path")))
-    return _write_grid(output, tiles, columns=3)
+    return _write_grid(output, tiles, columns=near_square_columns(len(tiles), cell_width=370, cell_height=334))
 
 
 def _current_detector_tile(run_dir: Path, record: dict) -> Path:
@@ -467,6 +475,8 @@ def _write_report(path: Path, summary: dict[str, Any]) -> None:
         "## Inpaint Status",
         "",
         *[f"- `{item['method']}`: `{item['status']}` {item.get('failure_reason', '')}" for item in summary["inpainters"]],
+        "",
+        "Note: BallonsTranslator registers this OpenCV method as `opencv-tela`, but its implementation calls `cv2.INPAINT_NS`.",
         "",
         "## MIMO",
         "",
