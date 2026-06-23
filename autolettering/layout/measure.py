@@ -50,6 +50,7 @@ def search_fitting_layout(
         selected_orientation,
         angle_degrees,
         0.0,
+        max_lines,
     )
     if best is None and allow_overflow_ratio > 0.0:
         best = _search_best_candidate(
@@ -62,6 +63,7 @@ def search_fitting_layout(
             selected_orientation,
             angle_degrees,
             allow_overflow_ratio,
+            max_lines,
         )
     if best is None:
         return _fallback_layout(
@@ -75,7 +77,7 @@ def search_fitting_layout(
             allow_overflow_ratio,
         )
 
-    line_breaks, font_size, measured = best
+    line_breaks, font_size, measured, line_spacing = best
     return _layout_result(
         text,
         line_breaks,
@@ -85,6 +87,7 @@ def search_fitting_layout(
         target_height,
         measured,
         allow_overflow_ratio,
+        line_spacing=line_spacing,
         angle_degrees=angle_degrees,
     )
 
@@ -99,17 +102,85 @@ def _search_best_candidate(
     orientation: str,
     angle_degrees: float,
     allow_overflow_ratio: float,
-) -> tuple[str, int, TextMeasurement] | None:
-    best: tuple[str, int, TextMeasurement] | None = None
+    max_lines: int,
+) -> tuple[str, int, TextMeasurement, int] | None:
+    fitting: list[tuple[str, int, TextMeasurement, int]] = []
     for line_breaks in candidates:
-        for font_size in range(max_font_size, min_font_size - 1, -1):
-            measured = measure_text_layout(line_breaks, font_path, font_size, orientation=orientation)
-            footprint = _rotation_footprint(measured, angle_degrees)
-            if _overflow_ratio(footprint.width, footprint.height, target_width, target_height) <= allow_overflow_ratio:
-                if best is None or font_size > best[1]:
-                    best = (line_breaks, font_size, footprint)
-                break
-    return best
+        for line_spacing in _line_spacing_candidates(orientation, max_lines):
+            for font_size in range(max_font_size, min_font_size - 1, -1):
+                measured = measure_text_layout(
+                    line_breaks,
+                    font_path,
+                    font_size,
+                    line_spacing=line_spacing,
+                    orientation=orientation,
+                )
+                footprint = _rotation_footprint(measured, angle_degrees)
+                overflow = _overflow_ratio(footprint.width, footprint.height, target_width, target_height)
+                if overflow <= allow_overflow_ratio:
+                    fitting.append((line_breaks, font_size, footprint, line_spacing))
+                    break
+    if not fitting:
+        return None
+
+    best_font_size = max(item[1] for item in fitting)
+    return max(
+        fitting,
+        key=lambda item: _layout_score(
+            item[0],
+            candidates,
+            item[1],
+            item[2],
+            item[3],
+            target_height,
+            orientation,
+            best_font_size,
+        ),
+    )
+
+
+def _line_spacing_candidates(orientation: str, max_lines: int) -> list[int]:
+    return [0, 1, 2, 4] if orientation == "vertical" and max_lines > 1 else [4]
+
+
+def _layout_score(
+    line_breaks: str,
+    candidates: list[str],
+    font_size: int,
+    measured: TextMeasurement,
+    line_spacing: int,
+    target_height: int,
+    orientation: str,
+    best_font_size: int,
+) -> tuple[int, float, int, int, int]:
+    if orientation != "vertical":
+        return 0, 0.0, font_size, 0, 0
+    phrase_bonus = _explicit_break_bonus(line_breaks, candidates, font_size, best_font_size)
+    margin_score = _vertical_margin_score(measured, target_height)
+    density_penalty = -abs((measured.height / max(1, target_height)) - 0.9)
+    size_score = font_size / max(1, best_font_size)
+    return phrase_bonus, size_score, margin_score + density_penalty, -line_spacing, -len(line_breaks)
+
+
+def _explicit_break_bonus(line_breaks: str, candidates: list[str], font_size: int, best_font_size: int) -> int:
+    explicit = candidates[0] if candidates else ""
+    if line_breaks != explicit or "\n" not in explicit or not _has_title_style_vertical_columns(explicit):
+        return 0
+    return 1 if font_size / best_font_size >= 0.7 else 0
+
+
+def _has_title_style_vertical_columns(line_breaks: str) -> bool:
+    lengths = [len(part.strip()) for part in line_breaks.splitlines() if part.strip()]
+    if len(lengths) < 3:
+        return False
+    return max(lengths) >= min(lengths) * 2
+
+
+def _vertical_margin_score(measured: TextMeasurement, target_height: int) -> float:
+    bottom_margin = target_height - measured.height
+    if bottom_margin < 0:
+        return -10.0
+    return min(bottom_margin, 12) / 12.0
 
 
 def _fallback_layout(
@@ -132,8 +203,9 @@ def _fallback_layout(
         target_height,
         measured,
         allow_overflow_ratio,
-        "overflow",
-        angle_degrees,
+        failure_reason="overflow",
+        line_spacing=4,
+        angle_degrees=angle_degrees,
     )
 
 
@@ -147,6 +219,7 @@ def _layout_result(
     measured: TextMeasurement,
     allow_overflow_ratio: float,
     failure_reason: str | None = None,
+    line_spacing: int = 4,
     angle_degrees: float = 0.0,
 ) -> LayoutResult:
     overflow = _overflow_ratio(measured.width, measured.height, target_width, target_height)
@@ -157,7 +230,7 @@ def _layout_result(
         line_breaks=line_breaks,
         font_size=font_size,
         orientation=orientation,
-        line_spacing=4,
+        line_spacing=line_spacing,
         letter_spacing=0,
         angle_degrees=round(angle_degrees, 1),
         target_width=target_width,

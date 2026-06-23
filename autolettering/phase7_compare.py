@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import math
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -15,20 +16,44 @@ class PreviewMethodInput:
     evaluation_run_dir: Path | None = None
 
 
+class PreviewComparisonClient(Protocol):
+    def analyze_image(
+        self,
+        image_path: str | Path,
+        prompt: str,
+        kind: str = "image_analysis",
+        max_completion_tokens: int | None = None,
+    ) -> dict:
+        ...
+
+
 def run_phase7_method_comparison(
     methods: list[PreviewMethodInput],
     output_root: str | Path = "outputs/runs",
     run_id: str | None = None,
+    client: PreviewComparisonClient | None = None,
+    crop_mode: str = "text",
 ) -> Path:
     if not methods:
         raise ValueError("at least one method is required")
+    if crop_mode not in {"text", "record"}:
+        raise ValueError(f"unsupported crop_mode: {crop_mode}")
     run_dir = Path(output_root) / (run_id or "phase7-method-comparison")
     run_dir.mkdir(parents=True, exist_ok=True)
     results = [_load_method_result(method) for method in methods]
     local_sheet = _write_local_sheet(run_dir / "debug" / "local-method-comparison.png", results)
     page_sheet = _write_page_sheet(run_dir / "debug" / "page-method-comparison.png", results)
-    _write_json(run_dir / "method-comparison.json", {"methods": results})
-    _write_index(run_dir / "index.md", results, local_sheet, page_sheet)
+    square_sheet = _write_near_square_result_sheet(
+        run_dir / "debug" / "near-square-result-grid.png",
+        results,
+        crop_mode=crop_mode,
+    )
+    mimo = _run_mimo_comparison(run_dir, square_sheet, results, client) if client else {"status": "not_requested"}
+    _write_json(
+        run_dir / "method-comparison.json",
+        {"methods": results, "near_square_sheet": str(square_sheet), "mimo": mimo},
+    )
+    _write_index(run_dir / "index.md", results, local_sheet, page_sheet, square_sheet, mimo)
     return run_dir
 
 
@@ -151,6 +176,78 @@ def _write_page_sheet(path: Path, results: list[dict[str, Any]]) -> Path:
     return path
 
 
+def _write_near_square_result_sheet(path: Path, results: list[dict[str, Any]], crop_mode: str) -> Path:
+    items = _result_items(results, crop_mode)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not items:
+        _blank_sheet(path, "No final preview records found")
+        return path
+
+    font = ImageFont.load_default()
+    columns = _near_square_columns(len(items), cell_width=320, cell_height=360)
+    rows = math.ceil(len(items) / columns)
+    tile_w, tile_h, label_h, pad = 300, 320, 42, 12
+    width = pad + columns * (tile_w + pad)
+    height = pad + rows * (tile_h + label_h + pad)
+    sheet = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(sheet)
+
+    for index, item in enumerate(items):
+        col = index % columns
+        row = index // columns
+        x = pad + col * (tile_w + pad)
+        y = pad + row * (tile_h + label_h + pad)
+        draw.rectangle((x, y, x + tile_w, y + label_h), fill=(245, 245, 245), outline=(180, 180, 180))
+        draw.text((x + 5, y + 5), item["method"][:44], fill="black", font=font)
+        draw.text((x + 5, y + 23), _score_label(item)[:44], fill=(70, 70, 70), font=font)
+        _paste_fitted(sheet, item["image"], (x, y + label_h, tile_w, tile_h))
+        draw.rectangle((x, y + label_h, x + tile_w, y + label_h + tile_h), outline=(210, 210, 210))
+
+    sheet.save(path)
+    return path
+
+
+def _result_items(results: list[dict[str, Any]], crop_mode: str) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for result in results:
+        evaluation = _first_evaluation(result)
+        for row in result["preview_rows"]:
+            preview = row.get("preview", {})
+            for record in row.get("records", []):
+                bbox = record.get("text_bbox") if crop_mode == "text" else record.get("bbox")
+                if not bbox:
+                    bbox = record.get("bbox")
+                items.append(
+                    {
+                        "method": result["label"],
+                        "record_id": record.get("record_id"),
+                        "image": _crop_image(preview.get("page_preview_path"), tuple(bbox)),
+                        "evaluation": evaluation,
+                    }
+                )
+    return items
+
+
+def _near_square_columns(count: int, cell_width: int, cell_height: int) -> int:
+    best_columns = 1
+    best_score = float("inf")
+    for columns in range(1, count + 1):
+        rows = math.ceil(count / columns)
+        ratio = (columns * cell_width) / max(1, rows * cell_height)
+        score = abs(math.log(ratio))
+        if score < best_score:
+            best_score = score
+            best_columns = columns
+    return best_columns
+
+
+def _score_label(item: dict[str, Any]) -> str:
+    evaluation = item.get("evaluation") or {}
+    if evaluation.get("status") == "evaluated":
+        return f"score={evaluation.get('score')} usable={evaluation.get('usable')}"
+    return "no evaluated MIMO result"
+
+
 def _page_items(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for result in results:
@@ -182,11 +279,15 @@ def _draw_page_row(
 
 
 def _evaluation_summary(result: dict[str, Any]) -> str:
-    evaluated = [row for row in result["evaluation_rows"] if row.get("status") == "evaluated"]
-    if not evaluated:
+    row = _first_evaluation(result)
+    if not row:
         return "no evaluated MIMO result"
-    row = evaluated[0]
     return f"score={row.get('score')} usable={row.get('usable')} art={row.get('art_preserved')}"
+
+
+def _first_evaluation(result: dict[str, Any]) -> dict[str, Any] | None:
+    evaluated = [row for row in result["evaluation_rows"] if row.get("status") == "evaluated"]
+    return evaluated[0] if evaluated else None
 
 
 def _crop_image(path: str | Path, bbox: tuple[int, int, int, int]) -> Image.Image:
@@ -217,10 +318,44 @@ def _blank_sheet(path: Path, message: str) -> None:
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def _write_index(path: Path, results: list[dict[str, Any]], local_sheet: Path, page_sheet: Path) -> None:
+def _run_mimo_comparison(
+    run_dir: Path,
+    square_sheet: Path,
+    results: list[dict[str, Any]],
+    client: PreviewComparisonClient,
+) -> dict[str, Any]:
+    prompt = "\n".join(
+        [
+            "Evaluate this near-square manga lettering comparison grid.",
+            "Each tile is the same target text area after a different cleanup/layout method.",
+            "Prefer methods that fully remove Japanese source text, keep surrounding manga art intact, preserve natural vertical manga lettering, avoid rotation, avoid oversized/heavy lettering, and keep phrase breaks natural.",
+            "Do not judge translation meaning; compare visual editing quality only.",
+            f"Methods JSON: {json.dumps([result['label'] for result in results], ensure_ascii=False)}",
+            "Return only JSON with keys: best_method, ranking, scores, unacceptable_methods, per_method_notes, reasoning_summary.",
+        ]
+    )
+    response = client.analyze_image(
+        square_sheet,
+        prompt,
+        kind="phase7_near_square_method_comparison",
+        max_completion_tokens=1200,
+    )
+    _write_json(run_dir / "reports" / "mimo-near-square-comparison.json", response)
+    return {"status": "ok", **response}
+
+
+def _write_index(
+    path: Path,
+    results: list[dict[str, Any]],
+    local_sheet: Path,
+    page_sheet: Path,
+    square_sheet: Path,
+    mimo: dict[str, Any],
+) -> None:
     lines = [
         "# Phase 7 Preview Method Comparison",
         "",
@@ -228,6 +363,8 @@ def _write_index(path: Path, results: list[dict[str, Any]], local_sheet: Path, p
         "",
         f"- Local method sheet: `{local_sheet}`",
         f"- Page method sheet: `{page_sheet}`",
+        f"- Near-square result grid: `{square_sheet}`",
+        f"- MIMO near-square result: `{path.parent / 'reports' / 'mimo-near-square-comparison.json'}`",
         f"- Structured summary: `{path.parent / 'method-comparison.json'}`",
         "",
         "## Methods",
@@ -248,4 +385,14 @@ def _write_index(path: Path, results: list[dict[str, Any]], local_sheet: Path, p
             )
             + " |"
         )
+    lines.extend(["", "## MIMO Near-Square Comparison", "", "```json", json.dumps(_mimo_brief(mimo), ensure_ascii=False, indent=2), "```"])
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _mimo_brief(mimo: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "status": mimo.get("status"),
+        "raw_text": mimo.get("raw_text"),
+        "request": mimo.get("request"),
+        "response": mimo.get("response"),
+    }

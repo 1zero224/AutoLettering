@@ -69,6 +69,16 @@ outputs/runs/phase6-bt-method-grid-gbc06-18-v6/visuals/detector-grid.png
 outputs/runs/phase6-bt-method-grid-gbc06-18-v6/visuals/inpaint-grid.png
 ```
 
+Grid dimensions were checked after the final run:
+
+```text
+detector-grid.png 750x678
+inpaint-grid.png  1120x1012
+```
+
+Both sheets keep the row/column count close enough for MIMO inspection and
+avoid the long-strip failure mode.
+
 MIMO records:
 
 ```text
@@ -252,6 +262,80 @@ now exposes `--mask-dilate-px` for explicit hard-case experiments. The default
 remains `3`: the d5 page-level preview is usable, but its MIMO score was `7`,
 below the previous d3/tight-layout page score `8`, because the remaining
 bottleneck is translated lettering size/weight rather than cleanup.
+
+## Phase 7 Follow-up: Layout and Cleanup Coupling
+
+After the phrase-aware vertical layout was promoted into the Phase 4 search, the
+same d3 cleanup became visibly worse at page-preview level. The smaller,
+narrower Chinese lettering no longer covered the residual inpaint artifacts, so
+MIMO correctly downgraded the page:
+
+```text
+outputs/runs/phase7-gbc06-18-phrase-aware-layout-v1/preview-evaluation.jsonl
+score: 4
+issue: original Japanese text still visible / cluttered overlap
+```
+
+Re-running the same layout with the stronger d5 text mask fixed that failure:
+
+```text
+outputs/runs/phase7-gbc06-18-phrase-aware-layout-d5-v1/pages/GBC06-18-png.png
+outputs/runs/phase7-gbc06-18-phrase-aware-layout-d5-eval-v1/preview-evaluation.jsonl
+score: 9
+usable: true
+original_text_removed: true
+```
+
+A near-square MIMO comparison grid was then generated from the same target
+`text_bbox`, so the unrelated neighboring `今日が初ライブ!` block was not scored:
+
+```powershell
+python experiments/phase7_preview_method_comparison.py `
+  --method old_fs33_d3=outputs/runs/phase7-gbc06-18-text-mask-lama-large-v3 `
+  --method phrase_fs25_d3=outputs/runs/phase7-gbc06-18-phrase-aware-layout-v1 `
+  --method phrase_fs25_d5=outputs/runs/phase7-gbc06-18-phrase-aware-layout-d5-v1 `
+  --evaluation old_fs33_d3=outputs/runs/phase7-gbc06-18-text-mask-lama-large-eval-v3 `
+  --evaluation phrase_fs25_d3=outputs/runs/phase7-gbc06-18-phrase-aware-layout-eval-v1 `
+  --evaluation phrase_fs25_d5=outputs/runs/phase7-gbc06-18-phrase-aware-layout-d5-eval-v1 `
+  --run-id phase7-gbc06-18-layout-cleanup-comparison-v1 `
+  --crop-mode text `
+  --mimo
+```
+
+Evidence:
+
+```text
+outputs/runs/phase7-gbc06-18-layout-cleanup-comparison-v1/debug/near-square-result-grid.png
+outputs/runs/phase7-gbc06-18-layout-cleanup-comparison-v1/reports/mimo-near-square-comparison.json
+outputs/runs/phase7-gbc06-18-layout-cleanup-comparison-v1/method-comparison.json
+```
+
+The comparison grid is `636x760`. MIMO selected `phrase_fs25_d5`:
+
+```json
+{
+  "best_method": "phrase_fs25_d5",
+  "ranking": ["phrase_fs25_d5", "old_fs33_d3", "phrase_fs25_d3"],
+  "scores": {
+    "phrase_fs25_d5": 9,
+    "old_fs33_d3": 8,
+    "phrase_fs25_d3": 4
+  },
+  "unacceptable_methods": ["phrase_fs25_d3"]
+}
+```
+
+Updated decision for this hard record:
+
+1. Keep `lama_large_512px` as the quality-first inpainter.
+2. Keep tight text-pixel masking; never fall back to a full rectangular white
+   fill for this overlapping diamond block.
+3. Use d5 dilation as the explicit hard-case cleanup setting when the final
+   lettering is narrower than the removed source text and d3 residuals become
+   visible.
+4. Treat cleanup and lettering as coupled: a layout that is typographically
+   better can reveal inpaint defects that were hidden by an oversized old
+   layout.
 
 ## Preserved Evidence Runs
 

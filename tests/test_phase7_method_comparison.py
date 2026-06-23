@@ -27,11 +27,38 @@ def test_phase7_method_comparison_writes_index_and_sheets(tmp_path: Path):
     assert (run_dir / "method-comparison.json").exists()
     assert (run_dir / "debug" / "local-method-comparison.png").exists()
     assert (run_dir / "debug" / "page-method-comparison.png").exists()
+    assert (run_dir / "debug" / "near-square-result-grid.png").exists()
     index = (run_dir / "index.md").read_text(encoding="utf-8")
     assert "bt_lama_large" in index
     assert "score=8" in index
     assert "bt_aot" in index
     assert "score=6" in index
+
+
+def test_phase7_method_comparison_near_square_grid_uses_text_bbox(tmp_path: Path):
+    runs = []
+    evals = []
+    for index in range(4):
+        label = f"method-{index}"
+        runs.append(_write_preview_run(tmp_path / f"{label}-preview", label, (250, 250, 250), (230 - index, 230, 230)))
+        evals.append(_write_eval_run(tmp_path / f"{label}-eval", 8 - index))
+
+    run_dir = run_phase7_method_comparison(
+        [
+            PreviewMethodInput(f"method-{index}", runs[index], evals[index])
+            for index in range(4)
+        ],
+        output_root=tmp_path,
+        run_id="square-comparison",
+    )
+
+    payload = json.loads((run_dir / "method-comparison.json").read_text(encoding="utf-8"))
+    assert payload["mimo"]["status"] == "not_requested"
+    assert payload["near_square_sheet"].endswith("near-square-result-grid.png")
+
+    with Image.open(run_dir / "debug" / "near-square-result-grid.png") as grid:
+        ratio = grid.width / grid.height
+    assert 0.75 <= ratio <= 1.35
 
 
 def _write_preview_run(path: Path, cleanup_method: str, cleaned_color: tuple[int, int, int], final_color: tuple[int, int, int]) -> Path:
@@ -49,6 +76,7 @@ def _write_preview_run(path: Path, cleanup_method: str, cleaned_color: tuple[int
             {
                 "record_id": "GBC06_01.png#16",
                 "bbox": [20, 15, 70, 65],
+                "text_bbox": [30, 20, 60, 55],
                 "translated_text": "text",
                 "cleanup_method": cleanup_method,
                 "preview_before_after_path": str(before_after),

@@ -100,6 +100,27 @@ def test_search_fitting_layout_preserves_vertical_line_breaks_as_columns(tmp_pat
     assert result.measured_height <= 188
 
 
+def test_search_fitting_layout_prefers_phrase_preserving_vertical_breaks_over_larger_split_text(tmp_path: Path):
+    font_path = Path("D:/work/autolettering/工具箱漫画字体V2.5/[toolbox]伪角明-简体-Bold(v2.4).ttf")
+    if not font_path.exists():
+        font_path = _copy_font(tmp_path)
+
+    result = search_fitting_layout(
+        text="-快看\n接下来登场的乐队\n竟然！",
+        font_path=font_path,
+        target_size=(115, 192),
+        min_font_size=12,
+        max_font_size=33,
+        orientation="vertical",
+    )
+
+    assert result.status == "ok"
+    assert result.line_breaks == "-快看\n接下来登场的乐队\n竟然！"
+    assert "接下\n来" not in result.line_breaks
+    assert result.font_size <= 25
+    assert result.overflow_ratio == 0.0
+
+
 def test_search_fitting_layout_accepts_min_font_bounded_overflow(tmp_path: Path):
     font_path = _copy_font(tmp_path)
     measured = measure_text_layout("所谓的街头表演\n就是在别人面前唱歌吗？", font_path, 12, orientation="vertical")
