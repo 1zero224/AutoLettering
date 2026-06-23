@@ -20,7 +20,7 @@ def selected_text_bbox(detection: dict, area_ratio_limit: float = 0.35, score_ma
     if selected_polarity != "light_on_dark":
         cluster = _expand_local_vertical_columns(cluster, candidates, selected, search_region, selected_polarity)
     if selected_polarity == "light_on_dark":
-        cluster = _cluster_with_selected(cluster, selected)
+        cluster = _expand_light_vertical_column(_cluster_with_selected(cluster, selected), candidates, selected)
     return _union_bbox([candidate["bbox"] for candidate in cluster or strong_candidates])
 
 
@@ -118,6 +118,38 @@ def _cluster_with_selected(cluster: list[dict], selected: tuple[int, int, int, i
     if any(_inside(candidate["bbox"], selected) for candidate in cluster):
         return [{"bbox": selected, "score": None, "polarity": "light_on_dark"}]
     return cluster
+
+
+def _expand_light_vertical_column(
+    cluster: list[dict],
+    candidates: list[dict],
+    selected: tuple[int, int, int, int],
+) -> list[dict]:
+    previous_len = -1
+    while len(cluster) != previous_len:
+        previous_len = len(cluster)
+        cluster_bbox = _union_bbox([candidate["bbox"] for candidate in cluster]) if cluster else selected
+        for candidate in candidates:
+            if candidate in cluster:
+                continue
+            if _light_vertical_column_continuation(candidate["bbox"], cluster_bbox, selected):
+                cluster.append(candidate)
+    return cluster
+
+
+def _light_vertical_column_continuation(
+    bbox: tuple[int, int, int, int],
+    cluster: tuple[int, int, int, int],
+    selected: tuple[int, int, int, int],
+) -> bool:
+    if bbox[1] < selected[1]:
+        return False
+    return (
+        _horizontal_overlap_ratio(bbox, cluster) >= 0.65
+        and _vertical_relation(bbox, cluster) <= max(36, int(round(_height(selected) * 1.35)))
+        and _width(bbox) <= max(96, int(round(_width(selected) * 1.6)))
+        and _height(bbox) <= max(140, int(round(_height(selected) * 2.6)))
+    )
 
 
 def _expand_local_vertical_columns(

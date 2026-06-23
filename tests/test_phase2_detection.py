@@ -4,10 +4,11 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from autolettering.detection.cv_text import detect_text_region
+from autolettering.detection.cv_text import detect_text_region, detection_result_to_dict
 from autolettering.detection.regions import build_search_region
 from autolettering.labelplus.models import ManifestImage, ManifestLabel
 from autolettering.phase2 import run_phase2
+from autolettering.text_bbox import selected_text_bbox
 
 
 def _label(
@@ -90,6 +91,35 @@ def test_detect_text_region_selects_light_text_on_dark_background_near_label_poi
     assert y1 <= 70
     assert x2 >= 136
     assert y2 >= 125
+    assert result.candidate_boxes[0].polarity == "light_on_dark"
+
+
+def test_detect_text_region_selects_light_text_on_mid_dark_color_background(tmp_path: Path):
+    image_path = tmp_path / "red-promo.png"
+    image = Image.new("RGB", (240, 420), (205, 112, 112))
+    draw = ImageDraw.Draw(image)
+    for y in range(80, 320, 46):
+        draw.rectangle((158, y, 188, y + 28), fill=(250, 250, 250))
+        draw.rectangle((188, y + 8, 198, y + 18), fill=(80, 70, 70))
+    draw.rectangle((118, 360, 150, 386), fill=(255, 255, 255))
+    image.save(image_path)
+
+    result = detect_text_region(
+        image_path=image_path,
+        label=_label(image_name="red-promo.png", x_px=176, y_px=104, group_name="框外"),
+        image_width=240,
+        image_height=420,
+        radius_x=80,
+        radius_y=220,
+    )
+
+    assert result.status == "ok"
+    assert result.selected_text_box_xyxy is not None
+    x1, y1, x2, y2 = selected_text_bbox(detection_result_to_dict(result))
+    assert x1 <= 158
+    assert y1 <= 80
+    assert x2 >= 188
+    assert y2 >= 300
     assert result.candidate_boxes[0].polarity == "light_on_dark"
 
 

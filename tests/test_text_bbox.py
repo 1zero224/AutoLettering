@@ -113,6 +113,23 @@ def test_selected_text_bbox_does_not_bridge_light_text_to_separate_upper_art():
     assert selected_text_bbox(detection) == (286, 277, 393, 361)
 
 
+def test_selected_text_bbox_extends_light_vertical_column_on_mid_dark_promo_background():
+    detection = {
+        "selected_text_box_xyxy": [154, 76, 193, 113],
+        "search_region_xyxy": [96, 0, 240, 380],
+        "candidate_boxes": [
+            {"xyxy": [154, 76, 193, 113], "score": 0.9792, "polarity": "light_on_dark"},
+            {"xyxy": [154, 122, 193, 159], "score": 0.9226, "polarity": "light_on_dark"},
+            {"xyxy": [154, 168, 193, 205], "score": 0.8254, "polarity": "light_on_dark"},
+            {"xyxy": [154, 214, 193, 251], "score": 0.7281, "polarity": "light_on_dark"},
+            {"xyxy": [154, 260, 193, 297], "score": 0.6308, "polarity": "light_on_dark"},
+            {"xyxy": [118, 360, 150, 386], "score": 0.55, "polarity": "light_on_dark"},
+        ],
+    }
+
+    assert selected_text_bbox(detection) == (154, 76, 193, 297)
+
+
 def test_selected_text_bbox_excludes_panel_border_and_neighbor_text_for_gbc06_02_record_3():
     detection = {
         "selected_text_box_xyxy": [826, 490, 1192, 758],

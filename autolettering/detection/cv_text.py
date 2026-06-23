@@ -75,10 +75,24 @@ def _load_gray_crop(
 
 
 def _light_text_mask(gray: np.ndarray, label_x: int, label_y: int, bright_threshold: int = 220) -> np.ndarray:
-    if _local_dark_ratio(gray, label_x, label_y) < 0.35:
+    if not _has_local_light_text_context(gray, label_x, label_y, bright_threshold):
         return np.zeros_like(gray, dtype=bool)
-    dark_context = np.array(Image.fromarray(((gray < 95).astype(np.uint8) * 255), mode="L").filter(ImageFilter.MaxFilter(13))) > 0
+    dark_context = np.array(Image.fromarray(((gray < 150).astype(np.uint8) * 255), mode="L").filter(ImageFilter.MaxFilter(13))) > 0
     return (gray > bright_threshold) & dark_context
+
+
+def _has_local_light_text_context(gray: np.ndarray, x: int, y: int, bright_threshold: int, radius: int = 60) -> bool:
+    height, width = gray.shape
+    x1 = max(0, x - radius)
+    y1 = max(0, y - radius)
+    x2 = min(width, x + radius + 1)
+    y2 = min(height, y + radius + 1)
+    if x1 >= x2 or y1 >= y2:
+        return False
+    crop = gray[y1:y2, x1:x2]
+    if not bool((crop > bright_threshold).any()):
+        return False
+    return float((crop < 95).mean()) >= 0.08 or float((crop < 150).mean()) >= 0.45
 
 
 def _build_component_mask(dark_mask: np.ndarray) -> np.ndarray:
