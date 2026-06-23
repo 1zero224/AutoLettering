@@ -18,7 +18,16 @@ def main() -> None:
     parser.add_argument("--output-root", default="outputs/runs")
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--sample-limit", type=int, default=5)
-    parser.add_argument("--cleanup-method", default="region_fill", choices=["region_fill", "soft_region_fill", "mask_fill"])
+    parser.add_argument(
+        "--cleanup-method",
+        default="region_fill",
+        choices=["region_fill", "soft_region_fill", "mask_fill", "text_mask_inpaint"],
+    )
+    parser.add_argument(
+        "--inpaint-method",
+        default="opencv_telea",
+        choices=["local_diffusion", "flat_median_fill", "opencv_telea", "opencv_ns", "bt_patchmatch", "bt_aot", "bt_lama_large"],
+    )
     parser.add_argument("--record-id", action="append", dest="record_ids", default=None)
     args = parser.parse_args()
 
@@ -30,6 +39,7 @@ def main() -> None:
         sample_limit=args.sample_limit,
         cleanup_method=args.cleanup_method,
         record_ids=args.record_ids,
+        inpaint_method=args.inpaint_method,
     )
     print(run_dir)
 

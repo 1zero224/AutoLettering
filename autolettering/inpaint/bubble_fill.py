@@ -6,6 +6,7 @@ from statistics import median
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 from .models import BubbleFillResult
+from .nonbubble import inpaint_crop
 
 
 def sample_border_color(
@@ -94,6 +95,49 @@ def mask_fill_text_pixels(
     return BubbleFillResult(
         record_id=record_id,
         method="bubble_mask_fill",
+        bbox=bbox,
+        fill_color=fill_color,
+        before_crop_path=before_path,
+        cleaned_crop_path=cleaned_path,
+        cleanup_mask_path=mask_path,
+        before_after_path=before_after_path,
+    )
+
+
+def text_mask_inpaint(
+    image_path: str | Path,
+    bbox: tuple[int, int, int, int],
+    text_bbox: tuple[int, int, int, int],
+    output_dir: str | Path,
+    record_id: str,
+    inpaint_method: str = "opencv_telea",
+    mask_bbox: tuple[int, int, int, int] | None = None,
+    dark_threshold: int = 185,
+    dilate_px: int = 3,
+) -> BubbleFillResult:
+    output_root = Path(output_dir)
+    safe_id = _safe_name(record_id)
+    mask_source_bbox = mask_bbox or text_bbox
+    fill_color = sample_border_color(image_path, mask_source_bbox)
+
+    with Image.open(image_path) as image:
+        source = image.convert("RGB")
+        before_crop = source.crop(bbox)
+        local_mask = _text_mask(source, bbox, mask_source_bbox, dark_threshold, dilate_px)
+        method_name, cleaned_crop = inpaint_crop(before_crop, local_mask, inpaint_method)
+
+    before_path = output_root / "before" / f"{safe_id}.png"
+    cleaned_path = output_root / "cleaned" / f"{safe_id}.png"
+    mask_path = output_root / "mask" / f"{safe_id}.png"
+    before_after_path = output_root / "before_after" / f"{safe_id}.png"
+    _save_crop(before_crop, before_path)
+    _save_crop(cleaned_crop, cleaned_path)
+    _save_crop(local_mask, mask_path)
+    _save_before_after(before_crop, cleaned_crop, before_after_path)
+
+    return BubbleFillResult(
+        record_id=record_id,
+        method=f"bubble_text_mask_{method_name}",
         bbox=bbox,
         fill_color=fill_color,
         before_crop_path=before_path,

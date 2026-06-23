@@ -9,8 +9,10 @@ from autolettering.inpaint.bubble_fill import (
     region_fill_text_area,
     sample_border_color,
     soft_region_fill_text_area,
+    text_mask_inpaint,
 )
 from autolettering.phase6 import run_phase6_bubble_cleanup
+from autolettering.phase6 import _mask_bbox
 from autolettering.phase6 import _text_bbox
 
 
@@ -64,6 +66,30 @@ def test_mask_fill_text_pixels_preserves_dark_art_outside_text_mask(tmp_path: Pa
     with Image.open(result.cleaned_crop_path) as cleaned:
         assert cleaned.convert("L").getpixel((60, 45)) > 240
         assert cleaned.convert("L").getpixel((30, 10)) < 40
+
+
+def test_text_mask_inpaint_preserves_dark_art_outside_mask_bbox(tmp_path: Path):
+    image = Image.new("RGB", (140, 100), "white")
+    draw = ImageDraw.Draw(image)
+    draw.line((10, 15, 130, 15), fill="black", width=3)
+    draw.rectangle((58, 42, 82, 68), fill="black")
+    image_path = tmp_path / "page.png"
+    image.save(image_path)
+
+    result = text_mask_inpaint(
+        image_path=image_path,
+        bbox=(0, 0, 140, 100),
+        text_bbox=(50, 35, 90, 75),
+        mask_bbox=(55, 38, 85, 72),
+        output_dir=tmp_path / "cleanup",
+        record_id="page.png#1",
+        inpaint_method="flat_median_fill",
+    )
+
+    with Image.open(result.cleaned_crop_path) as cleaned:
+        assert result.method == "bubble_text_mask_flat_median_fill"
+        assert cleaned.convert("L").getpixel((70, 55)) > 240
+        assert cleaned.convert("L").getpixel((30, 15)) < 40
 
 
 def test_region_fill_text_area_removes_light_glyph_ghosts(tmp_path: Path):
@@ -278,6 +304,29 @@ def test_run_phase6_bubble_cleanup_can_keep_mask_fill_for_comparison(tmp_path: P
     assert rows[0]["cleanup"]["method"] == "bubble_mask_fill"
 
 
+def test_run_phase6_bubble_cleanup_can_use_text_mask_inpaint(tmp_path: Path):
+    image_path = _write_sample_image(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    layout_run = tmp_path / "phase4"
+    detection_run.mkdir()
+    layout_run.mkdir()
+    _write_detection(detection_run / "detections.jsonl", image_path)
+    _write_layout(layout_run / "layout-results.jsonl")
+
+    run_dir = run_phase6_bubble_cleanup(
+        detection_run_dir=detection_run,
+        layout_run_dir=layout_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-text-mask-inpaint-test",
+        sample_limit=1,
+        cleanup_method="text_mask_inpaint",
+        inpaint_method="flat_median_fill",
+    )
+
+    rows = _read_jsonl(run_dir / "cleanup-results.jsonl")
+    assert rows[0]["cleanup"]["method"] == "bubble_text_mask_flat_median_fill"
+
+
 def test_run_phase6_bubble_cleanup_can_use_soft_region_fill_for_comparison(tmp_path: Path):
     image_path = _write_sample_image(tmp_path / "page.png")
     detection_run = tmp_path / "phase2"
@@ -339,9 +388,35 @@ def test_text_bbox_unions_small_text_candidates_inside_large_detection():
     assert _text_bbox(detection) == (60, 40, 135, 160)
 
 
+def test_mask_bbox_clusters_same_record_columns_without_neighbor_bubble_text():
+    detection = {
+        "selected_text_box_xyxy": [1237, 1337, 1273, 1527],
+        "candidate_boxes": [
+            {"xyxy": [1237, 1337, 1273, 1527], "score": 0.932, "polarity": "dark_on_light"},
+            {"xyxy": [1277, 1335, 1312, 1435], "score": 0.912, "polarity": "dark_on_light"},
+            {"xyxy": [1197, 1337, 1233, 1463], "score": 0.879, "polarity": "dark_on_light"},
+            {"xyxy": [1127, 1464, 1164, 1561], "score": 0.823, "polarity": "dark_on_light"},
+            {"xyxy": [1087, 1464, 1125, 1621], "score": 0.774, "polarity": "dark_on_light"},
+            {"xyxy": [1191, 1329, 1317, 1533], "score": 0.931, "polarity": "light_on_dark"},
+            {"xyxy": [1049, 1692, 1369, 1768], "score": 0.706, "polarity": "light_on_dark"},
+        ],
+    }
+
+    assert _mask_bbox(detection) == (1197, 1335, 1312, 1527)
+
+
 def _write_sample_image(path: Path) -> Path:
     image = Image.new("RGB", (120, 120), "white")
     ImageDraw.Draw(image).rectangle((42, 35, 72, 85), fill="black")
+    image.save(path)
+    return path
+
+
+def _write_sample_image_with_art(path: Path) -> Path:
+    image = Image.new("RGB", (120, 120), "white")
+    draw = ImageDraw.Draw(image)
+    draw.line((35, 35, 80, 35), fill="black", width=3)
+    draw.rectangle((42, 35, 72, 85), fill="black")
     image.save(path)
     return path
 
