@@ -167,6 +167,56 @@ Use this as the next Phase 6 direction:
 6. Do not use `opencv-tela` for this case except as a negative baseline.
 7. Do not use raw `ysgyolo` output as a cleanup mask without post-filtering.
 
+## GBC06_17 Black-Card Follow-up
+
+`GBC06_17.png#3` is a useful counterexample to the `GBC06_18.png#3` bubble
+ranking. The target is not the nearby vertical speech-bubble text, but the
+horizontal white title on a black card:
+
+```text
+record_id: GBC06_17.png#3
+translated_text: 新川崎（暂）
+full title bbox after detection fix: [988, 221, 1142, 278]
+body/layout bbox after logo trim: [1026, 221, 1142, 278]
+```
+
+The original diverse Phase 2 run selected the neighboring bubble text
+`…ですって`. The fixed Phase 2 run uses local dark-density filtering for
+light-on-dark text and selects the black card title instead:
+
+```text
+outputs/runs/phase2-gbc06-17-3-target-fix-v3/debug/detection/GBC06_17-3.png
+```
+
+For this small black-card crop, `bt_lama_large` was not the best local cleanup
+despite winning the `GBC06_18.png#3` bubble grid. It left visible ghosting in
+the crop:
+
+```text
+outputs/runs/phase6-gbc06-17-3-nonbubble-lama-large-target-fix-v1/crops/before_after/GBC06-17-png-3.png
+```
+
+`dark_panel_fill` and `bt_patchmatch` were then tried as direct follow-ups.
+After trimming the leading white logo out of the body bbox, `bt_patchmatch`
+produced the best usable result for the final page:
+
+```text
+outputs/runs/phase6-gbc06-17-3-nonbubble-patchmatch-target-fix-v2/crops/before_after/GBC06-17-png-3.png
+outputs/runs/phase7-8-gbc06-17-3-patchmatch-target-fix-v1/runs/phase7-preview/pages/GBC06-17-png.png
+outputs/runs/phase7-8-gbc06-17-3-patchmatch-target-fix-v1/runs/phase7-evaluation/preview-evaluation.jsonl
+```
+
+MIMO scored the final `bt_patchmatch` Phase 7 preview `10`, `usable=true`,
+with `original_text_removed=true`, `art_preserved=true`, and
+`lettering_readable=true`. This updates the practical integration rule:
+
+1. Use `lama_large_512px` as the quality-first default for difficult white
+   bubbles and larger textured cleanup areas.
+2. Use `bt_patchmatch` as the preferred fallback for small dark-card/sign text
+   where LaMa can leave ghost strokes.
+3. Always validate target selection before cleanup; a strong inpainter cannot
+   fix a wrong text crop.
+
 ## Phase 7 Follow-up: Tight Layout Target
 
 After connecting the best cleanup path into Phase 7, MIMO exposed a second issue: cleanup was fixed, but lettering was still using the large layout bbox.

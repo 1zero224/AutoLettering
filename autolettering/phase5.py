@@ -10,7 +10,6 @@ from .layout.orientation import (
     orientation_estimate_to_dict,
 )
 from .record_selection import normalize_record_ids, row_matches_record_ids
-from .text_body_bbox import selected_text_body_bbox
 
 
 def run_phase5_orientation(
@@ -64,19 +63,49 @@ def _orientation_row(run_dir: Path, detection: dict) -> dict:
 
 
 def _angle_bbox(detection: dict) -> tuple[int, int, int, int]:
-    selected = selected_text_body_bbox(detection)
+    selected = _phase2_bbox(detection, "selected_text_full_xyxy") or _raw_selected_bbox(detection)
+    fallback = _phase2_bbox(detection, "selected_text_body_xyxy") or selected
     selected_area = _area(selected)
     text_candidates = [_candidate_xyxy(item) for item in detection.get("candidate_boxes") or []]
     text_candidates = [
         bbox
         for bbox in text_candidates
         if bbox and _inside(bbox, selected) and 0 < _area(bbox) <= selected_area * 0.35
+        and _spans_meaningful_text(bbox, selected)
     ]
-    return _representative_text_column(text_candidates) if text_candidates else selected
+    return _representative_text_column(text_candidates) if text_candidates else fallback
+
+
+def _phase2_bbox(detection: dict, key: str) -> tuple[int, int, int, int] | None:
+    xyxy = detection.get(key)
+    if not isinstance(xyxy, list) or len(xyxy) != 4:
+        return None
+    return tuple(int(value) for value in xyxy)
+
+
+def _raw_selected_bbox(detection: dict) -> tuple[int, int, int, int]:
+    return tuple(int(value) for value in detection["selected_text_box_xyxy"])
 
 
 def _representative_text_column(bboxes: list[tuple[int, int, int, int]]) -> tuple[int, int, int, int]:
     return max(bboxes, key=lambda bbox: (_height_ratio(bbox), _area(bbox)))
+
+
+def _spans_meaningful_text(
+    candidate: tuple[int, int, int, int],
+    selected: tuple[int, int, int, int],
+) -> bool:
+    cx1, cy1, cx2, cy2 = candidate
+    sx1, sy1, sx2, sy2 = selected
+    candidate_width = max(1, cx2 - cx1)
+    candidate_height = max(1, cy2 - cy1)
+    selected_width = max(1, sx2 - sx1)
+    selected_height = max(1, sy2 - sy1)
+    if selected_height >= selected_width * 1.25:
+        return candidate_height / selected_height >= 0.45
+    if selected_width >= selected_height * 1.25:
+        return candidate_width / selected_width >= 0.35
+    return max(candidate_width / selected_width, candidate_height / selected_height) >= 0.35
 
 
 def _height_ratio(bbox: tuple[int, int, int, int]) -> float:

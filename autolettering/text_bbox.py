@@ -20,7 +20,10 @@ def selected_text_bbox(detection: dict, area_ratio_limit: float = 0.35, score_ma
     if selected_polarity != "light_on_dark":
         cluster = _expand_local_vertical_columns(cluster, candidates, selected, search_region, selected_polarity)
     if selected_polarity == "light_on_dark":
-        cluster = _expand_light_vertical_column(_cluster_with_selected(cluster, selected), candidates, selected)
+        cluster = _cluster_with_selected(cluster, selected)
+        cluster_bbox = _union_bbox([candidate["bbox"] for candidate in cluster]) if cluster else selected
+        if _vertical_cluster_like(cluster_bbox):
+            cluster = _expand_light_vertical_column(cluster, candidates, selected)
     return _union_bbox([candidate["bbox"] for candidate in cluster or strong_candidates])
 
 

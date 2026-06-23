@@ -162,6 +162,43 @@ def test_run_phase5_orientation_detects_vertical_from_multiple_text_columns(tmp_
     assert abs(orientation["selected_angle_degrees"]) <= 1.0
 
 
+def test_run_phase5_orientation_ignores_short_single_glyph_candidate_in_vertical_text(tmp_path: Path):
+    image_path = tmp_path / "page.png"
+    image = Image.new("RGB", (160, 240), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((72, 30, 88, 190), fill="black")
+    draw.rectangle((62, 165, 98, 190), fill="black")
+    image.save(image_path)
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    payload = {
+        "record_id": "page.png#1",
+        "status": "ok",
+        "image_name": "page.png",
+        "image_path": str(image_path),
+        "translated_text": "测试",
+        "group_name": "框外",
+        "selected_text_box_xyxy": [50, 20, 110, 200],
+        "candidate_boxes": [
+            {"xyxy": [50, 20, 110, 200], "area": 10800},
+            {"xyxy": [60, 160, 100, 200], "area": 1600},
+        ],
+    }
+    _write_jsonl(detection_run / "detections.jsonl", [payload])
+
+    run_dir = run_phase5_orientation(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase5-short-candidate-angle",
+        sample_limit=1,
+    )
+
+    orientation = _read_jsonl(run_dir / "angle-results.jsonl")[0]["orientation"]
+    assert orientation["bbox"] == [50, 20, 110, 200]
+    assert orientation["detected_orientation"] == "vertical"
+    assert abs(orientation["selected_angle_degrees"]) <= 1.0
+
+
 def test_run_phase5_orientation_filters_by_record_id_before_sample_limit(tmp_path: Path):
     image_path = tmp_path / "page.png"
     image = Image.new("RGB", (120, 160), "white")

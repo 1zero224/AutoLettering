@@ -250,6 +250,33 @@ def test_selected_text_body_bbox_excludes_top_diamond_decoration(tmp_path: Path)
     assert selected_text_body_bbox(detection) == (10, 80, 68, 330)
 
 
+def test_selected_text_body_bbox_excludes_leading_light_logo_on_dark_horizontal_title(tmp_path: Path):
+    image_path = tmp_path / "dark-title.png"
+    image = Image.new("RGB", (190, 90), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((10, 10, 174, 67), fill="black")
+    draw.ellipse((16, 18, 43, 45), outline="white", width=1)
+    for x in (23, 31, 39):
+        draw.line((x, 22, x, 41), fill="white", width=1)
+    for x in (56, 78, 100, 122, 144):
+        draw.rectangle((x, 25, x + 14, 49), fill="white")
+    image.save(image_path)
+    detection = {
+        "image_path": str(image_path),
+        "group_name": "框外",
+        "selected_text_box_xyxy": [10, 10, 174, 67],
+        "candidate_boxes": [
+            {"xyxy": [10, 10, 174, 67], "score": 0.95, "polarity": "light_on_dark"},
+        ],
+    }
+
+    body = selected_text_body_bbox(detection)
+
+    assert body[0] >= 52
+    assert body[0] <= 58
+    assert body[1:] == (10, 174, 67)
+
+
 def test_selected_text_body_bbox_keeps_plain_vertical_text_without_diamond(tmp_path: Path):
     image_path = tmp_path / "plain.png"
     image = Image.new("RGB", (80, 240), "white")

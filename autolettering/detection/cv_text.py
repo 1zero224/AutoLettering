@@ -77,8 +77,13 @@ def _load_gray_crop(
 def _light_text_mask(gray: np.ndarray, label_x: int, label_y: int, bright_threshold: int = 220) -> np.ndarray:
     if not _has_local_light_text_context(gray, label_x, label_y, bright_threshold):
         return np.zeros_like(gray, dtype=bool)
-    dark_context = np.array(Image.fromarray(((gray < 150).astype(np.uint8) * 255), mode="L").filter(ImageFilter.MaxFilter(13))) > 0
-    return (gray > bright_threshold) & dark_context
+    dark_density = _local_dark_density(gray < 150, radius=7)
+    return (gray > bright_threshold) & (dark_density >= 0.45)
+
+
+def _local_dark_density(dark_mask: np.ndarray, radius: int) -> np.ndarray:
+    density = Image.fromarray((dark_mask.astype(np.uint8) * 255), mode="L").filter(ImageFilter.BoxBlur(radius))
+    return np.array(density, dtype=np.float32) / 255.0
 
 
 def _has_local_light_text_context(gray: np.ndarray, x: int, y: int, bright_threshold: int, radius: int = 60) -> bool:

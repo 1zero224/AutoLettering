@@ -154,7 +154,10 @@ def _layout_score(
     best_font_size: int,
 ) -> tuple[int, float, int, int, int]:
     if orientation != "vertical":
-        return 0, 0.0, font_size, 0, 0
+        line_count = line_breaks.count("\n") + 1
+        size_score = font_size / max(1, best_font_size)
+        single_line_bonus = 1 if line_count == 1 and size_score >= 0.6 else 0
+        return single_line_bonus, size_score, font_size, -line_count, -len(line_breaks)
     phrase_bonus = _explicit_break_bonus(line_breaks, candidates, font_size, best_font_size)
     margin_score = _vertical_margin_score(measured, target_height)
     density_penalty = -abs((measured.height / max(1, target_height)) - 0.9)

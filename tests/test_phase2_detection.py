@@ -2,6 +2,7 @@ import csv
 import json
 from pathlib import Path
 
+import pytest
 from PIL import Image, ImageDraw
 
 from autolettering.detection.cv_text import detect_text_region, detection_result_to_dict
@@ -121,6 +122,37 @@ def test_detect_text_region_selects_light_text_on_mid_dark_color_background(tmp_
     assert x2 >= 188
     assert y2 >= 300
     assert result.candidate_boxes[0].polarity == "light_on_dark"
+
+
+def test_detect_text_region_selects_gbc06_17_black_card_title_instead_of_speech_bubble():
+    image_path = Path("GBC06 (已翻 斗笠)") / "GBC06_17.png"
+    if not image_path.exists():
+        pytest.skip("GBC06 sample image is not available")
+
+    result = detect_text_region(
+        image_path=image_path,
+        label=_label(image_name="GBC06_17.png", x_px=1073, y_px=272, record_index=3, group_name="框外"),
+        image_width=1440,
+        image_height=2048,
+        radius_x=220,
+        radius_y=180,
+    )
+
+    assert result.status == "ok"
+    assert result.selected_text_box_xyxy is not None
+    x1, y1, x2, y2 = result.selected_text_box_xyxy
+    assert x1 <= 1025
+    assert 210 <= y1 <= 235
+    assert x2 >= 1135
+    assert y2 <= 285
+    assert x2 < 1187
+    assert result.candidate_boxes[0].polarity == "light_on_dark"
+
+    full_x1, full_y1, full_x2, full_y2 = selected_text_bbox(detection_result_to_dict(result))
+    assert full_x1 <= 1025
+    assert 210 <= full_y1 <= 235
+    assert full_x2 >= 1135
+    assert full_y2 <= 285
 
 
 def test_detect_text_region_reports_no_dark_pixels_on_blank_image(tmp_path: Path):

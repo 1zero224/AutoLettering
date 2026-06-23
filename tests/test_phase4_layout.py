@@ -66,6 +66,42 @@ def test_search_fitting_layout_accounts_for_rotation_footprint(tmp_path: Path):
     assert rotated.measured_height <= 80
 
 
+def test_search_fitting_layout_prefers_single_line_for_short_horizontal_title(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+
+    result = search_fitting_layout(
+        text="新川崎（暂）",
+        font_path=font_path,
+        target_size=(116, 57),
+        min_font_size=12,
+        max_font_size=48,
+        orientation="horizontal",
+    )
+
+    assert "\n" not in result.line_breaks
+    assert result.orientation == "horizontal"
+    assert result.status == "ok"
+
+
+def test_search_fitting_layout_prefers_single_line_for_short_horizontal_title_with_toolbox_font(tmp_path: Path):
+    font_path = Path("D:/work/autolettering/工具箱漫画字体V2.5/[toolbox]伪角明-简体-Bold(v2.4).ttf")
+    if not font_path.exists():
+        font_path = _copy_font(tmp_path)
+
+    result = search_fitting_layout(
+        text="新川崎（暂）",
+        font_path=font_path,
+        target_size=(116, 57),
+        min_font_size=12,
+        max_font_size=48,
+        orientation="horizontal",
+    )
+
+    assert "\n" not in result.line_breaks
+    assert result.orientation == "horizontal"
+    assert result.status == "ok"
+
+
 def test_search_fitting_layout_uses_vertical_for_tall_narrow_targets(tmp_path: Path):
     font_path = _copy_font(tmp_path)
 
