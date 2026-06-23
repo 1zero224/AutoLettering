@@ -110,6 +110,27 @@ as side experiments. It keeps the v14 structural scope and adds:
 --run-id phase0-8-gbc06-pipeline-coverage-v15-diverse-detection --next-limit 12
 ```
 
+Current v17 keeps the v15 diverse base, adds the existing `GBC06_06.png#3`
+diverse run chain plus the new text-mask LaMa validation chain, and restores the
+previous `GBC06_01.png#17` layout input so older complete records remain in the
+coverage base:
+
+```powershell
+--layout-run-dir outputs/runs/phase4-gbc06-batch-17-layout-polarity-white-v1
+--layout-run-dir outputs/runs/phase4-gbc06-diverse-06-18-layout-v1
+--layout-run-dir outputs/runs/phase4-gbc06-06-3-layout-v2
+--cleanup-run-dir outputs/runs/phase6-gbc06-diverse-06-18-region-fill-v1
+--cleanup-run-dir outputs/runs/phase6-gbc06-06-3-text-mask-bt-lama-large-v1
+--preview-run-dir outputs/runs/phase7-8-gbc06-diverse-06-18-preview-v1/runs/phase7-preview
+--preview-run-dir outputs/runs/phase7-8-gbc06-06-3-text-mask-lama-large-v1/runs/phase7-preview
+--export-run-dir outputs/runs/phase7-8-gbc06-diverse-06-18-preview-v1/runs/phase8-export
+--export-run-dir outputs/runs/phase7-8-gbc06-06-3-text-mask-lama-large-v1/runs/phase8-export
+--phase7-preview-evaluation-run-dir outputs/runs/phase7-8-gbc06-diverse-06-18-preview-v1/runs/phase7-evaluation
+--phase7-preview-evaluation-run-dir outputs/runs/phase7-8-gbc06-06-3-text-mask-lama-large-v1/runs/phase7-evaluation
+--phase8-export-audit-run-dir outputs/runs/phase8-gbc06-06-3-text-mask-lama-large-audit-v1
+--run-id phase0-8-gbc06-pipeline-coverage-v17-gbc06-06-complete --next-limit 12
+```
+
 ## Generated Artifacts
 
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage/pipeline-coverage.json`
@@ -142,6 +163,8 @@ as side experiments. It keeps the v14 structural scope and adds:
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v14-phase1-pending/reports/pipeline-coverage-report.md`
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v15-diverse-detection/pipeline-coverage.json`
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v15-diverse-detection/reports/pipeline-coverage-report.md`
+- `outputs/runs/phase0-8-gbc06-pipeline-coverage-v17-gbc06-06-complete/pipeline-coverage.json`
+- `outputs/runs/phase0-8-gbc06-pipeline-coverage-v17-gbc06-06-complete/reports/pipeline-coverage-report.md`
 
 `outputs/` remains ignored by Git. The source-backed summary below records the key numbers so the experiment is traceable in the repository.
 
@@ -151,8 +174,8 @@ Base stage: `phase2_detection`
 
 ```text
 base_record_count=35
-complete_record_count=31
-incomplete_record_count=4
+complete_record_count=32
+incomplete_record_count=3
 ```
 
 Stage counts:
@@ -161,24 +184,24 @@ Stage counts:
 phase1_labelplus       covered=35 missing=0
 phase2_detection       covered=35 missing=0
 phase3_font_selection  covered=32 missing=3
-phase4_layout          covered=31 missing=4
+phase4_layout          covered=32 missing=3
 phase5_angle           covered=32 missing=3
-phase6_cleanup         covered=31 missing=4
-phase7_preview         covered=31 missing=4
-phase8_export          covered=31 missing=4
+phase6_cleanup         covered=32 missing=3
+phase7_preview         covered=32 missing=3
+phase8_export          covered=32 missing=3
 ```
 
 Quality audits:
 
 ```text
-phase7_preview evaluations=10 evaluated=10 usable=10/10 failed=0 low_score=0 records=31 record_issues=0
-phase8_export audits=2 passed=2/2 records=5 vertical_top_layers=5 missing_anchor=0 unexpected_anchor=0 record_issues=0 missing_jsx_anchor_logic=0
+phase7_preview evaluations=12 evaluated=12 usable=12/12 failed=0 low_score=0 records=32 record_issues=0
+phase8_export audits=3 passed=3/3 records=6 vertical_top_layers=6 missing_anchor=0 unexpected_anchor=0 record_issues=0 missing_jsx_anchor_logic=0
 ```
 
 Group coverage:
 
 ```text
-框内: base=30 complete=29
+框内: base=30 complete=30
 框外: base=5  complete=2
 ```
 
@@ -219,25 +242,25 @@ GBC06_02.png#12
 GBC06_02.png#13
 ```
 
-The v15 report promotes the five diverse expansion records into the coverage
-base. `GBC06_18.png#3` is complete across Phase 1-8 and all attached quality
-gates. The other four diverse records are now visible as next work:
+The v17 report promotes the five diverse expansion records into the coverage
+base. `GBC06_18.png#3` and `GBC06_06.png#3` are complete across Phase 1-8 and
+all attached quality gates. The other three diverse records are now visible as
+next work:
 
 ```text
-GBC06_06.png#3   框内  first_missing_stage=phase4_layout
 GBC06_17.png#3   框外  first_missing_stage=phase3_font_selection
 GBC06_29.png#2   框外  first_missing_stage=phase3_font_selection
 GBC06_33.png#1   框外  first_missing_stage=phase3_font_selection
 ```
 
-The v15 report also keeps the remaining parsed-but-undetected Phase 1 scope
+The v17 report also keeps the remaining parsed-but-undetected Phase 1 scope
 explicit:
 
 ```text
 phase1_pending_detection_count=145
 ```
 
-The first `next-limit=12` Phase 1 records missing detection in v15 are:
+The first `next-limit=12` Phase 1 records missing detection in v17 are:
 
 ```text
 GBC06_02.png#14  框外  GBC06_02.png
@@ -255,11 +278,10 @@ GBC06_03.png#11  框内  GBC06_03.png
 ```
 
 For quality and diversity, the next expansion should continue covering mixed
-layout types. `GBC06_18.png#3` has now moved from candidate to complete. The
-remaining diverse base records are:
+layout types. `GBC06_18.png#3` and `GBC06_06.png#3` have now moved from
+candidate to complete. The remaining diverse base records are:
 
 ```text
-GBC06_06.png#3   框内  毫无保留地 / 只要把现在的感受 / 唱出来就好了  long regular vertical bubble
 GBC06_17.png#3   框外  新川崎（暂）                              black-card/sign text, polarity-sensitive
 GBC06_29.png#2   框外  囚禁中挣脱而出！                          large non-bubble page text
 GBC06_33.png#1   框外  漫画第一卷 / 2026年6月29日发售！！          color promotional side text with numbers
@@ -271,7 +293,7 @@ The two current authoritative artifacts used for that selection, `phase1-gbc06-s
 
 The current detection prototype has produced 35 candidate records across the
 core `GBC06_01.png`/`GBC06_02.png` batches plus the diverse expansion records.
-The v15 coverage tool can merge multiple detection run directories, counts 31
+The v17 coverage report can merge multiple detection run directories, counts 32
 records as complete across Phase 1 through Phase 8, and additionally treats
 Phase 7 MIMO preview evaluation failures plus Phase 8 export audit failures as
 quality issues that make affected records incomplete.
@@ -295,6 +317,22 @@ with phrase-preserving vertical line breaks, `font_size=25`, `line_spacing=0`,
 `angle_degrees=0.0`, d5 text-mask LaMa cleanup, MIMO Phase 7 score `9`, and a
 Phase 8 export audit pass with one vertical top anchor.
 
+The `GBC06_06.png#3` diverse run exposed a repeated bbox contract issue across
+Phase 4 and Phase 6. Phase 2 had already persisted the complete multi-column
+text bbox `[557, 490, 750, 649]`, but rerunning Phase 4/6 from candidate boxes
+could recompute a narrower right-side cluster `[636, 490, 750, 649]`. The fix is
+to prefer Phase 2 persisted full/body bboxes and only prefer a text-mask bbox
+when it is materially smaller in height, which preserves `GBC06_18.png#3`'s
+overlapping-bubble mask behavior while keeping regular multi-column bubbles
+complete. The new validation chain uses `phase4-gbc06-06-3-layout-v2`,
+`phase6-gbc06-06-3-text-mask-bt-lama-large-v1`,
+`phase7-8-gbc06-06-3-text-mask-lama-large-v1`, and
+`phase8-gbc06-06-3-text-mask-lama-large-audit-v1`. MIMO scored the Phase 7
+preview `9`, `usable=true`; the Phase 8 audit passed with one vertical top
+anchor. An older region-fill chain,
+`phase7-8-gbc06-diverse-06-18-preview-v1`, also scored `9`, confirming that a
+plain white-bubble fill remains a valid simpler baseline for this record.
+
 ## Verification
 
 Fresh targeted verification for the coverage tool, Phase 7 evaluation failure preservation, and the latest Phase 4 top-alignment regression:
@@ -306,5 +344,5 @@ python -m pytest tests/test_pipeline_coverage.py tests/test_pipeline_quality_cov
 Observed result:
 
 ```text
-59 passed in 4.71s
+79 passed in 6.99s
 ```

@@ -163,10 +163,13 @@ def _layout_target_bboxes(row: dict, detection_rows: dict[str, dict]) -> list[li
     if detection is None:
         return []
     full_text_bbox = selected_text_bbox(detection)
+    phase2_full_bbox = _phase2_bbox(detection, "selected_text_full_xyxy")
+    if phase2_full_bbox is not None:
+        full_text_bbox = phase2_full_bbox
     mask_bbox = selected_text_mask_bbox(detection)
     if _prefer_mask_bbox_for_layout(detection, mask_bbox, full_text_bbox):
         return [list(mask_bbox)]
-    tight_bbox = _text_bbox(detection)
+    tight_bbox = _phase2_bbox(detection, "selected_text_body_xyxy") or _text_bbox(detection)
     if tight_bbox != full_text_bbox:
         return [list(tight_bbox)]
     selected_bbox = tuple(int(value) for value in detection["selected_text_box_xyxy"])
@@ -184,6 +187,13 @@ def _text_bbox(detection: dict) -> tuple[int, int, int, int]:
     return selected_text_body_bbox(detection)
 
 
+def _phase2_bbox(detection: dict, key: str) -> tuple[int, int, int, int] | None:
+    xyxy = detection.get(key)
+    if not isinstance(xyxy, list) or len(xyxy) != 4:
+        return None
+    return tuple(int(value) for value in xyxy)
+
+
 def _prefer_mask_bbox_for_layout(
     detection: dict,
     mask_bbox: tuple[int, int, int, int],
@@ -194,6 +204,7 @@ def _prefer_mask_bbox_for_layout(
         and mask_bbox != full_text_bbox
         and _inside(mask_bbox, full_text_bbox)
         and _area(mask_bbox) <= _area(full_text_bbox) * 0.75
+        and _height(mask_bbox) <= _height(full_text_bbox) * 0.9
     )
 
 

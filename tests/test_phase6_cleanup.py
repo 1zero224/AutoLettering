@@ -492,6 +492,64 @@ def test_run_phase6_bubble_cleanup_records_tight_layout_text_bbox_for_text_mask_
     assert cleanup["layout_text_bbox"] == [1197, 1335, 1312, 1527]
 
 
+def test_run_phase6_bubble_cleanup_keeps_full_layout_bbox_for_plain_multicolumn_text_mask(tmp_path: Path):
+    image = Image.new("RGB", (900, 900), "white")
+    draw = ImageDraw.Draw(image)
+    for bbox in (
+        (713, 491, 750, 619),
+        (673, 490, 711, 649),
+        (636, 493, 670, 619),
+        (595, 490, 632, 587),
+        (557, 525, 591, 649),
+    ):
+        draw.rectangle(bbox, fill="black")
+    image_path = tmp_path / "page.png"
+    image.save(image_path)
+    detection_run = tmp_path / "phase2"
+    layout_run = tmp_path / "phase4"
+    detection_run.mkdir()
+    layout_run.mkdir()
+    _write_jsonl(
+        detection_run / "detections.jsonl",
+        [
+            {
+                "record_id": "page.png#1",
+                "status": "ok",
+                "image_name": "page.png",
+                "image_path": str(image_path),
+                "group_name": "框内",
+                "selected_text_box_xyxy": [713, 491, 750, 619],
+                "selected_text_full_xyxy": [557, 490, 750, 649],
+                "selected_text_body_xyxy": [557, 490, 750, 649],
+                "candidate_boxes": [
+                    {"xyxy": [713, 491, 750, 619], "area": 3603, "score": 0.9541, "polarity": "dark_on_light"},
+                    {"xyxy": [673, 490, 711, 649], "area": 4334, "score": 0.9171, "polarity": "dark_on_light"},
+                    {"xyxy": [636, 493, 670, 619], "area": 3298, "score": 0.8901, "polarity": "dark_on_light"},
+                    {"xyxy": [595, 490, 632, 587], "area": 2883, "score": 0.8575, "polarity": "dark_on_light"},
+                    {"xyxy": [557, 525, 591, 649], "area": 2985, "score": 0.8099, "polarity": "dark_on_light"},
+                ],
+            }
+        ],
+    )
+    _write_layout(layout_run / "layout-results.jsonl")
+
+    run_dir = run_phase6_bubble_cleanup(
+        detection_run_dir=detection_run,
+        layout_run_dir=layout_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-full-layout-text-bbox",
+        sample_limit=1,
+        cleanup_method="text_mask_inpaint",
+        inpaint_method="flat_median_fill",
+    )
+
+    cleanup = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]["cleanup"]
+    assert cleanup["bbox"] == [557, 490, 750, 649]
+    assert cleanup["text_bbox"] == [557, 490, 750, 649]
+    assert cleanup["mask_bbox"] == [557, 490, 750, 649]
+    assert cleanup["layout_text_bbox"] == [557, 490, 750, 649]
+
+
 def _write_sample_image(path: Path) -> Path:
     image = Image.new("RGB", (120, 120), "white")
     ImageDraw.Draw(image).rectangle((42, 35, 72, 85), fill="black")

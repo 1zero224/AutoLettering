@@ -578,6 +578,41 @@ def test_run_phase4_uses_body_bbox_below_diamond_for_decorated_caption(tmp_path:
     assert layout["alignment"]["ink_height"] < layout["target_height"]
 
 
+def test_run_phase4_prefers_phase2_full_bbox_for_plain_multicolumn_bubble(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+    source_crop_path = tmp_path / "source-crop.png"
+    Image.new("RGB", (193, 159), "white").save(source_crop_path)
+    phase2_run = tmp_path / "phase2"
+    phase3_run = tmp_path / "phase3"
+    phase5_run = tmp_path / "phase5"
+    phase2_run.mkdir()
+    phase3_run.mkdir()
+    phase5_run.mkdir()
+    _write_font_selection(
+        phase3_run / "font-selections.jsonl",
+        font_path,
+        source_crop_path,
+        translated_text="毫无保留地\n只要把现在的感受\n唱出来就好了",
+    )
+    _write_plain_multicolumn_bubble_detection_with_phase2_bboxes(phase2_run / "detections.jsonl")
+    _write_micro_angle_result(phase5_run / "angle-results.jsonl")
+
+    run_dir = run_phase4(
+        selection_run_dir=phase3_run,
+        angle_run_dir=phase5_run,
+        detection_run_dir=phase2_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase4-plain-multicolumn-bubble",
+        sample_limit=1,
+    )
+
+    layout = _read_jsonl(run_dir / "layout-results.jsonl")[0]["layout"]
+    assert layout["target_bbox"] == [557, 490, 750, 649]
+    assert layout["target_width"] == 193
+    assert layout["target_height"] == 159
+    assert layout["orientation"] == "vertical"
+
+
 def test_run_phase4_caps_short_vertical_text_to_source_column_width(tmp_path: Path):
     font_path = _copy_font(tmp_path)
     source_crop_path = tmp_path / "source-crop.png"
@@ -1027,6 +1062,26 @@ def _write_detection_like_gbc06_18_record_3(path: Path) -> None:
             {"xyxy": [1127, 1464, 1164, 1561], "area": 2813, "score": 0.8225, "polarity": "dark_on_light"},
             {"xyxy": [1087, 1464, 1125, 1621], "area": 3745, "score": 0.7735, "polarity": "dark_on_light"},
             {"xyxy": [1049, 1692, 1369, 1768], "area": 17534, "score": 0.7063, "polarity": "light_on_dark"},
+        ],
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _write_plain_multicolumn_bubble_detection_with_phase2_bboxes(path: Path) -> None:
+    payload = {
+        "record_id": "page.png#1",
+        "status": "ok",
+        "image_name": "page.png",
+        "group_name": "框内",
+        "selected_text_box_xyxy": [713, 491, 750, 619],
+        "selected_text_full_xyxy": [557, 490, 750, 649],
+        "selected_text_body_xyxy": [557, 490, 750, 649],
+        "candidate_boxes": [
+            {"xyxy": [713, 491, 750, 619], "area": 3603, "score": 0.9541, "polarity": "dark_on_light"},
+            {"xyxy": [673, 490, 711, 649], "area": 4334, "score": 0.9171, "polarity": "dark_on_light"},
+            {"xyxy": [636, 493, 670, 619], "area": 3298, "score": 0.8901, "polarity": "dark_on_light"},
+            {"xyxy": [595, 490, 632, 587], "area": 2883, "score": 0.8575, "polarity": "dark_on_light"},
+            {"xyxy": [557, 525, 591, 649], "area": 2985, "score": 0.8099, "polarity": "dark_on_light"},
         ],
     }
     path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")

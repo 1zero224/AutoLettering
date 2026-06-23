@@ -134,11 +134,34 @@ def _context_bbox(image_path: str | Path, bbox: tuple[int, int, int, int], paddi
 
 
 def _text_bbox(detection: dict) -> tuple[int, int, int, int]:
-    return selected_text_bbox(detection)
+    return _phase2_bbox(detection, "selected_text_full_xyxy") or selected_text_bbox(detection)
 
 
 def _mask_bbox(detection: dict) -> tuple[int, int, int, int]:
-    return selected_text_mask_bbox(detection)
+    text_bbox = _text_bbox(detection)
+    mask_bbox = selected_text_mask_bbox(detection)
+    if _prefer_mask_bbox(mask_bbox, text_bbox):
+        return mask_bbox
+    return text_bbox
+
+
+def _phase2_bbox(detection: dict, key: str) -> tuple[int, int, int, int] | None:
+    xyxy = detection.get(key)
+    if not isinstance(xyxy, list) or len(xyxy) != 4:
+        return None
+    return tuple(int(value) for value in xyxy)
+
+
+def _prefer_mask_bbox(
+    mask_bbox: tuple[int, int, int, int],
+    text_bbox: tuple[int, int, int, int],
+) -> bool:
+    return (
+        mask_bbox != text_bbox
+        and _inside(mask_bbox, text_bbox)
+        and _area(mask_bbox) <= _area(text_bbox) * 0.75
+        and _height(mask_bbox) <= _height(text_bbox) * 0.9
+    )
 
 
 def _cleanup_payload(
@@ -175,6 +198,21 @@ def _layout_text_bbox(
     if cleanup_method in {"mask_fill", "text_mask_inpaint"} and mask_bbox is not None:
         return mask_bbox
     return text_bbox
+
+
+def _inside(inner: tuple[int, int, int, int], outer: tuple[int, int, int, int]) -> bool:
+    ix1, iy1, ix2, iy2 = inner
+    ox1, oy1, ox2, oy2 = outer
+    return ox1 <= ix1 < ix2 <= ox2 and oy1 <= iy1 < iy2 <= oy2
+
+
+def _height(bbox: tuple[int, int, int, int]) -> int:
+    return max(0, bbox[3] - bbox[1])
+
+
+def _area(bbox: tuple[int, int, int, int]) -> int:
+    x1, y1, x2, y2 = bbox
+    return max(0, x2 - x1) * max(0, y2 - y1)
 
 
 def _skipped_row(layout: dict, reason: str) -> dict:
