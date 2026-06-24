@@ -48,13 +48,19 @@ def selected_text_polarity(detection: dict, bbox: tuple[int, int, int, int] | No
 
 
 def matched_text_mask_bbox(detection: dict) -> tuple[int, int, int, int] | None:
+    canonical = _xyxy_tuple(detection.get("text_region_mask_bbox_xyxy"))
+    if canonical is not None:
+        return canonical
     match = detection.get("cta_match") or detection.get("ctd_match") or {}
     if match.get("status") != "matched":
         return None
-    xyxy = match.get("bbox_xyxy")
-    if not isinstance(xyxy, list) or len(xyxy) != 4:
+    return _xyxy_tuple(match.get("bbox_xyxy"))
+
+
+def _xyxy_tuple(value: object) -> tuple[int, int, int, int] | None:
+    if not isinstance(value, list) or len(value) != 4:
         return None
-    return tuple(int(value) for value in xyxy)
+    return tuple(int(item) for item in value)
 
 
 def _selected_text_candidates(detection: dict, area_ratio_limit: float = 0.35) -> tuple[tuple[int, int, int, int], list[dict], tuple[int, int, int, int]]:

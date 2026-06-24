@@ -105,6 +105,7 @@ def _write_detections(
                 radius_y,
                 detection_strategy=detection_strategy,
                 ctd_match=ctd_matches.get(label.id),
+                ctd_max_edge_distance_px=ctd_max_edge_distance_px,
             )
             rows.append(payload)
             ok_count += int(payload["status"] == "ok")
@@ -122,6 +123,7 @@ def _detect_record(
     radius_y: int,
     detection_strategy: str = "cv",
     ctd_match: CtdMaskMatch | None = None,
+    ctd_max_edge_distance_px: float | None = None,
 ) -> dict:
     result = _detect_with_strategy(
         image,
@@ -150,8 +152,17 @@ def _detect_record(
             payload["cta_match"] = match_payload
         payload["ctd_match"] = match_payload
     if result.status == "fallback_required":
-        payload["fallback"] = _mimo_gpt_fallback_payload(label, image.width, image.height, radius_x, radius_y)
+        payload["fallback"] = _mimo_gpt_fallback_payload(
+            label,
+            image.width,
+            image.height,
+            radius_x,
+            radius_y,
+            payload.get("failure_reason"),
+            ctd_max_edge_distance_px=ctd_max_edge_distance_px,
+        )
     payload["lettering_route"] = _lettering_route_payload(payload, detection_strategy)
+    payload.update(_text_region_payload(payload, detection_strategy))
     full_bbox, body_bbox = _add_derived_text_bboxes(payload)
     draw_detection_debug(
         image.image_path,
@@ -276,6 +287,8 @@ def _mimo_gpt_fallback_payload(
     image_height: int,
     radius_x: int,
     radius_y: int,
+    trigger_reason: str | None = None,
+    ctd_max_edge_distance_px: float | None = None,
 ) -> dict:
     source_bbox = build_search_region(label.x_px, label.y_px, image_width, image_height, radius_x, radius_y)
     context_bbox = _near_square_bbox(source_bbox, image_width, image_height)
@@ -285,6 +298,48 @@ def _mimo_gpt_fallback_payload(
         "source_context_bbox_xyxy": list(source_bbox),
         "context_shape": "near_square",
         "translated_text": label.translated_text,
+        "trigger_reason": trigger_reason,
+        "upstream_match_attempted": True,
+        "upstream_match_metric": "point_to_mask_edge",
+        "upstream_match_threshold_px": ctd_max_edge_distance_px,
+        "locator_target_kind": "original_text_region_inside_context",
+        "preferred_mask_shape": "tight_local_bbox",
+    }
+
+
+def _text_region_payload(payload: dict, detection_strategy: str) -> dict:
+    if _is_cta_mask_strategy(detection_strategy):
+        match = payload.get("cta_match") or payload.get("ctd_match") or {}
+        if payload.get("status") == "ok" and match.get("status") == "matched":
+            return {
+                "text_region_kind": "cta_mask_matched",
+                "text_region_source": "cta_mask",
+                "text_region_mask_path": match.get("mask_path"),
+                "text_region_mask_bbox_xyxy": match.get("bbox_xyxy"),
+                "match_status": "matched",
+            }
+        if payload.get("status") == "fallback_required":
+            return {
+                "text_region_kind": "fallback_context_only",
+                "text_region_source": "mimo_vision_model",
+                "text_region_mask_path": None,
+                "text_region_mask_bbox_xyxy": None,
+                "match_status": "fallback_required",
+            }
+    if payload.get("status") == "ok":
+        return {
+            "text_region_kind": "cv_candidate_box",
+            "text_region_source": "cv_text_detection",
+            "text_region_mask_path": None,
+            "text_region_mask_bbox_xyxy": None,
+            "match_status": "matched",
+        }
+    return {
+        "text_region_kind": "unknown",
+        "text_region_source": "unknown",
+        "text_region_mask_path": None,
+        "text_region_mask_bbox_xyxy": None,
+        "match_status": payload.get("status"),
     }
 
 

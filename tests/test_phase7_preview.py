@@ -634,6 +634,38 @@ def test_run_phase7_preview_does_not_require_or_overlay_layout_for_gpt_direct_re
         assert preview.getpixel((60, 45)) == (0, 0, 255)
 
 
+def test_run_phase7_preview_requires_layout_when_gpt_replacement_crop_is_missing(tmp_path: Path):
+    page_path = _write_page(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    cleanup_run = tmp_path / "phase6"
+    layout_run = tmp_path / "phase4"
+    detection_run.mkdir()
+    cleanup_run.mkdir()
+    layout_run.mkdir()
+    bbox = [40, 20, 80, 70]
+    cleanup = _cleanup_payload("page.png#1", _write_cleaned_crop(tmp_path / "local.png"), bbox)
+    cleanup["cleanup"]["replacement_method"] = "gpt_image2_masked_edit"
+    _write_jsonl(
+        detection_run / "detections.jsonl",
+        [_detection_payload("page.png#1", page_path, bbox, status="fallback_required")],
+    )
+    _write_jsonl(cleanup_run / "cleanup-results.jsonl", [cleanup])
+    _write_jsonl(layout_run / "layout-results.jsonl", [])
+
+    run_dir = run_phase7_preview(
+        detection_run_dir=detection_run,
+        cleanup_run_dir=cleanup_run,
+        layout_run_dir=layout_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase7-gpt-missing-replacement",
+        sample_limit=1,
+    )
+
+    rows = _read_jsonl(run_dir / "preview-results.jsonl")
+    assert rows[0]["status"] == "skipped"
+    assert rows[0]["preview"]["failure_reason"] == "missing_layout"
+
+
 def _write_page(path: Path) -> Path:
     image = Image.new("RGB", (120, 100), "white")
     ImageDraw.Draw(image).rectangle((40, 20, 80, 70), fill="black")

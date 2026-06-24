@@ -9,43 +9,42 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from autolettering.cta_first_pipeline import run_cta_first_cleanup_pipeline
 from autolettering.models.gpt_image import GptImageConfig
 from autolettering.models.mimo import MimoVisionClient, MimoVisionConfig
-from autolettering.phase6_nonbubble_gpt_replace import run_phase6_nonbubble_gpt_replace
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run Phase 6 non-bubble GPT Chinese replacement and BT repair comparison.")
-    parser.add_argument("--detection-run-dir", required=True)
+    parser = argparse.ArgumentParser(description="Run CTA-first Phase 2 detection and Phase 6 non-bubble cleanup.")
+    parser.add_argument("--labelplus-file", default="GBC06 (已翻 斗笠)/翻译_0.txt")
     parser.add_argument("--output-root", default="outputs/runs")
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--sample-limit", type=int, default=5)
     parser.add_argument("--record-id", action="append", dest="record_ids", default=None)
-    parser.add_argument("--bt-method", action="append", dest="bt_methods", default=None)
+    parser.add_argument("--radius-x", type=int, default=220)
+    parser.add_argument("--radius-y", type=int, default=180)
+    parser.add_argument("--ctd-max-edge-distance-px", type=float, default=20.0)
     parser.add_argument("--call-gpt-image", action="store_true")
     parser.add_argument("--skip-mimo", action="store_true")
-    parser.add_argument("--context-padding", type=int, default=16)
-    parser.add_argument("--rect-mask-expand-px", type=int, default=2)
     parser.add_argument("--env-file", default=".env")
     return parser
 
 
 def main() -> None:
     args = build_parser().parse_args()
-
     _load_env_file(Path(args.env_file))
-    run_dir = run_phase6_nonbubble_gpt_replace(
-        detection_run_dir=Path(args.detection_run_dir),
+    run_dir = run_cta_first_cleanup_pipeline(
+        labelplus_file=Path(args.labelplus_file),
         output_root=Path(args.output_root),
         run_id=args.run_id,
         sample_limit=args.sample_limit,
         record_ids=args.record_ids,
+        radius_x=args.radius_x,
+        radius_y=args.radius_y,
+        ctd_max_edge_distance_px=args.ctd_max_edge_distance_px,
         gpt_config=_gpt_config_from_env() if args.call_gpt_image else None,
         call_gpt_image=args.call_gpt_image,
-        bt_methods=args.bt_methods,
         mimo_client=None if args.skip_mimo else MimoVisionClient(_mimo_config_from_env()),
-        context_padding=args.context_padding,
-        rect_mask_expand_px=args.rect_mask_expand_px,
     )
     print(run_dir)
 
@@ -82,7 +81,7 @@ def _mimo_config_from_env() -> MimoVisionConfig:
         base_url=os.environ["MIMO_BASE_URL"],
         api_key=os.environ["MIMO_API_KEY"],
         model=os.environ["MIMO_VISION_MODEL"],
-        max_completion_tokens=1600,
+        max_completion_tokens=1024,
         thinking_type="disabled",
     )
 

@@ -594,6 +594,140 @@ def test_run_phase6_nonbubble_cleanup_ctd_match_can_experimentally_override_meth
     assert row["gpt_image2_edit"]["inpaint_method"] == "bt_patchmatch"
 
 
+def test_run_phase6_nonbubble_cleanup_prefers_canonical_text_region_mask_path(tmp_path: Path, monkeypatch):
+    image_path = _write_nonbubble_image(tmp_path / "page.png")
+    legacy_mask = tmp_path / "legacy-mask.png"
+    canonical_mask = tmp_path / "canonical-mask.png"
+    Image.new("L", (120, 100), 0).save(legacy_mask)
+    Image.new("L", (120, 100), 255).save(canonical_mask)
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(
+        detection_run / "detections.jsonl",
+        image_path,
+        rows=[
+            {
+                "record_id": "page.png#2",
+                "group_name": "框外",
+                "detection_method": "cta_mask",
+                "selected_text_box_xyxy": [20, 15, 90, 75],
+                "text_region_mask_path": str(canonical_mask),
+                "text_region_mask_bbox_xyxy": [20, 15, 90, 75],
+                "cta_match": {
+                    "status": "matched",
+                    "mask_path": str(legacy_mask),
+                    "component_id": "component-0001",
+                    "bbox_xyxy": [20, 15, 90, 75],
+                },
+            }
+        ],
+    )
+    calls = {}
+
+    def fake_inpaint(**kwargs):
+        calls.update(kwargs)
+        output_dir = Path(kwargs["output_dir"])
+        cleaned = output_dir / "cleaned.png"
+        mask = output_dir / "mask.png"
+        gpt_mask = output_dir / "gpt-mask.png"
+        before_after = output_dir / "before-after.png"
+        input_crop = output_dir / "input.png"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (70, 60), "white").save(cleaned)
+        Image.new("RGB", (70, 60), "black").save(input_crop)
+        Image.new("L", (70, 60), 255).save(mask)
+        Image.new("RGBA", (70, 60), (0, 0, 0, 0)).save(gpt_mask)
+        Image.new("RGB", (140, 60), "white").save(before_after)
+        return NonBubbleInpaintResult(
+            record_id=kwargs["record_id"],
+            method="bt_lama_large_inpaint",
+            bbox=kwargs["bbox"],
+            input_crop_path=input_crop,
+            text_mask_path=mask,
+            gpt_mask_path=gpt_mask,
+            cleaned_crop_path=cleaned,
+            before_after_path=before_after,
+            dark_pixel_count=42,
+        )
+
+    monkeypatch.setattr("autolettering.phase6_nonbubble.inpaint_nonbubble_text", fake_inpaint)
+
+    run_phase6_nonbubble_cleanup(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-canonical-mask",
+        sample_limit=1,
+    )
+
+    assert calls["text_mask_path"] == str(canonical_mask)
+
+
+def test_run_phase6_nonbubble_cleanup_prefers_canonical_text_region_bbox(tmp_path: Path, monkeypatch):
+    image_path = _write_nonbubble_image(tmp_path / "page.png")
+    mask_path = tmp_path / "canonical-mask.png"
+    Image.new("L", (120, 100), 255).save(mask_path)
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(
+        detection_run / "detections.jsonl",
+        image_path,
+        rows=[
+            {
+                "record_id": "page.png#2",
+                "group_name": "框外",
+                "detection_method": "cta_mask",
+                "selected_text_box_xyxy": [20, 15, 90, 75],
+                "text_region_mask_path": str(mask_path),
+                "text_region_mask_bbox_xyxy": [24, 19, 80, 71],
+                "cta_match": {
+                    "status": "matched",
+                    "mask_path": str(mask_path),
+                    "component_id": "component-0001",
+                    "bbox_xyxy": [20, 15, 90, 75],
+                },
+            }
+        ],
+    )
+    calls = {}
+
+    def fake_inpaint(**kwargs):
+        calls.update(kwargs)
+        output_dir = Path(kwargs["output_dir"])
+        cleaned = output_dir / "cleaned.png"
+        mask = output_dir / "mask.png"
+        gpt_mask = output_dir / "gpt-mask.png"
+        before_after = output_dir / "before-after.png"
+        input_crop = output_dir / "input.png"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (56, 52), "white").save(cleaned)
+        Image.new("RGB", (56, 52), "black").save(input_crop)
+        Image.new("L", (56, 52), 255).save(mask)
+        Image.new("RGBA", (56, 52), (0, 0, 0, 0)).save(gpt_mask)
+        Image.new("RGB", (112, 52), "white").save(before_after)
+        return NonBubbleInpaintResult(
+            record_id=kwargs["record_id"],
+            method="bt_lama_large_inpaint",
+            bbox=kwargs["bbox"],
+            input_crop_path=input_crop,
+            text_mask_path=mask,
+            gpt_mask_path=gpt_mask,
+            cleaned_crop_path=cleaned,
+            before_after_path=before_after,
+            dark_pixel_count=42,
+        )
+
+    monkeypatch.setattr("autolettering.phase6_nonbubble.inpaint_nonbubble_text", fake_inpaint)
+
+    run_phase6_nonbubble_cleanup(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-canonical-bbox",
+        sample_limit=1,
+    )
+
+    assert calls["bbox"] == (24, 19, 80, 71)
+
+
 def test_run_phase6_nonbubble_cleanup_ctd_match_uses_full_component_bbox_not_trimmed_body(tmp_path: Path, monkeypatch):
     image_path = _write_decorated_nonbubble_caption(tmp_path / "page.png")
     mask_path = tmp_path / "ctd-component-mask.png"
@@ -798,6 +932,9 @@ def test_run_phase6_nonbubble_cleanup_fallback_accepts_mimo_percent_bbox(tmp_pat
     assert row["fallback_locator_validation"]["status"] == "accepted"
     assert row["fallback_locator"]["local_bbox_xyxy"] == [25, 15, 52, 45]
     assert row["cleanup"]["layout_text_bbox"] == [35, 25, 62, 55]
+    assert row["status"] == "failed"
+    assert row["cleanup"]["text_overlay_required"] is True
+    assert "replacement_method" not in row["cleanup"]
     assert row["gpt_image2_edit"]["status"] == "dry_run"
 
 
@@ -838,10 +975,12 @@ def test_run_phase6_nonbubble_cleanup_fallback_retries_invalid_mimo_bbox(tmp_pat
         "phase6_fallback_text_locator_retry",
         "phase6_fallback_text_locator_validation",
     ]
-    assert row["status"] == "cleaned"
+    assert row["status"] == "failed"
     assert row["fallback_locator"]["retry_of_error"] == "ValueError"
     assert row["fallback_locator"]["local_bbox_xyxy"] == [25, 15, 52, 45]
     assert row["fallback_locator_validation"]["status"] == "accepted"
+    assert row["cleanup"]["text_overlay_required"] is True
+    assert "replacement_method" not in row["cleanup"]
     assert row["gpt_image2_edit"]["status"] == "dry_run"
 
 
@@ -879,6 +1018,9 @@ def test_run_phase6_nonbubble_cleanup_fallback_accepts_nested_mimo_bbox(tmp_path
     assert row["fallback_locator"]["status"] == "ok"
     assert row["fallback_locator"]["local_bbox_xyxy"] == [25, 15, 52, 45]
     assert row["fallback_locator_validation"]["status"] == "accepted"
+    assert row["status"] == "failed"
+    assert row["cleanup"]["text_overlay_required"] is True
+    assert "replacement_method" not in row["cleanup"]
     assert row["gpt_image2_edit"]["status"] == "dry_run"
 
 
@@ -919,9 +1061,11 @@ def test_run_phase6_nonbubble_cleanup_fallback_retries_inconclusive_semantic_val
         "phase6_fallback_text_locator_validation",
         "phase6_fallback_text_locator_validation_retry",
     ]
-    assert row["status"] == "cleaned"
+    assert row["status"] == "failed"
     assert row["fallback_locator_validation"]["status"] == "accepted"
     assert row["fallback_locator_validation"]["retry_of_error"] == "semantic_validation_inconclusive"
+    assert row["cleanup"]["text_overlay_required"] is True
+    assert "replacement_method" not in row["cleanup"]
     assert row["gpt_image2_edit"]["status"] == "dry_run"
 
 

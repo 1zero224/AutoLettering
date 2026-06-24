@@ -183,7 +183,8 @@ def _cleanup_method(cleanup: dict) -> str | None:
 
 
 def _text_overlay_required(cleanup: dict) -> bool:
-    return _cleanup_method(cleanup) not in FINAL_REPLACEMENT_METHODS
+    method = cleanup.get("replacement_method")
+    return not (method in FINAL_REPLACEMENT_METHODS and cleanup.get("replacement_crop_path"))
 
 
 def _skipped_row(record_id: str, reason: str) -> dict:

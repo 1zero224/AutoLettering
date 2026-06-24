@@ -321,8 +321,8 @@ def _cleanup_already_contains_replacement_text(cleanup_row: dict | None) -> bool
     if cleanup_row is None:
         return False
     cleanup = cleanup_row.get("cleanup") or {}
-    method = cleanup.get("replacement_method") or cleanup.get("method")
-    return method in FINAL_REPLACEMENT_METHODS
+    method = cleanup.get("replacement_method")
+    return method in FINAL_REPLACEMENT_METHODS and bool(cleanup.get("replacement_crop_path"))
 
 
 def _optional_bbox_payload(value: object) -> dict | None:

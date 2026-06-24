@@ -180,6 +180,7 @@ def _fallback_gpt_cleanup_one(
         mask_local_bbox,
         edit_context=edit_context,
     )
+    has_replacement = gpt_payload.get("status") == "ok" and context["replacement_crop_path"].exists()
     cleanup = {
         "method": "gpt_image2_masked_edit",
         "bbox": list(context_bbox),
@@ -188,14 +189,18 @@ def _fallback_gpt_cleanup_one(
         "layout_text_bbox": list(_global_bbox(context_bbox, local_bbox)),
         "cleaned_crop_path": str(context["input_path"]),
         "before_after_path": str(context["input_path"]),
-        "replacement_method": "gpt_image2_masked_edit",
-        "replacement_crop_path": str(context["replacement_crop_path"]) if context["replacement_crop_path"].exists() else gpt_payload.get("normalized_output_path"),
+        "text_overlay_required": not has_replacement,
     }
+    if has_replacement:
+        cleanup["replacement_method"] = "gpt_image2_masked_edit"
+        cleanup["replacement_crop_path"] = str(context["replacement_crop_path"])
+    else:
+        cleanup["failure_reason"] = gpt_payload.get("failure_reason") or "gpt_image2_replacement_not_completed"
     return {
         "record_id": detection["record_id"],
         "image_name": detection.get("image_name"),
         "translated_text": detection.get("translated_text", ""),
-        "status": "cleaned",
+        "status": "cleaned" if has_replacement else "failed",
         "cleanup": cleanup,
         "fallback_locator": locator,
         "fallback_locator_validation": validation,
@@ -312,6 +317,9 @@ def _is_ctd_matched_detection(detection: dict) -> bool:
 
 
 def _ctd_component_mask_path(detection: dict) -> str | None:
+    canonical = detection.get("text_region_mask_path")
+    if canonical:
+        return str(canonical)
     match = detection.get("cta_match") or detection.get("ctd_match") or {}
     if match.get("status") != "matched":
         return None

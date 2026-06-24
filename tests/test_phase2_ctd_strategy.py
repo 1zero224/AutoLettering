@@ -81,6 +81,11 @@ def test_run_phase2_cta_strategy_writes_mask_component_as_primary_text_region(tm
     assert record["selected_text_box_xyxy"] == [88, 70, 116, 151]
     assert record["selected_text_full_xyxy"] == [88, 70, 116, 151]
     assert record["selected_text_body_xyxy"] == [88, 70, 116, 151]
+    assert record["text_region_kind"] == "cta_mask_matched"
+    assert record["text_region_source"] == "cta_mask"
+    assert record["text_region_mask_path"] == str(component_mask)
+    assert record["text_region_mask_bbox_xyxy"] == [88, 70, 116, 151]
+    assert record["match_status"] == "matched"
     assert record["lettering_route"] == {
         "route": "cta_mask_lama_large_512px",
         "text_region_source": "cta_mask",
@@ -129,7 +134,16 @@ def test_run_phase2_ctd_strategy_records_fallback_required_when_no_component_is_
     assert record["detection_method"] == "ctd_mask"
     assert record["selected_text_box_xyxy"] is None
     assert record["failure_reason"] == "no_ctd_mask_within_threshold"
+    assert record["text_region_kind"] == "fallback_context_only"
+    assert record["text_region_source"] == "mimo_vision_model"
+    assert record["text_region_mask_path"] is None
+    assert record["text_region_mask_bbox_xyxy"] is None
+    assert record["match_status"] == "fallback_required"
     assert record["fallback"]["method"] == "mimo_crop_then_gpt_image2_masked_edit"
+    assert record["fallback"]["trigger_reason"] == "no_ctd_mask_within_threshold"
+    assert record["fallback"]["upstream_match_attempted"] is True
+    assert record["fallback"]["upstream_match_metric"] == "point_to_mask_edge"
+    assert record["fallback"]["upstream_match_threshold_px"] == 8
     assert record["fallback"]["context_bbox_xyxy"] == [0, 0, 240, 240]
     assert record["lettering_route"] == {
         "route": "mimo_locator_gpt_image2_masked_edit",

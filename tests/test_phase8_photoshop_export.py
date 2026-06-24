@@ -37,6 +37,10 @@ def test_run_phase8_photoshop_export_writes_manifest_and_jsx(tmp_path: Path):
     assert layer["cleanup"]["layout_text_bbox"] is None
     jsx = (run_dir / "photoshop-import.jsx").read_text(encoding="utf-8")
     _assert_rich_jsx_importer(jsx)
+    main_name_original = jsx.rindex("nameOriginalLayer(doc);")
+    main_add_repaired = jsx.rindex("var hasRepairedImage = addRepairedImageLayer(doc, page);")
+    main_add_text = jsx.rindex("addTextLayer(doc, page.layers[j]);")
+    assert main_name_original < main_add_repaired < main_add_text
     report = (run_dir / "reports" / "phase8-report.md").read_text(encoding="utf-8")
     assert "Missing cleanup layers: 0" in report
     assert "`bubble_fill=1`" in report
@@ -89,6 +93,37 @@ def test_run_phase8_photoshop_export_preserves_replacement_cleanup(tmp_path: Pat
     assert str(cleanup_run_b) in report
     checklist = (run_dir / "reports" / "photoshop-validation-checklist.md").read_text(encoding="utf-8")
     assert "- Expected editable text layers: 0" in checklist
+
+
+def test_run_phase8_photoshop_export_keeps_text_layer_when_replacement_crop_missing(tmp_path: Path):
+    image_path = tmp_path / "page.png"
+    Image.new("RGB", (120, 160), "white").save(image_path)
+    detection_run = _mkdir(tmp_path / "phase2")
+    font_run = _mkdir(tmp_path / "phase3")
+    layout_run = _mkdir(tmp_path / "phase4")
+    cleanup_run = _mkdir(tmp_path / "phase6")
+    local_path = tmp_path / "local.png"
+    Image.new("RGB", (70, 70), "gray").save(local_path)
+    cleanup = _cleanup_payload(local_path)
+    cleanup["cleanup"]["replacement_method"] = "gpt_image2_masked_edit"
+    _write_jsonl(detection_run / "detections.jsonl", [_detection_payload(image_path)])
+    _write_jsonl(font_run / "font-selections.jsonl", [_font_payload(tmp_path / "font.ttf")])
+    _write_jsonl(layout_run / "layout-results.jsonl", [_layout_payload()])
+    _write_jsonl(cleanup_run / "cleanup-results.jsonl", [cleanup])
+
+    run_dir = run_phase8_photoshop_export(
+        detection_run,
+        font_run,
+        layout_run,
+        cleanup_run,
+        tmp_path / "outputs",
+        sample_limit=1,
+    )
+
+    manifest = json.loads((run_dir / "photoshop-manifest.json").read_text(encoding="utf-8"))
+    page = manifest["pages"][0]
+    assert [layer["text_layer_name"] for layer in page["layers"]] == ["嵌字图层1"]
+    assert page["repaired_image_path"]
 
 
 def test_run_phase8_photoshop_export_uses_phase7_cleaned_page_as_repaired_image_layer(tmp_path: Path):
