@@ -12,6 +12,9 @@ from .rendering.compose import compose_page_stages
 from .rendering.debug_overlay import draw_page_debug_overlay
 
 
+FINAL_REPLACEMENT_METHODS = {"gpt_image2_masked_edit", "cta_first_masked_edit"}
+
+
 def run_phase7_preview(
     detection_run_dir: str | Path,
     cleanup_run_dir: CleanupRunInput,
@@ -180,7 +183,7 @@ def _cleanup_method(cleanup: dict) -> str | None:
 
 
 def _text_overlay_required(cleanup: dict) -> bool:
-    return _cleanup_method(cleanup) != "gpt_image2_masked_edit"
+    return _cleanup_method(cleanup) not in FINAL_REPLACEMENT_METHODS
 
 
 def _skipped_row(record_id: str, reason: str) -> dict:

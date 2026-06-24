@@ -226,6 +226,7 @@ Comment
         sample_limit=1,
         radius_x=70,
         radius_y=90,
+        detection_strategy="cv",
     )
 
     detection_path = run_dir / "detections.jsonl"
@@ -282,6 +283,7 @@ Comment
         sample_limit=1,
         radius_x=70,
         radius_y=70,
+        detection_strategy="cv",
     )
 
     record = json.loads((run_dir / "detections.jsonl").read_text(encoding="utf-8").strip())

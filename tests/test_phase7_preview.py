@@ -461,6 +461,32 @@ def test_run_phase7_preview_prefers_cleanup_layout_text_bbox_for_text_overlay(tm
         assert preview.getpixel((90, 70)) == (255, 255, 255)
 
 
+def test_run_phase7_preview_skips_overlay_for_final_replacement_methods(tmp_path: Path):
+    page_path = _write_page(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    cleanup_run = tmp_path / "phase6"
+    layout_run = tmp_path / "phase4"
+    detection_run.mkdir()
+    cleanup_run.mkdir()
+    layout_run.mkdir()
+    _write_jsonl(
+        detection_run / "detections.jsonl",
+        [_detection_payload("page.png#1", page_path, [40, 20, 100, 80])],
+    )
+    cleanup = _cleanup_payload("page.png#1", _write_cleaned_crop(tmp_path / "cleaned.png"), [40, 20, 100, 80])
+    cleanup["cleanup"]["replacement_method"] = "cta_first_masked_edit"
+    cleanup["cleanup"]["replacement_crop_path"] = cleanup["cleanup"]["cleaned_crop_path"]
+    _write_jsonl(cleanup_run / "cleanup-results.jsonl", [cleanup])
+    _write_jsonl(layout_run / "layout-results.jsonl", [_layout_payload_with_target_bbox(tmp_path)])
+
+    run_dir = run_phase7_preview(detection_run, cleanup_run, layout_run, tmp_path / "outputs", "phase7-cta-final", 1)
+
+    row = _read_jsonl(run_dir / "preview-results.jsonl")[0]
+    record = row["records"][0]
+    assert record["cleanup_method"] == "cta_first_masked_edit"
+    assert record["text_overlay_required"] is False
+
+
 def test_run_phase7_preview_merges_multiple_cleanup_runs(tmp_path: Path):
     page_path = _write_page(tmp_path / "page.png")
     detection_run = tmp_path / "phase2"

@@ -26,9 +26,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--radius-y", type=int, default=180, help="Vertical search radius in pixels.")
     parser.add_argument(
         "--detection-strategy",
-        default="cv",
-        choices=["cv", "ctd_mask"],
-        help="Detection strategy: local CV prototype or BallonsTranslator CTD mask matching.",
+        default="cta_mask",
+        choices=["cta_mask", "ctd_mask", "cv"],
+        help="Detection strategy: BallonsTranslator CTA/CTD mask matching or the old local CV prototype.",
     )
     parser.add_argument(
         "--ctd-max-edge-distance-px",

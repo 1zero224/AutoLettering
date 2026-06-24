@@ -46,6 +46,46 @@ def test_run_phase2_ctd_strategy_uses_matched_mask_component_as_text_region(tmp_
     assert record["ctd_match"]["mask_path"] == str(component_mask)
 
 
+def test_run_phase2_cta_strategy_writes_mask_component_as_primary_text_region(tmp_path: Path, monkeypatch):
+    project_dir = tmp_path / "sample_project"
+    project_dir.mkdir()
+    image_path = project_dir / "page.png"
+    _write_project_image(image_path)
+    _write_labelplus(project_dir / "翻译_0.txt")
+    component_mask = tmp_path / "component.png"
+    Image.new("L", (240, 240), 0).save(component_mask)
+
+    monkeypatch.setattr(
+        "autolettering.phase2.detect_ctd_mask_components_for_image",
+        lambda image, output_dir, **kwargs: [
+            CtdMaskComponent(
+                component_id="component-0001",
+                bbox_xyxy=(88, 70, 116, 151),
+                area_px=2268,
+                centroid_xy=(102.0, 110.0),
+                mask_path=component_mask,
+            )
+        ],
+    )
+
+    run_dir = run_phase2(
+        project_dir / "翻译_0.txt",
+        output_root=tmp_path / "outputs",
+        run_id="phase2-cta-test",
+        sample_limit=1,
+    )
+
+    record = json.loads((run_dir / "detections.jsonl").read_text(encoding="utf-8").strip())
+    assert record["status"] == "ok"
+    assert record["detection_method"] == "cta_mask"
+    assert record["selected_text_box_xyxy"] == [88, 70, 116, 151]
+    assert record["selected_text_full_xyxy"] == [88, 70, 116, 151]
+    assert record["selected_text_body_xyxy"] == [88, 70, 116, 151]
+    assert record["cta_match"]["status"] == "matched"
+    assert record["cta_match"]["component_id"] == "component-0001"
+    assert record["ctd_match"] == record["cta_match"]
+
+
 def test_run_phase2_ctd_strategy_records_fallback_required_when_no_component_is_close(tmp_path: Path, monkeypatch):
     project_dir = tmp_path / "sample_project"
     project_dir.mkdir()

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 
 def selected_text_bbox(detection: dict, area_ratio_limit: float = 0.35, score_margin: float = 0.12) -> tuple[int, int, int, int]:
+    matched_mask = matched_text_mask_bbox(detection)
+    if matched_mask is not None:
+        return matched_mask
     selected, candidates, search_region = _selected_text_candidates(detection, area_ratio_limit)
     if not candidates:
         return selected
@@ -42,6 +45,16 @@ def selected_text_polarity(detection: dict, bbox: tuple[int, int, int, int] | No
     if selected_candidates:
         return selected_candidates[0]["polarity"]
     return "dark_on_light"
+
+
+def matched_text_mask_bbox(detection: dict) -> tuple[int, int, int, int] | None:
+    match = detection.get("cta_match") or detection.get("ctd_match") or {}
+    if match.get("status") != "matched":
+        return None
+    xyxy = match.get("bbox_xyxy")
+    if not isinstance(xyxy, list) or len(xyxy) != 4:
+        return None
+    return tuple(int(value) for value in xyxy)
 
 
 def _selected_text_candidates(detection: dict, area_ratio_limit: float = 0.35) -> tuple[tuple[int, int, int, int], list[dict], tuple[int, int, int, int]]:

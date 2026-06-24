@@ -16,7 +16,7 @@ from .models.gpt_image import (
     normalize_gpt_output_to_crop,
 )
 from .models.mimo import MimoVisionClient
-from .text_bbox import selected_text_polarity
+from .text_bbox import matched_text_mask_bbox, selected_text_polarity
 from .text_body_bbox import selected_text_body_bbox
 
 
@@ -86,7 +86,7 @@ def _process_one(
     context_padding: int,
     rect_mask_expand_px: int,
 ) -> dict:
-    bbox = selected_text_body_bbox(detection)
+    bbox = matched_text_mask_bbox(detection) or selected_text_body_bbox(detection)
     polarity = selected_text_polarity(detection, bbox)
     context = _write_gpt_context_package(
         run_dir,

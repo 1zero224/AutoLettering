@@ -5,10 +5,13 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageFilter
 
-from .text_bbox import selected_text_bbox, selected_text_polarity
+from .text_bbox import matched_text_mask_bbox, selected_text_bbox, selected_text_polarity
 
 
 def selected_text_body_bbox(detection: dict) -> tuple[int, int, int, int]:
+    matched_mask = matched_text_mask_bbox(detection)
+    if matched_mask is not None:
+        return matched_mask
     bbox = selected_text_bbox(detection)
     trimmed = _trim_leading_light_icon(detection, bbox)
     if trimmed is not None:

@@ -628,12 +628,15 @@ def test_run_phase6_nonbubble_cleanup_fallback_uses_mimo_bbox_and_gpt_mask(tmp_p
     assert row["fallback_locator_validation"]["status"] == "accepted"
     assert Path(row["fallback_locator_validation"]["validation_image_path"]).exists()
     assert row["gpt_image2_edit"]["status"] == "ok"
-    assert Path(row["gpt_image2_edit"]["request"]["image_path"]).parent.name == "fallback_input"
+    assert Path(row["gpt_image2_edit"]["request"]["image_path"]).parent.name == "fallback_edit_input"
     assert Path(row["cleanup"]["replacement_crop_path"]).parent.name == "fallback_replacement_crop"
+    assert row["gpt_image2_edit"]["request"]["target_size"] == [59, 61]
+    assert row["gpt_image2_edit"]["edit_context"]["local_context_bbox"] == [9, 0, 68, 61]
     with Image.open(row["fallback_locator"]["locator_image_path"]).convert("RGB") as locator_image:
         assert _has_reddish_pixel(locator_image)
     with Image.open(row["gpt_image2_edit"]["request"]["mask_path"]) as mask:
-        assert mask.getpixel((25, 15))[3] == 0
+        assert mask.size == (59, 61)
+        assert mask.getpixel((16, 15))[3] == 0
         assert mask.getpixel((0, 0))[3] == 255
     with Image.open(row["cleanup"]["cleaned_crop_path"]).convert("RGB") as original:
         with Image.open(row["cleanup"]["replacement_crop_path"]).convert("RGB") as replacement:

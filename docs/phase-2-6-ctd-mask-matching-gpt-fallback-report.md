@@ -1,15 +1,16 @@
-# Phase 2/6 CTD Mask Matching And GPT Fallback Report
+# Phase 2/6 CTA/CTD Mask Matching And GPT Fallback Report
 
 ## Summary
 
-This slice rewrites the non-bubble text detection path around BallonsTranslator CTD masks.
+This slice rewrites the non-bubble text detection path around BallonsTranslator ComicTextDetector masks.
 
 - BallonsTranslator module name is `ctd`; the user-facing "cta" route maps to ComicTextDetector.
-- Phase 2 now supports `--detection-strategy ctd_mask`.
+- Phase 2 now defaults to `--detection-strategy cta_mask`; `ctd_mask` remains a compatibility alias.
 - CTD runs once per page, writes the refined full-page mask, splits it into connected components, and matches LabelPlus points by edge distance.
 - A matched CTD component is expanded down the same narrow vertical column before matching is finalized. This fixes the `GBC06_01.png#16` case where the title was split into `桃香から` plus lower continuation components.
-- Phase 6 matched CTD records force `lama_large_512px` and use the CTD merged full-page mask.
-- Phase 6 fallback records call MIMO to locate the target bbox in the crop and only call `gpt-image-2` if MIMO returns an in-bounds crop-local bbox.
+- Phase 6 matched CTA/CTD records force `lama_large_512px` and use the matched merged full-page component mask.
+- Phase 6 fallback records call MIMO to locate the target bbox in the larger LabelPlus context crop and only call `gpt-image-2` after MIMO returns an in-bounds, semantically accepted crop-local bbox.
+- The GPT fallback edit input is then tightened to the accepted target bbox plus local padding; the transparent mask is drawn inside that smaller edit crop, and the result is composed back into the full context crop for Phase 7/8 consumption.
 - Phase 7 now supports GPT-direct replacement records without requiring a layout row or overlaying a second text layer.
 - Phase 8 can use a page-level repaired image layer from Phase 7.
 
@@ -204,6 +205,166 @@ MIMO evaluation:
 }
 ```
 
+## 2026-06-25 Update: CTA Default, Tight GPT Fallback, And Readable Grids
+
+### CTA Default Detection Contract
+
+`cta_mask` is now the default Phase 2 detection strategy:
+
+```powershell
+python experiments/phase2_detect_text_regions.py --labelplus-file "GBC06 (已翻 斗笠)\翻译_0.txt" --output-root outputs/runs --run-id phase2-gbc06-cta-mask-01-16-default-v2 --sample-limit 1 --record-id "GBC06_01.png#16"
+```
+
+Result:
+
+- Status: `ok`
+- Detection method: `cta_mask`
+- Matched component id: `component-0001+component-0012+component-0016+component-0018+component-0026`
+- Final bbox: `[1349, 122, 1407, 684]`
+- Mask-edge distance: `18.788`
+- `cta_match` and compatibility `ctd_match` are both written.
+- `selected_text_full_xyxy` and `selected_text_body_xyxy` are both forced to the matched mask bbox.
+- Source coverage: full `桃香からの突然の提案`, not only `桃香から`.
+
+The BallonsTranslator config snapshot for this run is:
+
+```json
+{
+  "device": "cpu",
+  "detect_size": 1280,
+  "det_rearrange_max_batches": 4,
+  "mask dilate size": 2,
+  "font size multiplier": 1.0,
+  "font size max": -1,
+  "font size min": -1
+}
+```
+
+BallonsTranslator source review note: the user-facing CTA name maps to `ballontranslator.modules.textdetector.detector_ctd.ComicTextDetector`. Under the CPU/ONNX backend, BallonsTranslator's CTD model path still appears to force the internal detector size to `1024`, so `detect_size=1280` is recorded as the running config but may not fully control CPU inference scale.
+
+### Matched Path: CTA Mask + `lama_large_512px`
+
+Command:
+
+```powershell
+python experiments/phase6_nonbubble_cleanup.py --detection-run-dir outputs/runs/phase2-gbc06-cta-mask-01-16-default-v2 --output-root outputs/runs --run-id phase6-gbc06-cta-lama-01-16-default-v2 --sample-limit 1 --record-id "GBC06_01.png#16" --skip-mimo
+```
+
+Result:
+
+- Status: `cleaned`
+- Cleanup method: `bt_lama_large_inpaint`
+- Bbox: `[1349, 122, 1407, 684]`
+- GPT image status: `not_applicable`
+- GPT calls: `0`
+
+Integrated Phase 7/8 command:
+
+```powershell
+python experiments/phase7_8_integrated_smoke.py --detection-run-dir outputs/runs/phase2-gbc06-cta-mask-01-16-default-v2 --cleanup-run-dir outputs/runs/phase6-gbc06-cta-lama-01-16-default-v2 --layout-run-dir outputs/runs/phase4-gbc06-01-16-layout-song-fs40-top-noangle-v10 --font-selection-run-dir outputs/runs/phase3-gbc06-01-16-manual-song-selection-v1 --output-root outputs/runs --run-id phase7-8-gbc06-cta-lama-01-16-default-v2 --sample-limit 1
+```
+
+MIMO preview evaluation:
+
+- Run: `outputs/runs/phase7-8-gbc06-cta-lama-01-16-default-v2/runs/phase7-evaluation`
+- Score: `9`
+- Usable: `true`
+- Original text removed: `true`
+- Art preserved: `true`
+- Lettering readable: `true`
+- Issue: slight spacing irregularity.
+
+Phase 8 manifest evidence:
+
+- Manifest: `outputs/runs/phase7-8-gbc06-cta-lama-01-16-default-v2/runs/phase8-export/photoshop-manifest.json`
+- `layer_order`: `["text_layers", "repaired_image", "original_image"]`
+- Page-level `repaired_image_path`: `outputs\runs\phase7-8-gbc06-cta-lama-01-16-default-v2\runs\phase7-preview\pages\cleaned\GBC06-01-png.png`
+- Text layer: `嵌字图层1`
+- Layout: vertical, `vertical_align=top`, `angle_degrees=0.0`, `font_size=40`.
+
+### Fallback Path: MIMO Locator + Tight `gpt-image-2` Masked Edit
+
+Detection command:
+
+```powershell
+python experiments/phase2_detect_text_regions.py --labelplus-file "GBC06 (已翻 斗笠)\翻译_0.txt" --output-root outputs/runs --run-id phase2-gbc06-cta-mask-fallback-16-5-v2 --sample-limit 1 --record-id "GBC06_16.png#5"
+```
+
+Result:
+
+- Status: `fallback_required`
+- Detection method: `cta_mask`
+- Failure reason: `no_ctd_mask_within_threshold`
+- Fallback context bbox: `[229, 47, 669, 407]`
+- Translation: `哼`
+
+Controlled real GPT command:
+
+```powershell
+python experiments/phase6_nonbubble_cleanup.py --detection-run-dir outputs/runs/phase2-gbc06-cta-mask-fallback-16-5-v2 --output-root outputs/runs --run-id phase6-gbc06-cta-fallback-gpt-16-5-tight-v2 --sample-limit 1 --record-id "GBC06_16.png#5" --call-gpt-image
+```
+
+Result:
+
+- MIMO locator status: `ok`
+- MIMO local bbox: `[158, 104, 230, 220]`
+- MIMO global bbox: `[387, 151, 459, 267]`
+- MIMO validation: `accepted`
+- GPT call status: `ok`
+- GPT edit input: `fallback_edit_input/GBC06-16-png-5.png`
+- GPT edit mask: `fallback_edit_gpt_mask/GBC06-16-png-5.png`
+- Edit crop size: `104x148`
+- Full fallback context size: `440x360`
+- Replacement crop composed for Phase 7: `fallback_replacement_crop/GBC06-16-png-5.png`
+
+The mask convention matches the OpenAI/gpt-image-playground editing route: the mask has the same dimensions as the edit input, the target region is transparent, and the preserved region is opaque. The local `gpt-image-playground/src/app/api/images/route.ts` reference also passes `mask` into `openai.images.edit(...)` for edit mode.
+
+Phase 7 preview command:
+
+```powershell
+python experiments/phase7_page_preview.py --detection-run-dir outputs/runs/phase2-gbc06-cta-mask-fallback-16-5-v2 --cleanup-run-dir outputs/runs/phase6-gbc06-cta-fallback-gpt-16-5-tight-v2 --layout-run-dir outputs/runs/phase4-gbc06-01-16-layout-song-fs40-top-noangle-v10 --output-root outputs/runs --run-id phase7-gbc06-cta-fallback-gpt-16-5-tight-v2 --sample-limit 1
+```
+
+Phase 7 record evidence:
+
+- Cleanup method: `gpt_image2_masked_edit`
+- Text overlay required: `false`
+- Cleanup crop path: `outputs\runs\phase6-gbc06-cta-fallback-gpt-16-5-tight-v2\fallback_replacement_crop\GBC06-16-png-5.png`
+
+MIMO evaluation command:
+
+```powershell
+python experiments/phase7_preview_evaluate.py --preview-run-dir outputs/runs/phase7-gbc06-cta-fallback-gpt-16-5-tight-v2 --output-root outputs/runs --run-id phase7-eval-gbc06-cta-fallback-gpt-16-5-tight-v2 --sample-limit 1
+```
+
+MIMO result:
+
+- Score: `9`
+- Usable: `true`
+- Original text removed: `true`
+- Art preserved: `true`
+- Lettering readable: `true`
+- Issues: `[]`
+- Summary: the Chinese character `哼` is placed accurately and the surrounding artwork is preserved.
+
+Readable grid sizes:
+
+- Fallback locator grid: `350x374`
+- Fallback Phase 7 evaluation contact sheet: `790x584`
+
+### Font Comparison Grid Readability
+
+The Phase 3 font comparison grid is no longer rendered as one long horizontal strip. It uses near-square columns and contained tiles:
+
+```powershell
+python experiments/phase3_font_comparison.py --labelplus-file "GBC06 (已翻 斗笠)\翻译_0.txt" --detection-run-dir outputs/runs/phase2-gbc06-cta-mask-01-16-default-v2 --font-dir "工具箱漫画字体V2.5" --output-root outputs/runs --run-id phase3-gbc06-cta-01-16-font-grid-v2 --sample-limit 1 --font-limit 12 --record-id "GBC06_01.png#16"
+```
+
+Resulting comparison image:
+
+- Path: `outputs\runs\phase3-gbc06-cta-01-16-font-grid-v2\debug\font_comparison\GBC06-01-png-16.png`
+- Size: `950x1198`
+
 ## Implementation Notes
 
 - CTD matching keeps one-to-one uniqueness at the seed component level and now claims all merged vertical-continuation components.
@@ -211,10 +372,10 @@ MIMO evaluation:
 - `fallback_required` rows are now carried into Phase 6, but GPT is only called when MIMO locator status is `ok`.
 - MIMO bbox parsing accepts either one JSON object or a one-item JSON array.
 - MIMO bbox validation rejects out-of-bounds coordinates instead of falling back to an unsafe whole-crop mask.
-- GPT fallback uses the full LabelPlus context crop as the GPT input and makes only the target bbox transparent, matching the gpt-image-playground mask-edit style.
-- GPT replacement crop composition keeps bbox outside the edit crop untouched; inside the masked bbox it attempts to preserve manga tone and paste only confident dark text strokes.
+- GPT fallback uses a large LabelPlus context crop for MIMO locating, then uses a smaller padded edit crop for the actual `gpt-image-2` call.
+- GPT replacement crop composition expands the small GPT edit result back into the full context crop and keeps pixels outside the accepted target bbox untouched; inside the masked bbox it attempts to preserve manga tone and paste only confident dark text strokes.
 
-## 2026-06-25 Update: Mask-Edge Matching And Full-Context GPT Fallback
+## 2026-06-25 Earlier Update: Mask-Edge Matching And Full-Context GPT Fallback Experiment
 
 The CTD path now matches the requested geometry more closely:
 
@@ -248,11 +409,11 @@ Result:
 
 Fallback locator changes:
 
-- MIMO locator input now gets a coordinate-grid crop in `fallback_locator_input/*.png`; GPT still gets the clean context crop.
+- MIMO locator input now gets a coordinate-grid crop in `fallback_locator_input/*.png`.
 - Locator JSON parser accepts `bbox_xyxy`, `bbox`, `bbox_percent_xyxy`, `bbox_normalized_xyxy`, and one-level nested bbox arrays.
 - Out-of-bounds locator output triggers one strict retry with crop dimensions and the previous invalid response.
 - A second MIMO pass validates whether the bbox covers the target original Japanese text. Rejected bboxes do not call `gpt-image-2`.
-- If the bbox is semantically correct but reported as too tight, Phase 6 keeps the full context crop and expands only the transparent mask bbox.
+- If the bbox is semantically correct but reported as too tight, Phase 6 expands the transparent mask bbox before creating the tight edit context.
 - The run writes a near-square locator grid at `visuals/fallback-locator-grid.png`.
 
 Five-record fallback dry-run:
@@ -288,17 +449,17 @@ Controlled `gpt-image-2` replacement on `GBC06_16.png#5`:
    - Result: target text `哼` correct, original removed, gray-box artifact removed after masked composition, artwork preserved.
    - MIMO score: `10/10`, recommendation `Accept`.
 
-Based on that experiment, Phase 6 fallback now sends the clean full context crop to `gpt-image-2` and masks only the target text region. It no longer uses the tight edit crop as the default operational path.
+That full-context experiment remains useful evidence, but the current operational path has been tightened again after the later CTA-first rewrite: GPT receives a padded target edit crop, not the full LabelPlus context crop. The full context crop is retained as the Phase 7 replacement canvas.
 
 ## Current Recommendation
 
 Use the CTD matched path with `lama_large_512px` for non-bubble text when CTD detects the original text. This is the currently usable route.
 
-Do not enable the GPT fallback route as an automatic production path yet. The current blockers are:
+Keep the GPT fallback route behind the CTA miss path rather than using it for all non-bubble text. Remaining blockers are:
 
-- MIMO bbox coordinates are unstable on some crops and often return coordinates outside the crop dimensions.
-- `gpt-image-2` may render the target text but introduce gray/dark rectangular artifacts.
-- Postprocessing can reduce blast radius but cannot reliably recover clean manga background from a bad GPT output.
+- MIMO bbox coordinates are still unstable on some crops and can return coordinates outside the crop dimensions.
+- `gpt-image-2` can still introduce gray/dark rectangular artifacts on harder regions.
+- Postprocessing reduces blast radius but cannot reliably recover clean manga background from every bad GPT output.
 
 Next experiments should focus on fallback locator stability:
 
@@ -310,10 +471,10 @@ Next experiments should focus on fallback locator stability:
 ## Verification
 
 ```powershell
-python -m pytest tests/test_ctd_mask_matching.py tests/test_phase2_ctd_strategy.py tests/test_phase2_detection.py tests/test_phase6_nonbubble_cleanup.py tests/test_phase6_nonbubble_gpt_replace.py tests/test_phase7_preview.py tests/test_phase7_preview_evaluation.py tests/test_phase8_photoshop_export.py tests/test_phase8_photoshop_export_alignment.py tests/test_experiment_clis.py -q
+python -m pytest tests/test_ctd_mask_matching.py tests/test_phase2_ctd_strategy.py tests/test_phase2_detection.py tests/test_experiment_clis.py tests/test_text_bbox.py tests/test_phase3_fonts.py tests/test_phase6_nonbubble_cleanup.py tests/test_phase6_nonbubble_gpt_replace.py tests/test_phase7_preview.py tests/test_phase7_preview_evaluation.py tests/test_phase8_photoshop_export.py tests/test_phase8_photoshop_export_alignment.py tests/test_phase7_8_smoke.py -q
 ```
 
-Result: `86 passed`.
+Result: `130 passed`.
 
 Full regression:
 
@@ -321,4 +482,4 @@ Full regression:
 python -m pytest -q
 ```
 
-Result: `233 passed`.
+Result: `252 passed`.

@@ -16,7 +16,7 @@ from .models.gpt_image import (
     gpt_image_request_summary,
     normalize_gpt_output_to_crop,
 )
-from .text_bbox import selected_text_polarity
+from .text_bbox import matched_text_mask_bbox, selected_text_polarity
 from .text_body_bbox import selected_text_body_bbox
 
 
@@ -141,24 +141,28 @@ def _fallback_gpt_cleanup_one(
         }
     local_bbox = tuple(locator.get("local_bbox_xyxy") or (0, 0, context["size"][0], context["size"][1]))
     mask_local_bbox = _fallback_mask_bbox(local_bbox, context["size"], validation)
-    mask_path = _write_local_gpt_mask(context["size"], mask_local_bbox, context["mask_path"])
+    edit_context = _write_fallback_edit_context(run_dir, detection, context, mask_local_bbox)
+    edit_mask_bbox = _rebase_bbox(mask_local_bbox, edit_context["local_context_bbox"])
+    mask_path = _write_local_gpt_mask(edit_context["size"], edit_mask_bbox, edit_context["mask_path"])
     prompt = gpt_image_edit_prompt(detection.get("translated_text", ""))
     gpt_payload = _gpt_image_payload_for_paths(
         run_dir,
         detection["record_id"],
-        context["input_path"],
+        edit_context["input_path"],
         mask_path,
-        context["size"],
+        edit_context["size"],
         prompt,
         config,
         client,
     )
+    gpt_payload["edit_context"] = _edit_context_payload(edit_context)
     _write_fallback_replacement_crop(
         gpt_payload,
         context["input_path"],
         context["replacement_crop_path"],
         context["size"],
         mask_local_bbox,
+        edit_context=edit_context,
     )
     cleanup = {
         "method": "gpt_image2_masked_edit",
@@ -192,6 +196,15 @@ def _fallback_mask_bbox(
     if padding <= 0:
         return local_bbox
     return _expanded_local_bbox(local_bbox, context_size[0], context_size[1], padding)
+
+
+def _edit_context_payload(edit_context: dict) -> dict:
+    return {
+        "input_path": str(edit_context["input_path"]),
+        "mask_path": str(edit_context["mask_path"]),
+        "local_context_bbox": list(edit_context["local_context_bbox"]),
+        "size": list(edit_context["size"]),
+    }
 
 
 def _cleanup_payload(result) -> dict:
@@ -237,6 +250,7 @@ def _gpt_image_payload_for_paths(
     client: GptImageEditClient | None,
 ) -> dict:
     summary = gpt_image_request_summary(config, image_path, mask_path, prompt)
+    summary["target_size"] = list(target_size)
     if client is None:
         return {"status": "dry_run", "request": summary, "failure_reason": None}
     try:
@@ -271,20 +285,18 @@ def _method_for_detection(detection: dict, requested_method: str) -> str:
 
 
 def _cleanup_bbox_for_detection(detection: dict) -> tuple[int, int, int, int]:
-    if _is_ctd_matched_detection(detection):
-        match_bbox = (detection.get("ctd_match") or {}).get("bbox_xyxy")
-        if isinstance(match_bbox, list) and len(match_bbox) == 4:
-            return tuple(int(value) for value in match_bbox)
+    matched_bbox = matched_text_mask_bbox(detection)
+    if matched_bbox is not None:
+        return matched_bbox
     return selected_text_body_bbox(detection)
 
 
 def _is_ctd_matched_detection(detection: dict) -> bool:
-    match = detection.get("ctd_match") or {}
-    return detection.get("detection_method") == "ctd_mask" and match.get("status") == "matched"
+    return matched_text_mask_bbox(detection) is not None
 
 
 def _ctd_component_mask_path(detection: dict) -> str | None:
-    match = detection.get("ctd_match") or {}
+    match = detection.get("cta_match") or detection.get("ctd_match") or {}
     if match.get("status") != "matched":
         return None
     return match.get("mask_path")
@@ -735,15 +747,33 @@ def _write_fallback_replacement_crop(
     output_path: Path,
     size: tuple[int, int],
     local_bbox: tuple[int, int, int, int],
+    edit_context: dict | None = None,
 ) -> None:
     normalized = gpt_payload.get("normalized_output_path")
     if not normalized:
         return
     with Image.open(input_path) as original_image, Image.open(normalized) as edited_image:
         original = original_image.convert("RGB").resize(size)
-        edited = edited_image.convert("RGB").resize(size)
+        edited = edited_image.convert("RGB")
+    if edit_context is not None:
+        local_context_bbox = edit_context["local_context_bbox"]
+        edited = _expand_edit_crop_to_context(edited, original, local_context_bbox)
+    else:
+        edited = edited.resize(size)
     original = _compose_gpt_replacement_region(original, edited, local_bbox)
     original.save(output_path)
+
+
+def _expand_edit_crop_to_context(
+    edited: Image.Image,
+    original: Image.Image,
+    local_context_bbox: tuple[int, int, int, int],
+) -> Image.Image:
+    canvas = original.copy()
+    x1, y1, x2, y2 = local_context_bbox
+    patch = edited.convert("RGB").resize((x2 - x1, y2 - y1))
+    canvas.paste(patch, (x1, y1))
+    return canvas
 
 
 def _compose_gpt_replacement_region(

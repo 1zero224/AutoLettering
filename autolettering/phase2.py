@@ -10,6 +10,7 @@ from .detection.ctd_masks import (
     CtdMaskComponent,
     CtdMaskMatch,
     assign_labelplus_points_to_ctd_masks,
+    _ballonstranslator_ctd_config,
     detect_ctd_mask_components_for_image,
 )
 from .detection.models import CandidateBox, DetectionResult
@@ -30,7 +31,7 @@ def run_phase2(
     radius_x: int = 220,
     radius_y: int = 180,
     record_ids: Iterable[str] | None = None,
-    detection_strategy: str = "cv",
+    detection_strategy: str = "cta_mask",
     ctd_max_edge_distance_px: float = 20.0,
 ) -> Path:
     manifest = parse_labelplus_project(labelplus_file)
@@ -38,12 +39,13 @@ def run_phase2(
     run_dir.mkdir(parents=True, exist_ok=True)
 
     selected = _select_detection_records(manifest, sample_limit, record_ids)
+    strategy = _normalize_detection_strategy(detection_strategy)
     ok_count, failed_count = _write_detections(
         run_dir,
         selected,
         radius_x,
         radius_y,
-        detection_strategy=detection_strategy,
+        detection_strategy=strategy,
         ctd_max_edge_distance_px=ctd_max_edge_distance_px,
     )
 
@@ -55,7 +57,7 @@ def run_phase2(
         failed_count=failed_count,
         radius_x=radius_x,
         radius_y=radius_y,
-        detection_strategy=detection_strategy,
+        detection_strategy=strategy,
     )
     return run_dir
 
@@ -88,7 +90,11 @@ def _write_detections(
 ) -> tuple[int, int]:
     ok_count = failed_count = 0
     rows: list[dict] = []
-    ctd_matches = _ctd_matches_by_record(run_dir, selected_records, ctd_max_edge_distance_px) if detection_strategy == "ctd_mask" else {}
+    ctd_matches = (
+        _ctd_matches_by_record(run_dir, selected_records, ctd_max_edge_distance_px)
+        if _is_cta_mask_strategy(detection_strategy)
+        else {}
+    )
     with (run_dir / "detections.jsonl").open("w", encoding="utf-8", newline="\n") as handle:
         for image, label in selected_records:
             payload = _detect_record(
@@ -139,7 +145,10 @@ def _detect_record(
         }
     )
     if ctd_match is not None:
-        payload["ctd_match"] = _ctd_match_payload(ctd_match)
+        match_payload = _ctd_match_payload(ctd_match)
+        if _is_cta_mask_strategy(detection_strategy):
+            payload["cta_match"] = match_payload
+        payload["ctd_match"] = match_payload
     if result.status == "fallback_required":
         payload["fallback"] = _mimo_gpt_fallback_payload(label, image.width, image.height, radius_x, radius_y)
     full_bbox, body_bbox = _add_derived_text_bboxes(payload)
@@ -164,7 +173,7 @@ def _detect_with_strategy(
 ) -> DetectionResult:
     if detection_strategy == "cv":
         return detect_text_region(image.image_path, label, image.width, image.height, radius_x, radius_y)
-    if detection_strategy != "ctd_mask":
+    if not _is_cta_mask_strategy(detection_strategy):
         raise ValueError(f"unsupported_detection_strategy:{detection_strategy}")
     search_region = build_search_region(label.x_px, label.y_px, image.width, image.height, radius_x, radius_y)
     if ctd_match and ctd_match.status == "matched" and ctd_match.bbox_xyxy:
@@ -225,7 +234,13 @@ def _group_labels_by_image(
 
 def _detect_page_components(run_dir: Path, image: ManifestImage) -> list[CtdMaskComponent]:
     output_dir = run_dir / "debug" / "ctd_masks" / Path(image.image_name).stem
+    _write_json(output_dir / "ctd-config.json", _ballonstranslator_ctd_config(Path("BallonsTranslator")))
     return detect_ctd_mask_components_for_image(image.image_path, output_dir)
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _ctd_match_payload(match: CtdMaskMatch) -> dict:
@@ -238,6 +253,20 @@ def _ctd_match_payload(match: CtdMaskMatch) -> dict:
         "distance_px": match.distance_px,
         "failure_reason": match.failure_reason,
     }
+
+
+def _normalize_detection_strategy(strategy: str) -> str:
+    if strategy == "ctd_mask":
+        return "ctd_mask"
+    if strategy in {"cta_mask", "cta"}:
+        return "cta_mask"
+    if strategy == "cv":
+        return "cv"
+    raise ValueError(f"unsupported_detection_strategy:{strategy}")
+
+
+def _is_cta_mask_strategy(strategy: str) -> bool:
+    return strategy in {"cta_mask", "ctd_mask"}
 
 
 def _mimo_gpt_fallback_payload(
@@ -259,6 +288,12 @@ def _add_derived_text_bboxes(payload: dict) -> tuple[tuple[int, int, int, int] |
         payload["selected_text_full_xyxy"] = None
         payload["selected_text_body_xyxy"] = None
         return None, None
+
+    if payload.get("detection_method") in {"cta_mask", "ctd_mask"}:
+        bbox = tuple(int(value) for value in payload["selected_text_box_xyxy"])
+        payload["selected_text_full_xyxy"] = list(bbox)
+        payload["selected_text_body_xyxy"] = list(bbox)
+        return bbox, bbox
 
     full_bbox = selected_text_bbox(payload)
     body_bbox = selected_text_body_bbox(payload)
@@ -327,6 +362,7 @@ def _write_phase2_report(
         f"- Failed records: {failed_count}",
         f"- Search radius: `{radius_x} x {radius_y}`",
         f"- Detection strategy: `{detection_strategy}`",
+        "- CTA strategy note: `cta_mask` is the user-facing BallonsTranslator ComicTextDetector route; `ctd_mask` remains a compatibility alias.",
         "",
         "## Generated Artifacts",
         "",

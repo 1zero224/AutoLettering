@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from .text_bbox import selected_text_bbox
+from .text_bbox import matched_text_mask_bbox, selected_text_bbox
 
 
 def selected_text_mask_bbox(detection: dict) -> tuple[int, int, int, int]:
+    matched_mask = matched_text_mask_bbox(detection)
+    if matched_mask is not None:
+        return matched_mask
     selected = _selected_bbox(detection)
     if selected is None:
         return selected_text_bbox(detection)
