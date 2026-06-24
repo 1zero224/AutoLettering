@@ -18,11 +18,12 @@ def build_photoshop_manifest(
     cleanup_rows: dict[str, dict],
     sample_limit: int,
     font_mapping: dict[str, str] | None = None,
+    repaired_pages: dict[str, str] | None = None,
 ) -> dict:
     layers = _manifest_layers(detection_rows, font_rows, layout_rows, cleanup_rows, sample_limit, font_mapping or {})
     return {
         "schema_version": SCHEMA_VERSION,
-        "pages": _group_layers_by_page(layers),
+        "pages": _group_layers_by_page(layers, repaired_pages or {}),
         "summary": {
             "record_count": len(layers),
             "page_count": len({layer["image_name"] for layer in layers}),
@@ -72,6 +73,8 @@ def _layer_record(
         "image_name": detection["image_name"],
         "image_path": detection["image_path"],
         "layer_name": f"AL {detection['record_id']}",
+        "text_layer_name": f"嵌字图层 {detection['record_id']}",
+        "cleanup_layer_name": f"修复区域 {detection['record_id']}",
         "text": layout.get("line_breaks") or detection.get("translated_text", ""),
         "translated_text": detection.get("translated_text", ""),
         "group_name": detection.get("group_name"),
@@ -92,7 +95,7 @@ def _text_bbox(layout: dict, cleanup_row: dict | None, fallback_bbox: list[int])
     return cleanup.get("layout_text_bbox") or layout.get("target_bbox") or fallback_bbox
 
 
-def _group_layers_by_page(layers: list[dict]) -> list[dict]:
+def _group_layers_by_page(layers: list[dict], repaired_pages: dict[str, str]) -> list[dict]:
     pages: dict[str, dict] = {}
     for layer in layers:
         page = pages.setdefault(
@@ -102,6 +105,8 @@ def _group_layers_by_page(layers: list[dict]) -> list[dict]:
                 "image_path": layer["image_path"],
                 "width": layer["position"]["page_width"],
                 "height": layer["position"]["page_height"],
+                "repaired_image_path": repaired_pages.get(layer["image_name"]),
+                "layer_order": ["text_layers", "repaired_image", "original_image"],
                 "layers": [],
             },
         )

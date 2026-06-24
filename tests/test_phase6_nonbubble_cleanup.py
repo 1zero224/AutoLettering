@@ -8,6 +8,7 @@ from PIL import Image, ImageChops, ImageDraw
 
 from autolettering.inpaint.nonbubble import build_gpt_edit_mask, build_text_mask, inpaint_crop, inpaint_nonbubble_text
 from autolettering.inpaint.balloons import _restore_grayscale_if_mono
+from autolettering.inpaint.models import NonBubbleInpaintResult
 from autolettering.models.gpt_image import (
     GptImageConfig,
     gpt_image_edit_prompt,
@@ -36,6 +37,8 @@ def test_gpt_image_prompt_requires_exact_target_text():
     assert "Target Chinese text: 来自桃香的唐突的提案" in prompt
     assert "exactly match" in prompt
     assert "Do not omit" in prompt
+    assert "Do not create gray boxes" in prompt
+    assert "black-and-white line art" in prompt
 
 
 def test_build_text_mask_excludes_large_solid_icon_on_light_background():
@@ -157,6 +160,24 @@ def test_inpaint_crop_routes_balloon_patchmatch_method(monkeypatch):
 
     assert method == "bt_patchmatch_inpaint"
     assert result.getpixel((0, 0)) == (255, 255, 255)
+
+
+def test_inpaint_crop_routes_balloon_method_aliases(monkeypatch):
+    crop = Image.new("RGB", (12, 10), "black")
+    mask = Image.new("L", crop.size, 255)
+
+    monkeypatch.setattr(
+        "autolettering.inpaint.nonbubble.balloons_lama_mpe_inpaint",
+        lambda crop_arg, mask_arg: Image.new("RGB", crop_arg.size, "white"),
+    )
+
+    method, result = inpaint_crop(crop, mask, "lama_mpe")
+
+    assert method == "bt_lama_mpe_inpaint"
+    assert result.getpixel((0, 0)) == (255, 255, 255)
+
+    routed_method, _ = inpaint_crop(crop, mask, "opencv-tela")
+    assert routed_method == "bt_opencv-tela_actual_cv2_INPAINT_NS"
 
 
 def test_inpaint_crop_routes_balloon_aot_method(monkeypatch):
@@ -424,6 +445,280 @@ def test_run_phase6_nonbubble_cleanup_records_gpt_success_with_fake_client(tmp_p
     assert "- GPT image calls: 1" in report
 
 
+def test_run_phase6_nonbubble_cleanup_ctd_match_uses_lama_large_and_ctd_mask(tmp_path: Path, monkeypatch):
+    image_path = _write_nonbubble_image(tmp_path / "page.png")
+    mask_path = tmp_path / "ctd-component-mask.png"
+    Image.new("L", (120, 100), 0).save(mask_path)
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(
+        detection_run / "detections.jsonl",
+        image_path,
+        rows=[
+            {
+                "record_id": "page.png#2",
+                "group_name": "框外",
+                "detection_method": "ctd_mask",
+                "selected_text_box_xyxy": [20, 15, 90, 75],
+                "ctd_match": {
+                    "status": "matched",
+                    "mask_path": str(mask_path),
+                    "component_id": "component-0001",
+                    "bbox_xyxy": [20, 15, 90, 75],
+                },
+            }
+        ],
+    )
+    calls = {}
+
+    def fake_inpaint(**kwargs):
+        calls.update(kwargs)
+        output_dir = Path(kwargs["output_dir"])
+        cleaned = output_dir / "cleaned.png"
+        mask = output_dir / "mask.png"
+        gpt_mask = output_dir / "gpt-mask.png"
+        before_after = output_dir / "before-after.png"
+        input_crop = output_dir / "input.png"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (70, 60), "white").save(cleaned)
+        Image.new("RGB", (70, 60), "black").save(input_crop)
+        Image.new("L", (70, 60), 255).save(mask)
+        Image.new("RGBA", (70, 60), (0, 0, 0, 0)).save(gpt_mask)
+        Image.new("RGB", (140, 60), "white").save(before_after)
+        return NonBubbleInpaintResult(
+            record_id=kwargs["record_id"],
+            method="bt_lama_large_inpaint",
+            bbox=kwargs["bbox"],
+            input_crop_path=input_crop,
+            text_mask_path=mask,
+            gpt_mask_path=gpt_mask,
+            cleaned_crop_path=cleaned,
+            before_after_path=before_after,
+            dark_pixel_count=42,
+        )
+
+    monkeypatch.setattr("autolettering.phase6_nonbubble.inpaint_nonbubble_text", fake_inpaint)
+
+    run_dir = run_phase6_nonbubble_cleanup(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-ctd-match",
+        sample_limit=1,
+        inpaint_method="local_diffusion",
+    )
+
+    row = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]
+    assert calls["method"] == "lama_large_512px"
+    assert calls["text_mask_path"] == str(mask_path)
+    assert calls["bbox"] == (20, 15, 90, 75)
+    assert row["cleanup"]["method"] == "bt_lama_large_inpaint"
+    assert row["gpt_image2_edit"]["status"] == "not_applicable"
+
+
+def test_run_phase6_nonbubble_cleanup_ctd_match_uses_full_component_bbox_not_trimmed_body(tmp_path: Path, monkeypatch):
+    image_path = _write_decorated_nonbubble_caption(tmp_path / "page.png")
+    mask_path = tmp_path / "ctd-component-mask.png"
+    Image.new("L", (80, 280), 255).save(mask_path)
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(
+        detection_run / "detections.jsonl",
+        image_path,
+        rows=[
+            {
+                "record_id": "page.png#2",
+                "group_name": "框外",
+                "detection_method": "ctd_mask",
+                "selected_text_box_xyxy": [10, 10, 68, 250],
+                "ctd_match": {
+                    "status": "matched",
+                    "mask_path": str(mask_path),
+                    "component_id": "component-0001",
+                    "bbox_xyxy": [10, 10, 68, 250],
+                },
+                "candidate_boxes": [
+                    {"xyxy": [10, 10, 68, 250], "score": 1.0, "polarity": "dark_on_light"},
+                ],
+            }
+        ],
+    )
+    calls = {}
+
+    def fake_inpaint(**kwargs):
+        calls.update(kwargs)
+        output_dir = Path(kwargs["output_dir"])
+        cleaned = output_dir / "cleaned.png"
+        mask = output_dir / "mask.png"
+        gpt_mask = output_dir / "gpt-mask.png"
+        before_after = output_dir / "before-after.png"
+        input_crop = output_dir / "input.png"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (58, 240), "white").save(cleaned)
+        Image.new("RGB", (58, 240), "black").save(input_crop)
+        Image.new("L", (58, 240), 255).save(mask)
+        Image.new("RGBA", (58, 240), (0, 0, 0, 0)).save(gpt_mask)
+        Image.new("RGB", (116, 240), "white").save(before_after)
+        return NonBubbleInpaintResult(
+            record_id=kwargs["record_id"],
+            method="bt_lama_large_inpaint",
+            bbox=kwargs["bbox"],
+            input_crop_path=input_crop,
+            text_mask_path=mask,
+            gpt_mask_path=gpt_mask,
+            cleaned_crop_path=cleaned,
+            before_after_path=before_after,
+            dark_pixel_count=42,
+        )
+
+    monkeypatch.setattr("autolettering.phase6_nonbubble.inpaint_nonbubble_text", fake_inpaint)
+
+    run_phase6_nonbubble_cleanup(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-ctd-full-bbox",
+        sample_limit=1,
+        inpaint_method="local_diffusion",
+    )
+
+    assert calls["bbox"] == (10, 10, 68, 250)
+
+
+def test_run_phase6_nonbubble_cleanup_fallback_uses_mimo_bbox_and_gpt_mask(tmp_path: Path, monkeypatch):
+    image_path = _write_nonbubble_image(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(
+        detection_run / "detections.jsonl",
+        image_path,
+        rows=[
+            {
+                "record_id": "page.png#2",
+                "status": "fallback_required",
+                "group_name": "框外",
+                "selected_text_box_xyxy": None,
+                "failure_reason": "no_ctd_mask_within_threshold",
+                "fallback": {
+                    "method": "mimo_crop_then_gpt_image2_masked_edit",
+                    "context_bbox_xyxy": [10, 10, 100, 80],
+                    "translated_text": "背景文字",
+                },
+            }
+        ],
+    )
+    monkeypatch.setattr("autolettering.phase6_nonbubble.GptImageEditClient", lambda config: _FakeGptClient())
+
+    run_dir = run_phase6_nonbubble_cleanup(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-fallback-gpt",
+        sample_limit=1,
+        gpt_config=GptImageConfig(base_url="https://example.test/v1/images", api_key="test", model="gpt-image-2"),
+        call_gpt_image=True,
+        mimo_client=_FakeMimoLocator(),
+    )
+
+    row = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]
+    assert row["status"] == "cleaned"
+    assert row["cleanup"]["method"] == "gpt_image2_masked_edit"
+    assert row["cleanup"]["bbox"] == [19, 10, 78, 71]
+    assert row["cleanup"]["layout_text_bbox"] == [35, 25, 62, 55]
+    assert row["fallback_locator"]["status"] == "ok"
+    assert row["gpt_image2_edit"]["status"] == "ok"
+    with Image.open(row["gpt_image2_edit"]["request"]["mask_path"]) as mask:
+        assert mask.getpixel((25, 15))[3] == 0
+        assert mask.getpixel((0, 0))[3] == 255
+    with Image.open(row["cleanup"]["cleaned_crop_path"]).convert("RGB") as original:
+        with Image.open(row["cleanup"]["replacement_crop_path"]).convert("RGB") as replacement:
+            assert replacement.getpixel((0, 0)) == original.getpixel((0, 0))
+            assert replacement.getpixel((30, 20)) == (255, 255, 255)
+
+
+def test_run_phase6_nonbubble_cleanup_fallback_accepts_mimo_bbox_array_response(tmp_path: Path, monkeypatch):
+    image_path = _write_nonbubble_image(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(
+        detection_run / "detections.jsonl",
+        image_path,
+        rows=[
+            {
+                "record_id": "page.png#2",
+                "status": "fallback_required",
+                "group_name": "框外",
+                "selected_text_box_xyxy": None,
+                "fallback": {
+                    "method": "mimo_crop_then_gpt_image2_masked_edit",
+                    "context_bbox_xyxy": [10, 10, 100, 80],
+                    "translated_text": "背景文字",
+                },
+            }
+        ],
+    )
+    monkeypatch.setattr("autolettering.phase6_nonbubble.GptImageEditClient", lambda config: _FakeGptClient())
+
+    run_dir = run_phase6_nonbubble_cleanup(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-fallback-gpt-array",
+        sample_limit=1,
+        gpt_config=GptImageConfig(base_url="https://example.test/v1/images", api_key="test", model="gpt-image-2"),
+        call_gpt_image=True,
+        mimo_client=_FakeMimoLocatorArray(),
+    )
+
+    row = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]
+    assert row["fallback_locator"]["status"] == "ok"
+    assert row["cleanup"]["layout_text_bbox"] == [35, 25, 62, 55]
+    assert row["gpt_image2_edit"]["status"] == "ok"
+
+
+def test_run_phase6_nonbubble_cleanup_fallback_does_not_call_gpt_when_mimo_bbox_is_invalid(tmp_path: Path, monkeypatch):
+    image_path = _write_nonbubble_image(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(
+        detection_run / "detections.jsonl",
+        image_path,
+        rows=[
+            {
+                "record_id": "page.png#2",
+                "status": "fallback_required",
+                "group_name": "框外",
+                "selected_text_box_xyxy": None,
+                "fallback": {
+                    "method": "mimo_crop_then_gpt_image2_masked_edit",
+                    "context_bbox_xyxy": [10, 10, 100, 80],
+                    "translated_text": "背景文字",
+                },
+            }
+        ],
+    )
+    calls = {"gpt": 0}
+
+    class FakeGptClient:
+        def edit_image(self, image_path: str, mask_path: str, prompt: str, output_path: str) -> dict:
+            calls["gpt"] += 1
+            return _FakeGptClient().edit_image(image_path, mask_path, prompt, output_path)
+
+    monkeypatch.setattr("autolettering.phase6_nonbubble.GptImageEditClient", lambda config: FakeGptClient())
+
+    run_dir = run_phase6_nonbubble_cleanup(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-fallback-invalid-mimo",
+        sample_limit=1,
+        gpt_config=GptImageConfig(base_url="https://example.test/v1/images", api_key="test", model="gpt-image-2"),
+        call_gpt_image=True,
+        mimo_client=_FakeMimoLocatorInvalidBbox(),
+    )
+
+    row = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]
+    assert calls["gpt"] == 0
+    assert row["status"] == "failed"
+    assert row["fallback_locator"]["status"] == "failed"
+    assert row["gpt_image2_edit"]["status"] == "not_called"
+
+
 def test_normalize_gpt_output_to_crop_writes_target_sized_image(tmp_path: Path):
     image_path = tmp_path / "gpt.png"
     Image.new("RGB", (300, 500), "blue").save(image_path)
@@ -448,6 +743,58 @@ class _FakeGptClient:
         output.parent.mkdir(parents=True, exist_ok=True)
         Image.new("RGB", (10, 10), "white").save(output)
         return {"status": "ok", "output_path": str(output), "response": {"usage": {"total_tokens": 1}}}
+
+
+class _FakeMimoLocator:
+    def analyze_image(self, image_path: str, prompt: str, kind: str = "image_analysis", max_completion_tokens: int | None = None):
+        assert Path(image_path).exists()
+        assert "背景文字" in prompt
+        return {
+            "raw_text": json.dumps(
+                {
+                    "bbox_xyxy": [25, 15, 52, 45],
+                    "confidence": 0.82,
+                    "reasoning_summary": "target text region",
+                },
+                ensure_ascii=False,
+            ),
+            "request": {"kind": kind, "image_path": str(image_path)},
+            "response": {"status": "ok"},
+        }
+
+
+class _FakeMimoLocatorArray:
+    def analyze_image(self, image_path: str, prompt: str, kind: str = "image_analysis", max_completion_tokens: int | None = None):
+        return {
+            "raw_text": json.dumps(
+                [
+                    {
+                        "bbox_xyxy": [25, 15, 52, 45],
+                        "confidence": 0.82,
+                        "reasoning_summary": "target text region",
+                    }
+                ],
+                ensure_ascii=False,
+            ),
+            "request": {"kind": kind, "image_path": str(image_path)},
+            "response": {"status": "ok"},
+        }
+
+
+class _FakeMimoLocatorInvalidBbox:
+    def analyze_image(self, image_path: str, prompt: str, kind: str = "image_analysis", max_completion_tokens: int | None = None):
+        return {
+            "raw_text": json.dumps(
+                {
+                    "bbox_xyxy": [401, 385, 831, 539],
+                    "confidence": 0.99,
+                    "reasoning_summary": "out of crop bounds",
+                },
+                ensure_ascii=False,
+            ),
+            "request": {"kind": kind, "image_path": str(image_path)},
+            "response": {"status": "ok"},
+        }
 
 
 def _write_nonbubble_image(path: Path) -> Path:

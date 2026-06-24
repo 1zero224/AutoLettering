@@ -17,6 +17,7 @@ def main() -> None:
     parser.add_argument("--font-selection-run-dir", default="outputs/runs/phase3-gbc06-mimo-font-smoke")
     parser.add_argument("--layout-run-dir", default="outputs/runs/phase4-gbc06-angle-layout-smoke")
     parser.add_argument("--cleanup-run-dir", action="append", default=None)
+    parser.add_argument("--preview-run-dir", default=None)
     parser.add_argument("--output-root", default="outputs/runs")
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--sample-limit", type=int, default=5)
@@ -33,6 +34,7 @@ def main() -> None:
         run_id=args.run_id,
         sample_limit=args.sample_limit,
         font_mapping_path=Path(args.font_mapping) if args.font_mapping else None,
+        preview_run_dir=Path(args.preview_run_dir) if args.preview_run_dir else None,
     )
     print(run_dir)
 

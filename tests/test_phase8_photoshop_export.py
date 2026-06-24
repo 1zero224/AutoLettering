@@ -13,7 +13,10 @@ def test_run_phase8_photoshop_export_writes_manifest_and_jsx(tmp_path: Path):
     layer = manifest["pages"][0]["layers"][0]
     assert manifest["schema_version"] == "autolettering.photoshop.v1"
     assert manifest["summary"] == {"record_count": 1, "page_count": 1}
+    assert manifest["pages"][0]["layer_order"] == ["text_layers", "repaired_image", "original_image"]
     assert layer["record_id"] == "page.png#1"
+    assert layer["text_layer_name"] == "嵌字图层 page.png#1"
+    assert layer["cleanup_layer_name"] == "修复区域 page.png#1"
     assert layer["bbox"]["xyxy"] == [10, 20, 80, 90]
     assert layer["text_bbox"]["xyxy"] == [30, 40, 60, 85]
     assert layer["text_position"]["x_px"] == 30
@@ -88,6 +91,53 @@ def test_run_phase8_photoshop_export_preserves_replacement_cleanup(tmp_path: Pat
     assert str(cleanup_run_a) in report
     assert str(cleanup_run_b) in report
     assert "`gpt_image2_masked_edit=1`" in report
+
+
+def test_run_phase8_photoshop_export_uses_phase7_cleaned_page_as_repaired_image_layer(tmp_path: Path):
+    image_path = tmp_path / "page.png"
+    Image.new("RGB", (120, 160), "white").save(image_path)
+    repaired_page = tmp_path / "cleaned-page.png"
+    Image.new("RGB", (120, 160), "gray").save(repaired_page)
+    detection_run = _mkdir(tmp_path / "phase2")
+    font_run = _mkdir(tmp_path / "phase3")
+    layout_run = _mkdir(tmp_path / "phase4")
+    cleanup_run = _mkdir(tmp_path / "phase6")
+    preview_run = _mkdir(tmp_path / "phase7")
+    _write_jsonl(detection_run / "detections.jsonl", [_detection_payload(image_path)])
+    _write_jsonl(font_run / "font-selections.jsonl", [_font_payload(tmp_path / "font.ttf")])
+    _write_jsonl(layout_run / "layout-results.jsonl", [_layout_payload()])
+    _write_jsonl(cleanup_run / "cleanup-results.jsonl", [_cleanup_payload(tmp_path / "local.png")])
+    _write_jsonl(
+        preview_run / "preview-results.jsonl",
+        [
+            {
+                "image_name": "page.png",
+                "status": "page_preview_generated",
+                "preview": {"cleaned_page_path": str(repaired_page)},
+            }
+        ],
+    )
+
+    run_dir = run_phase8_photoshop_export(
+        detection_run,
+        font_run,
+        layout_run,
+        cleanup_run,
+        tmp_path / "outputs",
+        sample_limit=1,
+        preview_run_dir=preview_run,
+    )
+
+    manifest = json.loads((run_dir / "photoshop-manifest.json").read_text(encoding="utf-8"))
+    page = manifest["pages"][0]
+    assert page["repaired_image_path"] == str(repaired_page)
+    assert page["layers"][0]["cleanup"]["effective_crop_path"] == str(tmp_path / "local.png")
+    report = (run_dir / "reports" / "phase8-report.md").read_text(encoding="utf-8")
+    checklist = (run_dir / "reports" / "photoshop-validation-checklist.md").read_text(encoding="utf-8")
+    assert "Adds page-level `repaired_image_path`" in report
+    assert "Skips per-record cleanup patch layers" in report
+    assert "Expected page-level repaired image layers: 1" in checklist
+    assert "Expected cleanup patch layers: 0" in checklist
 
 
 def test_run_phase8_photoshop_export_places_cleanup_patch_by_cleanup_bbox(tmp_path: Path):
@@ -251,9 +301,14 @@ def _assert_rich_jsx_importer(jsx: str) -> None:
     for expected in [
         "photoshop-manifest.json",
         "LayerKind.TEXT",
+        "function addRepairedImageLayer",
+        "page.repaired_image_path",
+        "layer.name = '修复图像'",
         "function addCleanupPatchLayer",
         "layerData.cleanup.effective_crop_path",
         "addCleanupPatchLayer(doc, layerData)",
+        "layerData.text_layer_name",
+        "layerData.cleanup_layer_name",
         "AL cleanup ",
         "TextType.PARAGRAPHTEXT",
         "item.width = UnitValue(layerData.text_bbox.width, 'px')",

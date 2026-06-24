@@ -86,6 +86,8 @@ def _paste_cleaned_crops(canvas: Image.Image, records: list[dict]) -> None:
 
 def _paste_text_overlays(canvas: Image.Image, records: list[dict]) -> None:
     for record in records:
+        if not record.get("text_overlay_required", True):
+            continue
         text_bbox = tuple(record.get("text_bbox") or record["bbox"])
         overlay = _resize_to_bbox(record["layout_preview_path"], text_bbox).convert("RGBA")
         text_x1, text_y1, _, _ = text_bbox

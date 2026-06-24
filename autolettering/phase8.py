@@ -16,6 +16,7 @@ def run_phase8_photoshop_export(
     run_id: str | None = None,
     sample_limit: int = 5,
     font_mapping_path: str | Path | None = None,
+    preview_run_dir: str | Path | None = None,
 ) -> Path:
     run_dir = Path(output_root) / (run_id or "phase8-photoshop-export")
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -27,6 +28,7 @@ def run_phase8_photoshop_export(
         cleanup_rows=load_cleanup_rows_by_id(cleanup_run_dir),
         sample_limit=sample_limit,
         font_mapping=font_mapping,
+        repaired_pages=_load_repaired_pages(preview_run_dir),
     )
     write_json(run_dir / "photoshop-manifest.json", manifest)
     write_photoshop_import_jsx(run_dir / "photoshop-import.jsx")
@@ -38,6 +40,7 @@ def run_phase8_photoshop_export(
         cleanup_run_dir,
         manifest,
         font_mapping_path,
+        preview_run_dir,
     )
     _write_photoshop_validation_checklist(run_dir / "reports" / "photoshop-validation-checklist.md", manifest, font_mapping_path)
     return run_dir
@@ -48,6 +51,18 @@ def _load_font_mapping(path: str | Path | None) -> dict[str, str]:
         return {}
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     return {str(key): str(value) for key, value in payload.items() if value}
+
+
+def _load_repaired_pages(path: str | Path | None) -> dict[str, str]:
+    if path is None:
+        return {}
+    rows = _load_jsonl(Path(path) / "preview-results.jsonl", "page_preview_generated")
+    repaired: dict[str, str] = {}
+    for row in rows:
+        cleaned = row.get("preview", {}).get("cleaned_page_path")
+        if row.get("image_name") and cleaned:
+            repaired[row["image_name"]] = cleaned
+    return repaired
 
 
 def _load_jsonl(path: Path, status: str) -> list[dict]:
@@ -75,6 +90,7 @@ def _write_report(
     cleanup_run_dir: CleanupRunInput,
     manifest: dict,
     font_mapping_path: str | Path | None,
+    preview_run_dir: str | Path | None,
 ) -> None:
     cleanup_summary = _cleanup_summary(manifest)
     lines = [
@@ -84,6 +100,7 @@ def _write_report(
         f"Font selection run directory: `{font_selection_run_dir}`",
         f"Layout run directory: `{layout_run_dir}`",
         f"Cleanup run directories: {format_cleanup_run_dirs(cleanup_run_dir)}",
+        f"Preview run directory: `{preview_run_dir}`" if preview_run_dir else "Preview run directory: none",
         f"Font mapping file: `{font_mapping_path}`" if font_mapping_path else "Font mapping file: none",
         "",
         "## Summary",
@@ -98,7 +115,9 @@ def _write_report(
         "",
         "## JSX Behavior",
         "",
-        "- Places `cleanup.effective_crop_path` as a bitmap patch layer when available.",
+        "- Adds page-level `repaired_image_path` as a bitmap layer named `修复图像` above the original image when a Phase 7 preview run is supplied.",
+        "- Skips per-record cleanup patch layers when a page-level repaired image is available.",
+        "- Places `cleanup.effective_crop_path` as a bitmap patch layer only when no page-level repaired image is available.",
         "- Creates one editable Photoshop paragraph text layer per exported layer using `text_bbox` width, height, and initial position.",
         "- Keeps `bbox` for cleanup patch placement and `text_bbox` for editable text placement.",
         "- Chooses editable text placement from `cleanup.layout_text_bbox` first, then `layout.target_bbox`, then the detected bbox.",
@@ -122,6 +141,7 @@ def _write_report(
 def _write_photoshop_validation_checklist(output_path: Path, manifest: dict, font_mapping_path: str | Path | None) -> None:
     summary = manifest["summary"]
     cleanup_patch_count = _cleanup_patch_count(manifest)
+    repaired_page_count = _repaired_page_count(manifest)
     lines = [
         "# Photoshop Validation Checklist",
         "",
@@ -136,13 +156,15 @@ def _write_photoshop_validation_checklist(output_path: Path, manifest: dict, fon
         "Expected PSD output folder: `psd/`",
         f"- Expected pages: {summary['page_count']}",
         f"- Expected editable text layers: {summary['record_count']}",
+        f"- Expected page-level repaired image layers: {repaired_page_count}",
         f"- Expected cleanup patch layers: {cleanup_patch_count}",
         f"- Font mapping file: `{font_mapping_path}`" if font_mapping_path else "- Font mapping file: none",
         "",
         "## Manual Checks",
         "",
         "- Each PSD opens without missing image path errors.",
-        "- Cleanup patch layers align with their detected text boxes.",
+        "- Page-level `修复图像` layers align with the original canvas when exported.",
+        "- Cleanup patch layers align with their detected text boxes when no page-level repaired image is exported.",
         "- Text layers remain editable paragraph text layers initialized from `text_bbox`.",
         "- Text layer colors match `layout.text_color`, especially white text on dark panels.",
         "- Fonts resolve to `font.photoshop_font_name` or an acceptable fallback from `font.font_name_candidates`.",
@@ -162,10 +184,16 @@ def _write_photoshop_validation_checklist(output_path: Path, manifest: dict, fon
 def _cleanup_patch_count(manifest: dict) -> int:
     count = 0
     for page in manifest.get("pages", []):
+        if page.get("repaired_image_path"):
+            continue
         for layer in page.get("layers", []):
             if layer.get("cleanup", {}).get("effective_crop_path"):
                 count += 1
     return count
+
+
+def _repaired_page_count(manifest: dict) -> int:
+    return sum(1 for page in manifest.get("pages", []) if page.get("repaired_image_path"))
 
 
 def _cleanup_summary(manifest: dict) -> dict:

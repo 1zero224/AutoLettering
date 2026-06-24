@@ -11,41 +11,26 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from autolettering.models.gpt_image import GptImageConfig
 from autolettering.models.mimo import MimoVisionClient, MimoVisionConfig
-from autolettering.phase6_nonbubble import run_phase6_nonbubble_cleanup
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run Phase 6 non-bubble cleanup with local inpaint and GPT mask package.")
-    parser.add_argument("--detection-run-dir", default="outputs/runs/phase2-gbc06-smoke")
-    parser.add_argument("--output-root", default="outputs/runs")
-    parser.add_argument("--run-id", default=None)
-    parser.add_argument("--sample-limit", type=int, default=1)
-    parser.add_argument("--record-id", action="append", dest="record_ids", default=None)
-    parser.add_argument("--env-file", default=".env")
-    parser.add_argument("--call-gpt-image", action="store_true")
-    parser.add_argument("--skip-mimo", action="store_true")
-    parser.add_argument(
-        "--inpaint-method",
-        default="bt_lama_large",
-        choices=[
-            "local_diffusion",
-            "flat_median_fill",
-            "opencv_telea",
-            "opencv_ns",
-            "dark_panel_fill",
-            "bt_aot",
-            "bt_lama_large",
-            "bt_patchmatch",
-        ],
-    )
-    return parser
+from autolettering.phase6_nonbubble_gpt_replace import run_phase6_nonbubble_gpt_replace
 
 
 def main() -> None:
-    args = build_parser().parse_args()
+    parser = argparse.ArgumentParser(description="Run Phase 6 non-bubble GPT Chinese replacement and BT repair comparison.")
+    parser.add_argument("--detection-run-dir", required=True)
+    parser.add_argument("--output-root", default="outputs/runs")
+    parser.add_argument("--run-id", default=None)
+    parser.add_argument("--sample-limit", type=int, default=5)
+    parser.add_argument("--record-id", action="append", dest="record_ids", default=None)
+    parser.add_argument("--bt-method", action="append", dest="bt_methods", default=None)
+    parser.add_argument("--call-gpt-image", action="store_true")
+    parser.add_argument("--skip-mimo", action="store_true")
+    parser.add_argument("--context-padding", type=int, default=96)
+    parser.add_argument("--rect-mask-expand-px", type=int, default=2)
+    parser.add_argument("--env-file", default=".env")
+    args = parser.parse_args()
 
     _load_env_file(Path(args.env_file))
-    run_dir = run_phase6_nonbubble_cleanup(
+    run_dir = run_phase6_nonbubble_gpt_replace(
         detection_run_dir=Path(args.detection_run_dir),
         output_root=Path(args.output_root),
         run_id=args.run_id,
@@ -53,8 +38,10 @@ def main() -> None:
         record_ids=args.record_ids,
         gpt_config=_gpt_config_from_env() if args.call_gpt_image else None,
         call_gpt_image=args.call_gpt_image,
-        inpaint_method=args.inpaint_method,
+        bt_methods=args.bt_methods,
         mimo_client=None if args.skip_mimo else MimoVisionClient(_mimo_config_from_env()),
+        context_padding=args.context_padding,
+        rect_mask_expand_px=args.rect_mask_expand_px,
     )
     print(run_dir)
 
@@ -91,7 +78,7 @@ def _mimo_config_from_env() -> MimoVisionConfig:
         base_url=os.environ["MIMO_BASE_URL"],
         api_key=os.environ["MIMO_API_KEY"],
         model=os.environ["MIMO_VISION_MODEL"],
-        max_completion_tokens=1024,
+        max_completion_tokens=1600,
         thinking_type="disabled",
     )
 

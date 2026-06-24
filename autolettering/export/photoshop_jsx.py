@@ -69,6 +69,21 @@ JSX_SOURCE = """#target photoshop
             moveLayerTop(layer, layerData.photoshop.vertical_top_anchor_y_px);
         }
     }
+    function addRepairedImageLayer(doc, page) {
+        if (!page.repaired_image_path) { return false; }
+        var repairedFile = new File(page.repaired_image_path);
+        if (!repairedFile.exists) { return false; }
+        var sourceDoc = app.open(repairedFile);
+        sourceDoc.selection.selectAll();
+        sourceDoc.selection.copy();
+        sourceDoc.close(SaveOptions.DONOTSAVECHANGES);
+        app.activeDocument = doc;
+        doc.paste();
+        var layer = doc.activeLayer;
+        layer.name = '修复图像';
+        moveLayerTopLeft(layer, 0, 0);
+        return true;
+    }
     function addCleanupPatchLayer(doc, layerData) {
         var patchPath = layerData.cleanup && layerData.cleanup.effective_crop_path;
         if (!patchPath) { return; }
@@ -82,13 +97,13 @@ JSX_SOURCE = """#target photoshop
         app.activeDocument = doc;
         doc.paste();
         var layer = doc.activeLayer;
-        layer.name = 'AL cleanup ' + layerData.record_id;
+        layer.name = layerData.cleanup_layer_name || ('AL cleanup ' + layerData.record_id);
         moveLayerTopLeft(layer, patchPosition.x_px, patchPosition.y_px);
     }
     function addTextLayer(doc, layerData) {
         var layer = doc.artLayers.add();
         layer.kind = LayerKind.TEXT;
-        layer.name = layerData.layer_name;
+        layer.name = layerData.text_layer_name || layerData.layer_name;
         var item = layer.textItem;
         item.kind = TextType.PARAGRAPHTEXT;
         item.width = UnitValue(layerData.text_bbox.width, 'px');
@@ -100,7 +115,7 @@ JSX_SOURCE = """#target photoshop
         setTextColor(item, layerData.layout.text_color);
         setTextSpacing(item, layerData.layout);
         item.position = [UnitValue(layerData.text_position.x_px, 'px'), UnitValue(layerData.text_position.y_px, 'px')];
-        layer.name = layerData.layer_name + textAnchorNote(layerData);
+        layer.name = (layerData.text_layer_name || layerData.layer_name) + textAnchorNote(layerData);
         if (layerData.layout.angle_degrees) { layer.rotate(layerData.layout.angle_degrees); }
         applyVerticalTopAnchor(layer, layerData);
     }
@@ -112,8 +127,11 @@ JSX_SOURCE = """#target photoshop
     for (var i = 0; i < manifest.pages.length; i++) {
         var page = manifest.pages[i];
         var doc = app.open(new File(page.image_path));
+        var hasRepairedImage = addRepairedImageLayer(doc, page);
         for (var j = 0; j < page.layers.length; j++) {
-            try { addCleanupPatchLayer(doc, page.layers[j]); } catch (err) {}
+            if (!hasRepairedImage) {
+                try { addCleanupPatchLayer(doc, page.layers[j]); } catch (err) {}
+            }
             addTextLayer(doc, page.layers[j]);
         }
         var saveFile = new File(outputFolder.fsName + '/' + baseName(page.image_name) + '.psd');

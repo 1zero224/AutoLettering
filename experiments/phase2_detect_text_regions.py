@@ -11,8 +11,8 @@ if str(PROJECT_ROOT) not in sys.path:
 from autolettering.phase2 import run_phase2
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the Phase 2 CV text-region detection prototype.")
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run the Phase 2 text-region detection prototype.")
     parser.add_argument(
         "--labelplus-file",
         default="GBC06 (已翻 斗笠)/翻译_0.txt",
@@ -24,7 +24,23 @@ def main() -> None:
     parser.add_argument("--record-id", action="append", dest="record_ids", help="Record id to detect; repeatable.")
     parser.add_argument("--radius-x", type=int, default=220, help="Horizontal search radius in pixels.")
     parser.add_argument("--radius-y", type=int, default=180, help="Vertical search radius in pixels.")
-    args = parser.parse_args()
+    parser.add_argument(
+        "--detection-strategy",
+        default="cv",
+        choices=["cv", "ctd_mask"],
+        help="Detection strategy: local CV prototype or BallonsTranslator CTD mask matching.",
+    )
+    parser.add_argument(
+        "--ctd-max-edge-distance-px",
+        type=float,
+        default=12.0,
+        help="Maximum LabelPlus-point to CTD component edge distance for unique matching.",
+    )
+    return parser
+
+
+def main() -> None:
+    args = build_parser().parse_args()
 
     run_dir = run_phase2(
         Path(args.labelplus_file),
@@ -34,6 +50,8 @@ def main() -> None:
         radius_x=args.radius_x,
         radius_y=args.radius_y,
         record_ids=args.record_ids,
+        detection_strategy=args.detection_strategy,
+        ctd_max_edge_distance_px=args.ctd_max_edge_distance_px,
     )
     print(run_dir)
 

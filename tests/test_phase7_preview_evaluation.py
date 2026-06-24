@@ -4,6 +4,7 @@ from pathlib import Path
 from PIL import Image
 
 from autolettering.phase7_evaluate import (
+    _build_evaluation_contact_sheet,
     _record_label,
     build_preview_evaluation_prompt,
     parse_preview_evaluation_response,
@@ -165,6 +166,9 @@ def test_build_preview_evaluation_prompt_lists_records_and_methods():
     assert "tight crops" in prompt
     assert "not as same-size score targets" in prompt
     assert "Do not penalize missing full speech-bubble outlines" in prompt
+    assert "Long vertical records may be split into numbered segments" in prompt
+    assert "do not treat repeated panel borders, columns, or multiple segments as duplicated lettering" in prompt
+    assert "Judge the combined sequence of segments in segment order" in prompt
     assert "Do not echo the Records JSON" in prompt
     assert "That JSON object must include score and usable" in prompt
     assert "score" in prompt
@@ -215,7 +219,7 @@ def test_run_phase7_preview_evaluation_writes_results_and_api_summaries(tmp_path
     assert evaluation_path.exists()
     with Image.open(evaluation_path).convert("RGB") as sheet:
         assert sheet.width > 80
-        assert sheet.getpixel((11, 56)) == (0, 160, 80)
+        assert sheet.getpixel((11, 144)) == (0, 160, 80)
         assert _has_nonwhite_pixel(sheet, (12, 16, 160, 38))
         assert _has_nonwhite_pixel(sheet, (150, 16, sheet.width - 1, 38))
     assert "bubble translation is too large" in evaluations[0]["issues"]
@@ -223,6 +227,36 @@ def test_run_phase7_preview_evaluation_writes_results_and_api_summaries(tmp_path
     assert api_calls[0]["request"]["prompt_chars"] > 0
     assert "api_key" not in json.dumps(api_calls[0]).lower()
     assert "Average score: 8.0" in report
+
+
+def test_evaluation_contact_sheet_splits_tall_vertical_crops_into_readable_grid(tmp_path: Path):
+    preview_run = tmp_path / "phase7"
+    preview_page = preview_run / "pages" / "page.png"
+    preview_page.parent.mkdir(parents=True)
+    Image.new("RGB", (64, 64), "white").save(preview_page)
+    tall_before_after = tmp_path / "before-after-tall.png"
+    Image.new("RGB", (80, 600), "white").save(tall_before_after)
+    row = {
+        "image_name": "page.png",
+        "status": "page_preview_generated",
+        "records": [
+            {
+                "record_id": "page.png#16",
+                "translated_text": "来自桃香的唐突的提案",
+                "cleanup_method": "bt_lama_large_inpaint",
+                "preview_before_after_path": str(tall_before_after),
+            }
+        ],
+        "preview": {"page_preview_path": str(preview_page), "record_count": 1},
+    }
+
+    sheet_path = Path(_build_evaluation_contact_sheet(row))
+
+    with Image.open(sheet_path).convert("RGB") as sheet:
+        ratio = sheet.width / sheet.height
+        assert 0.45 <= ratio <= 2.3
+        assert sheet.height < 1300
+        assert sheet.getpixel((11, 144)) == (0, 160, 80)
 
 
 def test_run_phase7_preview_evaluation_preserves_records_when_api_fails(tmp_path: Path):

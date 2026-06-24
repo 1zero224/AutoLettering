@@ -12,6 +12,8 @@ from PIL import Image
 _DLL_HANDLES: list[object] = []
 _AOT_MODEL = None
 _AOT_MODULE = None
+_LAMA_MPE_MODEL = None
+_LAMA_MPE_MODULE = None
 _LAMA_LARGE_MODEL = None
 _LAMA_LARGE_MODULE = None
 _PATCHMATCH_MODULE = None
@@ -58,6 +60,24 @@ def lama_large_inpaint(crop: Image.Image, text_mask: Image.Image) -> Image.Image
     return Image.fromarray((output * fill + original * keep).astype(np.uint8), mode="RGB")
 
 
+def lama_mpe_inpaint(crop: Image.Image, text_mask: Image.Image) -> Image.Image:
+    model, _ = _load_lama_mpe()
+    cv2 = _require_cv2()
+    torch = _require_torch()
+    original = np.array(crop.convert("RGB"), dtype=np.uint8)
+    mask = np.array(text_mask.convert("L"), dtype=np.uint8) >= 127
+    img_t, mask_t, padded_shape = _lama_large_tensors(original, mask, cv2, torch)
+    rel_pos, _, direct = model.load_masked_position_encoding(mask_t.cpu().squeeze(0).squeeze(0).numpy())
+    rel_pos_t = torch.LongTensor(rel_pos).unsqueeze(0)
+    direct_t = torch.LongTensor(direct).unsqueeze(0)
+    with torch.no_grad():
+        output_t = model(img_t, mask_t, rel_pos_t, direct_t)
+    output = _lama_large_output(output_t, original.shape, padded_shape, cv2)
+    keep = (~mask)[:, :, None].astype(np.uint8)
+    fill = mask[:, :, None].astype(np.uint8)
+    return Image.fromarray((output * fill + original * keep).astype(np.uint8), mode="RGB")
+
+
 def _load_aot():
     global _AOT_MODEL, _AOT_MODULE
     if _AOT_MODEL is not None and _AOT_MODULE is not None:
@@ -95,6 +115,25 @@ def _load_patchmatch():
         "ballontranslator/modules/inpaint/patch_match.py",
     )
     return _PATCHMATCH_MODULE
+
+
+def _load_lama_mpe():
+    global _LAMA_MPE_MODEL, _LAMA_MPE_MODULE
+    if _LAMA_MPE_MODEL is not None and _LAMA_MPE_MODULE is not None:
+        return _LAMA_MPE_MODEL, _LAMA_MPE_MODULE
+    bt_root = _balloons_root()
+    default_model = bt_root / "data" / "models" / "lama_mpe.ckpt"
+    model_path = Path(os.environ.get("BT_LAMA_MPE_CKPT", default_model))
+    if not model_path.exists():
+        raise RuntimeError(f"bt_lama_mpe_missing_checkpoint:{model_path}")
+    _LAMA_MPE_MODULE = _load_balloons_inpaint_module(bt_root, "lama")
+    cwd = Path.cwd()
+    os.chdir(bt_root)
+    try:
+        _LAMA_MPE_MODEL = _LAMA_MPE_MODULE.load_lama_mpe(str(model_path), "cpu", use_mpe=True, large_arch=False)
+    finally:
+        os.chdir(cwd)
+    return _LAMA_MPE_MODEL, _LAMA_MPE_MODULE
 
 
 def _load_lama_large():

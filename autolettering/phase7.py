@@ -45,7 +45,7 @@ def _load_detection_rows(path: Path) -> dict[str, dict]:
     with path.open("r", encoding="utf-8") as handle:
         for line in handle:
             payload = json.loads(line)
-            if payload.get("status") == "ok":
+            if payload.get("status") in {"ok", "fallback_required"}:
                 rows[payload["record_id"]] = payload
     return rows
 
@@ -91,16 +91,18 @@ def _preview_records(
         if detection is None:
             skipped_rows.append(_skipped_row(record_id, "missing_detection"))
             continue
-        if layout is None:
+        if layout is None and _text_overlay_required(cleanup["cleanup"]):
             skipped_rows.append(_skipped_row(record_id, "missing_layout"))
             continue
         records.append(_preview_record(detection, cleanup, layout))
     return records, skipped_rows
 
 
-def _preview_record(detection: dict, cleanup: dict, layout: dict) -> dict:
+def _preview_record(detection: dict, cleanup: dict, layout: dict | None) -> dict:
     bbox = cleanup["cleanup"]["bbox"]
-    text_bbox = _text_overlay_bbox(cleanup["cleanup"], layout["layout"], bbox)
+    text_overlay_required = _text_overlay_required(cleanup["cleanup"])
+    layout_payload = layout["layout"] if layout is not None else {}
+    text_bbox = _text_overlay_bbox(cleanup["cleanup"], layout_payload, bbox)
     return {
         "record_id": detection["record_id"],
         "image_name": detection.get("image_name"),
@@ -111,7 +113,8 @@ def _preview_record(detection: dict, cleanup: dict, layout: dict) -> dict:
         "cleanup_method": _cleanup_method(cleanup["cleanup"]),
         "cleaned_crop_path": _cleanup_crop_path(cleanup["cleanup"]),
         "cleanup_mask_path": _cleanup_mask_path(cleanup["cleanup"]),
-        "layout_preview_path": layout["layout"]["preview_path"],
+        "layout_preview_path": layout_payload.get("preview_path", ""),
+        "text_overlay_required": text_overlay_required,
     }
 
 
@@ -156,7 +159,8 @@ def _record_summary(record: dict) -> dict:
         "translated_text": record.get("translated_text", ""),
         "cleanup_method": record.get("cleanup_method"),
         "cleanup_crop_path": record.get("cleaned_crop_path", ""),
-        "layout_preview_path": record["layout_preview_path"],
+        "layout_preview_path": record.get("layout_preview_path", ""),
+        "text_overlay_required": record.get("text_overlay_required", True),
         "preview_before_after_path": record.get("preview_before_after_path", ""),
     }
 
@@ -173,6 +177,10 @@ def _cleanup_mask_path(cleanup: dict) -> str | None:
 
 def _cleanup_method(cleanup: dict) -> str | None:
     return cleanup.get("replacement_method") or cleanup.get("method")
+
+
+def _text_overlay_required(cleanup: dict) -> bool:
+    return _cleanup_method(cleanup) != "gpt_image2_masked_edit"
 
 
 def _skipped_row(record_id: str, reason: str) -> dict:

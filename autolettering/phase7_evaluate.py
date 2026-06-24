@@ -7,6 +7,8 @@ from typing import Protocol
 
 from PIL import Image, ImageDraw, ImageFont
 
+from .experiment_grid import near_square_columns
+
 
 class PreviewEvaluationClient(Protocol):
     def analyze_image(
@@ -65,6 +67,9 @@ def build_preview_evaluation_prompt(row: dict) -> str:
         [
             "Evaluate this manga auto-lettering contact sheet.",
             "Each record has a large green AFTER RESULT panel and a smaller gray BEFORE reference panel.",
+            "Long vertical records may be split into numbered segments; combine all segments for the page-level verdict.",
+            "If the image is split into segments, do not treat repeated panel borders, columns, or multiple segments as duplicated lettering.",
+            "Judge the combined sequence of segments in segment order.",
             "The green AFTER RESULT panel is the AFTER preview; the gray BEFORE reference panel is the BEFORE original.",
             "Score only the large green AFTER RESULT panel.",
             "The gray BEFORE reference panel intentionally contains Japanese source text and must never count as a failure.",
@@ -260,36 +265,119 @@ def _build_evaluation_contact_sheet(row: dict) -> str:
         row.setdefault("preview", {})["evaluation_image_path"] = row.get("preview", {}).get("page_preview_path")
         return str(row["preview"]["evaluation_image_path"])
 
-    font = ImageFont.load_default()
-    label_height = 44
-    padding = 12
-    loaded = [(_record_label(record), *_split_before_after(record["preview_before_after_path"])) for record in records]
-    after_scale = 3
-    before_scale = 1
-    after_w = max(after.width for _, _, after in loaded) * after_scale
-    after_h = max(after.height for _, _, after in loaded) * after_scale
-    before_w = max(before.width for _, before, _ in loaded) * before_scale
-    width = padding * 3 + after_w + before_w
-    height = padding + sum(label_height + after_h + padding for _ in loaded)
+    font = _review_font(13)
+    small_font = _review_font(11)
+    header_height = 54
+    label_height = 80
+    padding = 10
+    after_box = (230, 420)
+    before_box = (120, 220)
+    loaded = _contact_sheet_segments(records)
+    cell_width = padding * 3 + after_box[0] + before_box[0]
+    cell_height = label_height + after_box[1] + padding
+    columns = near_square_columns(len(loaded), cell_width=cell_width, cell_height=cell_height)
+    rows = (len(loaded) + columns - 1) // columns
+    width = padding + columns * (cell_width + padding)
+    height = header_height + padding + rows * (cell_height + padding)
     sheet = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(sheet)
-    y = padding
-    for label, before, after in loaded:
-        draw.text((padding, y), label[:120], fill="black", font=font)
-        before_x = padding * 2 + after_w
-        draw.text((padding, y + 18), "SCORE THIS: AFTER RESULT", fill=(0, 120, 60), font=font)
-        draw.text((before_x, y + 18), "reference only: BEFORE original", fill=(90, 90, 90), font=font)
-        y += label_height
-        after_panel = after.resize((after.width * after_scale, after.height * after_scale), Image.Resampling.LANCZOS)
-        before_panel = before.resize((before.width * before_scale, before.height * before_scale), Image.Resampling.LANCZOS)
-        draw.rectangle((padding - 1, y - 1, padding + after_w, y + after_h), outline=(0, 160, 80), width=3)
-        draw.rectangle((before_x - 1, y - 1, before_x + before_w, y + before.height * before_scale), outline=(150, 150, 150), width=1)
-        sheet.paste(after_panel, (padding, y))
-        sheet.paste(before_panel, (before_x, y))
-        y += after_h + padding
+    _draw_review_header(draw, width, font)
+    for index, (label, before, after) in enumerate(loaded):
+        column = index % columns
+        row_index = index // columns
+        x = padding + column * (cell_width + padding)
+        y = header_height + padding + row_index * (cell_height + padding)
+        before_x = x + padding * 2 + after_box[0]
+        _draw_review_label(draw, (x, y), label, font, small_font)
+        draw.text((x, y + 52), "SCORE THIS: AFTER RESULT", fill=(0, 120, 60), font=small_font)
+        draw.text((before_x, y + 52), "reference only: BEFORE", fill=(90, 90, 90), font=small_font)
+        panel_y = y + label_height
+        after_panel = _fit_for_review_panel(after, after_box)
+        before_panel = _fit_for_review_panel(before, before_box)
+        draw.rectangle((x - 1, panel_y - 1, x + after_box[0], panel_y + after_box[1]), outline=(0, 160, 80), width=3)
+        draw.rectangle(
+            (before_x - 1, panel_y - 1, before_x + before_box[0], panel_y + before_box[1]),
+            outline=(150, 150, 150),
+            width=1,
+        )
+        sheet.paste(after_panel, (x + (after_box[0] - after_panel.width) // 2, panel_y))
+        sheet.paste(before_panel, (before_x + (before_box[0] - before_panel.width) // 2, panel_y))
     sheet.save(output)
     row.setdefault("preview", {})["evaluation_image_path"] = str(output)
     return str(output)
+
+
+def _contact_sheet_segments(records: list[dict]) -> list[tuple[str, Image.Image, Image.Image]]:
+    segments: list[tuple[str, Image.Image, Image.Image]] = []
+    for record in records:
+        before, after = _split_before_after(record["preview_before_after_path"])
+        split_pairs = _split_tall_review_pair(before, after)
+        for index, (before_segment, after_segment) in enumerate(split_pairs, start=1):
+            label = _record_label(record)
+            if len(split_pairs) > 1:
+                label = f"{label} | segment {index}/{len(split_pairs)} {_segment_position(index, len(split_pairs))}"
+            segments.append((label, before_segment, after_segment))
+    return segments
+
+
+def _segment_position(index: int, total: int) -> str:
+    if index == 1:
+        return "TOP"
+    if index == total:
+        return "BOTTOM"
+    return "MIDDLE"
+
+
+def _draw_review_header(draw: ImageDraw.ImageDraw, width: int, font: ImageFont.ImageFont) -> None:
+    draw.rectangle((0, 0, width, 46), fill=(242, 248, 244), outline=(170, 210, 185))
+    draw.text((10, 8), "MIMO REVIEW SHEET: long vertical crops are split into ordered segments.", fill=(0, 80, 40), font=font)
+    draw.text((10, 27), "Segments are consecutive slices, not duplicated lettering. Judge segment 1 -> 2 -> 3 as one result.", fill=(0, 80, 40), font=font)
+
+
+def _draw_review_label(
+    draw: ImageDraw.ImageDraw,
+    xy: tuple[int, int],
+    label: str,
+    font: ImageFont.ImageFont,
+    small_font: ImageFont.ImageFont,
+) -> None:
+    x, y = xy
+    parts = [part.strip() for part in label.split("|")]
+    for offset, text in enumerate(parts[:3]):
+        if not text:
+            continue
+        draw.text((x, y + offset * 16), text[:42], fill="black", font=font if offset == 0 else small_font)
+
+
+def _review_font(size: int) -> ImageFont.ImageFont:
+    try:
+        return ImageFont.truetype("DejaVuSans.ttf", size)
+    except OSError:
+        return ImageFont.load_default()
+
+
+def _split_tall_review_pair(
+    before: Image.Image,
+    after: Image.Image,
+    max_segment_height: int = 260,
+) -> list[tuple[Image.Image, Image.Image]]:
+    if after.height <= max_segment_height:
+        return [(before, after)]
+    segment_count = max(1, int(round((after.height + max_segment_height - 1) // max_segment_height)))
+    pairs: list[tuple[Image.Image, Image.Image]] = []
+    for index in range(segment_count):
+        y1 = round(after.height * index / segment_count)
+        y2 = round(after.height * (index + 1) / segment_count)
+        pairs.append((before.crop((0, y1, before.width, y2)), after.crop((0, y1, after.width, y2))))
+    return pairs
+
+
+def _fit_for_review_panel(image: Image.Image, box: tuple[int, int]) -> Image.Image:
+    max_width, max_height = box
+    scale = min(max_width / max(1, image.width), max_height / max(1, image.height), 3.0)
+    width = max(1, int(round(image.width * scale)))
+    height = max(1, int(round(image.height * scale)))
+    return image.resize((width, height), Image.Resampling.LANCZOS)
 
 
 def _split_before_after(path: str | Path) -> tuple[Image.Image, Image.Image]:

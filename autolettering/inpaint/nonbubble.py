@@ -7,6 +7,7 @@ from PIL import Image, ImageChops, ImageFilter
 
 from .balloons import aot_inpaint as balloons_aot_inpaint
 from .balloons import lama_large_inpaint as balloons_lama_large_inpaint
+from .balloons import lama_mpe_inpaint as balloons_lama_mpe_inpaint
 from .balloons import patchmatch_inpaint as balloons_patchmatch_inpaint
 from .models import NonBubbleInpaintResult
 
@@ -22,13 +23,18 @@ def inpaint_nonbubble_text(
     light_threshold: int = 210,
     mask_dilate_px: int = 5,
     iterations: int = 80,
+    text_mask_path: str | Path | None = None,
 ) -> NonBubbleInpaintResult:
     output_root = Path(output_dir)
     safe_id = _safe_name(record_id)
     with Image.open(image_path) as image:
         crop = image.convert("RGB").crop(bbox)
 
-    text_mask = build_text_mask(crop, dark_threshold, mask_dilate_px, polarity=polarity, light_threshold=light_threshold)
+    text_mask = (
+        _crop_external_mask(text_mask_path, bbox, crop.size)
+        if text_mask_path
+        else build_text_mask(crop, dark_threshold, mask_dilate_px, polarity=polarity, light_threshold=light_threshold)
+    )
     method_name, cleaned = inpaint_crop(crop, text_mask, method, iterations)
     gpt_mask = build_gpt_edit_mask(text_mask)
 
@@ -62,16 +68,21 @@ def inpaint_crop(
     method: str = "bt_lama_large",
     iterations: int = 80,
 ) -> tuple[str, Image.Image]:
+    method = _canonical_method(method)
     if method == "local_diffusion":
         return "local_diffusion_inpaint", diffuse_inpaint(crop, text_mask, iterations)
     if method in {"opencv_telea", "opencv_ns"}:
         return f"{method}_inpaint", opencv_inpaint(crop, text_mask, method)
+    if method == "bt_opencv_tela":
+        return "bt_opencv-tela_actual_cv2_INPAINT_NS", opencv_inpaint(crop, text_mask, "opencv_ns")
     if method == "flat_median_fill":
         return "flat_median_fill", flat_median_fill(crop, text_mask)
     if method == "dark_panel_fill":
         return "dark_panel_fill", dark_panel_fill(crop, text_mask)
     if method == "bt_aot":
         return "bt_aot_inpaint", balloons_aot_inpaint(crop, text_mask)
+    if method == "bt_lama_mpe":
+        return "bt_lama_mpe_inpaint", balloons_lama_mpe_inpaint(crop, text_mask)
     if method == "bt_lama_large":
         return "bt_lama_large_inpaint", balloons_lama_large_inpaint(crop, text_mask)
     if method == "bt_patchmatch":
@@ -278,5 +289,25 @@ def _save_before_after(before: Image.Image, after: Image.Image, path: Path) -> N
     canvas.save(path)
 
 
+def _crop_external_mask(mask_path: str | Path, bbox: tuple[int, int, int, int], target_size: tuple[int, int]) -> Image.Image:
+    with Image.open(mask_path) as image:
+        mask = image.convert("L")
+        crop = mask.crop(bbox)
+    if crop.size != target_size:
+        crop = crop.resize(target_size)
+    return crop
+
+
 def _safe_name(value: str) -> str:
     return "".join(char if char.isalnum() else "-" for char in value).strip("-") or "record"
+
+
+def _canonical_method(method: str) -> str:
+    return {
+        "opencv-tela": "bt_opencv_tela",
+        "opencv_tela": "bt_opencv_tela",
+        "patchmatch": "bt_patchmatch",
+        "aot": "bt_aot",
+        "lama_mpe": "bt_lama_mpe",
+        "lama_large_512px": "bt_lama_large",
+    }.get(method, method)
