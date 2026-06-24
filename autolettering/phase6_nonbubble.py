@@ -85,6 +85,13 @@ def _cleanup_one(
     )
     cleanup = _cleanup_payload(result)
     if _is_ctd_matched_detection(detection):
+        cleanup.update(
+            {
+                "route": "cta_mask_lama_large_512px",
+                "source_mask_path": _ctd_component_mask_path(detection),
+                "text_overlay_required": True,
+            }
+        )
         gpt_payload = {
             "status": "not_applicable",
             "reason": "cta_mask_matched_inpaint_path",

@@ -512,6 +512,9 @@ def test_run_phase6_nonbubble_cleanup_ctd_match_uses_lama_large_and_ctd_mask(tmp
     assert calls["text_mask_path"] == str(mask_path)
     assert calls["bbox"] == (20, 15, 90, 75)
     assert row["cleanup"]["method"] == "bt_lama_large_inpaint"
+    assert row["cleanup"]["route"] == "cta_mask_lama_large_512px"
+    assert row["cleanup"]["source_mask_path"] == str(mask_path)
+    assert row["cleanup"]["text_overlay_required"] is True
     assert row["gpt_image2_edit"]["status"] == "not_applicable"
     assert row["gpt_image2_edit"]["reason"] == "cta_mask_matched_inpaint_path"
     assert row["gpt_image2_edit"]["inpaint_method"] == "lama_large_512px"
@@ -584,6 +587,8 @@ def test_run_phase6_nonbubble_cleanup_ctd_match_can_experimentally_override_meth
     assert calls["method"] == "bt_patchmatch"
     assert calls["text_mask_path"] == str(mask_path)
     assert row["cleanup"]["method"] == "bt_patchmatch_inpaint"
+    assert row["cleanup"]["route"] == "cta_mask_lama_large_512px"
+    assert row["cleanup"]["source_mask_path"] == str(mask_path)
     assert row["gpt_image2_edit"]["status"] == "not_applicable"
     assert row["gpt_image2_edit"]["reason"] == "cta_mask_matched_inpaint_path"
     assert row["gpt_image2_edit"]["inpaint_method"] == "bt_patchmatch"

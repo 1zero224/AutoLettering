@@ -81,6 +81,13 @@ def test_run_phase2_cta_strategy_writes_mask_component_as_primary_text_region(tm
     assert record["selected_text_box_xyxy"] == [88, 70, 116, 151]
     assert record["selected_text_full_xyxy"] == [88, 70, 116, 151]
     assert record["selected_text_body_xyxy"] == [88, 70, 116, 151]
+    assert record["lettering_route"] == {
+        "route": "cta_mask_lama_large_512px",
+        "text_region_source": "cta_mask",
+        "repair_method": "lama_large_512px",
+        "requires_mimo_locator": False,
+        "requires_gpt_image2_replacement": False,
+    }
     assert record["cta_match"]["status"] == "matched"
     assert record["cta_match"]["component_id"] == "component-0001"
     assert record["ctd_match"] == record["cta_match"]
@@ -124,6 +131,38 @@ def test_run_phase2_ctd_strategy_records_fallback_required_when_no_component_is_
     assert record["failure_reason"] == "no_ctd_mask_within_threshold"
     assert record["fallback"]["method"] == "mimo_crop_then_gpt_image2_masked_edit"
     assert record["fallback"]["context_bbox_xyxy"] == [0, 0, 240, 240]
+    assert record["lettering_route"] == {
+        "route": "mimo_locator_gpt_image2_masked_edit",
+        "text_region_source": "mimo_vision_model",
+        "repair_method": "gpt_image2_masked_edit",
+        "requires_mimo_locator": True,
+        "requires_gpt_image2_replacement": True,
+    }
+
+
+def test_run_phase2_fallback_context_is_expanded_to_near_square_for_vision(tmp_path: Path, monkeypatch):
+    project_dir = tmp_path / "sample_project"
+    project_dir.mkdir()
+    image_path = project_dir / "page.png"
+    _write_project_image(image_path)
+    _write_labelplus(project_dir / "翻译_0.txt")
+
+    monkeypatch.setattr("autolettering.phase2.detect_ctd_mask_components_for_image", lambda image, output_dir, **kwargs: [])
+
+    run_dir = run_phase2(
+        project_dir / "翻译_0.txt",
+        output_root=tmp_path / "outputs",
+        run_id="phase2-near-square-fallback",
+        sample_limit=1,
+        detection_strategy="ctd_mask",
+        radius_x=110,
+        radius_y=40,
+    )
+
+    record = json.loads((run_dir / "detections.jsonl").read_text(encoding="utf-8").strip())
+    assert record["fallback"]["source_context_bbox_xyxy"] == [0, 70, 212, 150]
+    assert record["fallback"]["context_bbox_xyxy"] == [0, 4, 212, 216]
+    assert record["fallback"]["context_shape"] == "near_square"
 
 
 def test_run_phase2_defaults_ctd_mask_edge_distance_to_twenty(tmp_path: Path, monkeypatch):

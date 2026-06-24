@@ -171,12 +171,32 @@ def _is_vertical_continuation(
     if bbox[1] < seed[1]:
         return False
     seed_width = _width(seed)
-    if _width(bbox) > max(seed_width * 1.35, seed_width + 20):
-        return False
     if _horizontal_overlap_ratio(bbox, cluster) < 0.72:
         return False
     gap = _vertical_gap(bbox, cluster)
-    return gap <= max(10, int(round(_height(seed) * 0.08)))
+    width_limit = max(seed_width * 1.35, seed_width + 20)
+    if gap <= max(10, int(round(_height(seed) * 0.08))):
+        return _width(bbox) <= width_limit or _is_tall_promo_column_continuation(bbox, cluster, seed, gap)
+    if _width(bbox) > width_limit and not _is_tall_promo_column_continuation(bbox, cluster, seed, gap):
+        return False
+    return _is_tall_promo_column_continuation(bbox, cluster, seed, gap)
+
+
+def _is_tall_promo_column_continuation(
+    bbox: tuple[int, int, int, int],
+    cluster: tuple[int, int, int, int],
+    seed: tuple[int, int, int, int],
+    gap: int,
+) -> bool:
+    if _height(cluster) < max(_width(cluster) * 4, _height(seed) * 4):
+        return False
+    if _height(bbox) < _width(bbox) * 0.45:
+        return False
+    if _width(bbox) > max(_width(cluster) * 1.25, _width(seed) * 1.6):
+        return False
+    if _horizontal_center_delta_ratio(bbox, cluster) > 0.36:
+        return False
+    return gap <= max(90, int(round(_height(cluster) * 0.18)))
 
 
 def _merged_component(group: list[CtdMaskComponent]) -> CtdMaskComponent:
@@ -347,6 +367,12 @@ def _horizontal_overlap_ratio(a: tuple[int, int, int, int], b: tuple[int, int, i
     if overlap <= 0:
         return 0.0
     return overlap / max(1, min(_width(a), _width(b)))
+
+
+def _horizontal_center_delta_ratio(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
+    center_a = (a[0] + a[2]) / 2
+    center_b = (b[0] + b[2]) / 2
+    return abs(center_a - center_b) / max(1, min(_width(a), _width(b)))
 
 
 def _fallback(record_id: str, reason: str) -> CtdMaskMatch:

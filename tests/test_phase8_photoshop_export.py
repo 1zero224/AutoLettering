@@ -65,6 +65,7 @@ def test_run_phase8_photoshop_export_preserves_replacement_cleanup(tmp_path: Pat
     cleanup_run_a = _mkdir(tmp_path / "phase6-a")
     cleanup_run_b = _mkdir(tmp_path / "phase6-b")
     replacement_path = tmp_path / "replacement.png"
+    Image.new("RGB", (70, 70), "gray").save(replacement_path)
     _write_jsonl(detection_run / "detections.jsonl", [_detection_payload(image_path)])
     _write_jsonl(font_run / "font-selections.jsonl", [_font_payload(tmp_path / "font.ttf")])
     _write_jsonl(layout_run / "layout-results.jsonl", [_layout_payload()])
@@ -81,16 +82,13 @@ def test_run_phase8_photoshop_export_preserves_replacement_cleanup(tmp_path: Pat
     )
 
     manifest = json.loads((run_dir / "photoshop-manifest.json").read_text(encoding="utf-8"))
-    cleanup = manifest["pages"][0]["layers"][0]["cleanup"]
-    assert cleanup["method"] == "local_diffusion_inpaint"
-    assert cleanup["replacement_method"] == "gpt_image2_masked_edit"
-    assert cleanup["replacement_crop_path"] == str(replacement_path)
-    assert cleanup["effective_method"] == "gpt_image2_masked_edit"
-    assert cleanup["effective_crop_path"] == str(replacement_path)
+    assert manifest["summary"] == {"record_count": 0, "page_count": 1}
+    assert manifest["pages"][0]["layers"] == []
     report = (run_dir / "reports" / "phase8-report.md").read_text(encoding="utf-8")
     assert str(cleanup_run_a) in report
     assert str(cleanup_run_b) in report
-    assert "`gpt_image2_masked_edit=1`" in report
+    checklist = (run_dir / "reports" / "photoshop-validation-checklist.md").read_text(encoding="utf-8")
+    assert "- Expected editable text layers: 0" in checklist
 
 
 def test_run_phase8_photoshop_export_uses_phase7_cleaned_page_as_repaired_image_layer(tmp_path: Path):
@@ -135,9 +133,78 @@ def test_run_phase8_photoshop_export_uses_phase7_cleaned_page_as_repaired_image_
     report = (run_dir / "reports" / "phase8-report.md").read_text(encoding="utf-8")
     checklist = (run_dir / "reports" / "photoshop-validation-checklist.md").read_text(encoding="utf-8")
     assert "Adds page-level `repaired_image_path`" in report
+    assert "Synthesizes page-level `repaired_image_path`" in report
     assert "Skips per-record cleanup patch layers" in report
     assert "Expected page-level repaired image layers: 1" in checklist
     assert "Expected cleanup patch layers: 0" in checklist
+
+
+def test_run_phase8_photoshop_export_synthesizes_repaired_page_from_cleanup_rows(tmp_path: Path):
+    image_path = tmp_path / "page.png"
+    Image.new("RGB", (120, 160), "white").save(image_path)
+    cleaned_crop = tmp_path / "cleaned.png"
+    Image.new("RGB", (30, 40), "gray").save(cleaned_crop)
+    detection_run = _mkdir(tmp_path / "phase2")
+    font_run = _mkdir(tmp_path / "phase3")
+    layout_run = _mkdir(tmp_path / "phase4")
+    cleanup_run = _mkdir(tmp_path / "phase6")
+    _write_jsonl(detection_run / "detections.jsonl", [_detection_payload(image_path)])
+    _write_jsonl(font_run / "font-selections.jsonl", [_font_payload(tmp_path / "font.ttf")])
+    _write_jsonl(layout_run / "layout-results.jsonl", [_layout_payload()])
+    _write_jsonl(cleanup_run / "cleanup-results.jsonl", [_cleanup_payload(cleaned_crop, cleanup_bbox=[10, 20, 40, 60])])
+
+    run_dir = run_phase8_photoshop_export(
+        detection_run,
+        font_run,
+        layout_run,
+        cleanup_run,
+        tmp_path / "outputs",
+        sample_limit=1,
+    )
+
+    manifest = json.loads((run_dir / "photoshop-manifest.json").read_text(encoding="utf-8"))
+    page = manifest["pages"][0]
+    repaired_path = Path(page["repaired_image_path"])
+    assert repaired_path.parent.name == "repaired_pages"
+    assert page["layers"][0]["text_layer_name"] == "嵌字图层1"
+    with Image.open(repaired_path).convert("RGB") as repaired:
+        assert repaired.getpixel((12, 22)) == (128, 128, 128)
+    checklist = (run_dir / "reports" / "photoshop-validation-checklist.md").read_text(encoding="utf-8")
+    assert "- Expected page-level repaired image layers: 1" in checklist
+    assert "- Expected cleanup patch layers: 0" in checklist
+
+
+def test_run_phase8_photoshop_export_skips_text_layer_for_gpt_replacement_cleanup(tmp_path: Path):
+    image_path = tmp_path / "page.png"
+    Image.new("RGB", (120, 160), "white").save(image_path)
+    replacement_path = tmp_path / "replacement.png"
+    Image.new("RGB", (70, 70), "gray").save(replacement_path)
+    detection_run = _mkdir(tmp_path / "phase2")
+    font_run = _mkdir(tmp_path / "phase3")
+    layout_run = _mkdir(tmp_path / "phase4")
+    cleanup_run = _mkdir(tmp_path / "phase6")
+    _write_jsonl(detection_run / "detections.jsonl", [_detection_payload(image_path)])
+    _write_jsonl(font_run / "font-selections.jsonl", [_font_payload(tmp_path / "font.ttf")])
+    _write_jsonl(layout_run / "layout-results.jsonl", [_layout_payload()])
+    _write_jsonl(cleanup_run / "cleanup-results.jsonl", [_cleanup_payload(tmp_path / "local.png", replacement_path)])
+
+    run_dir = run_phase8_photoshop_export(
+        detection_run,
+        font_run,
+        layout_run,
+        cleanup_run,
+        tmp_path / "outputs",
+        sample_limit=1,
+    )
+
+    manifest = json.loads((run_dir / "photoshop-manifest.json").read_text(encoding="utf-8"))
+    page = manifest["pages"][0]
+    assert manifest["summary"] == {"record_count": 0, "page_count": 1}
+    assert page["layers"] == []
+    assert page["repaired_image_path"]
+    checklist = (run_dir / "reports" / "photoshop-validation-checklist.md").read_text(encoding="utf-8")
+    assert "- Expected editable text layers: 0" in checklist
+    assert "- Expected page-level repaired image layers: 1" in checklist
 
 
 def test_run_phase8_photoshop_export_uses_phase7_manifest_for_repaired_page_without_text_layers(tmp_path: Path):

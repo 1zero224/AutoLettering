@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from .rendering.compose import compose_page_records
 from .cleanup_runs import CleanupRunInput, format_cleanup_run_dirs, load_cleanup_rows_by_id
 from .export.photoshop import build_photoshop_manifest, write_json, write_photoshop_import_jsx
 
@@ -21,14 +22,18 @@ def run_phase8_photoshop_export(
     run_dir = Path(output_root) / (run_id or "phase8-photoshop-export")
     run_dir.mkdir(parents=True, exist_ok=True)
     font_mapping = _load_font_mapping(font_mapping_path)
+    detection_rows = _load_jsonl_by_id(Path(detection_run_dir) / "detections.jsonl", {"ok", "fallback_required"})
+    cleanup_rows = load_cleanup_rows_by_id(cleanup_run_dir)
+    repaired_pages = _load_repaired_pages(preview_run_dir)
+    repaired_pages.update(_synthesize_repaired_pages(run_dir, detection_rows, cleanup_rows, repaired_pages))
     manifest = build_photoshop_manifest(
-        detection_rows=_load_jsonl_by_id(Path(detection_run_dir) / "detections.jsonl", {"ok", "fallback_required"}),
+        detection_rows=detection_rows,
         font_rows=_load_jsonl_by_id(Path(font_selection_run_dir) / "font-selections.jsonl", "selected"),
         layout_rows=_load_jsonl(Path(layout_run_dir) / "layout-results.jsonl", "layout_generated"),
-        cleanup_rows=load_cleanup_rows_by_id(cleanup_run_dir),
+        cleanup_rows=cleanup_rows,
         sample_limit=sample_limit,
         font_mapping=font_mapping,
-        repaired_pages=_load_repaired_pages(preview_run_dir),
+        repaired_pages=repaired_pages,
     )
     write_json(run_dir / "photoshop-manifest.json", manifest)
     write_photoshop_import_jsx(run_dir / "photoshop-import.jsx")
@@ -44,6 +49,59 @@ def run_phase8_photoshop_export(
     )
     _write_photoshop_validation_checklist(run_dir / "reports" / "photoshop-validation-checklist.md", manifest, font_mapping_path)
     return run_dir
+
+
+def _synthesize_repaired_pages(
+    run_dir: Path,
+    detection_rows: dict[str, dict],
+    cleanup_rows: dict[str, dict],
+    existing_repaired_pages: dict[str, dict],
+) -> dict[str, dict]:
+    records_by_image: dict[str, list[dict]] = {}
+    image_paths: dict[str, str] = {}
+    for record_id, cleanup_row in cleanup_rows.items():
+        detection = detection_rows.get(record_id)
+        if detection is None:
+            continue
+        image_name = detection.get("image_name")
+        image_path = detection.get("image_path")
+        if not image_name or not image_path or image_name in existing_repaired_pages:
+            continue
+        record = _cleanup_record_for_page(detection, cleanup_row)
+        if record is None:
+            continue
+        records_by_image.setdefault(image_name, []).append(record)
+        image_paths[image_name] = image_path
+
+    repaired: dict[str, dict] = {}
+    for image_name, records in records_by_image.items():
+        output_path = run_dir / "repaired_pages" / f"{_safe_name(image_name)}.png"
+        compose_page_records(image_paths[image_name], records, output_path)
+        repaired[image_name] = {
+            "image_path": image_paths[image_name],
+            "repaired_image_path": str(output_path),
+        }
+    return repaired
+
+
+def _cleanup_record_for_page(detection: dict, cleanup_row: dict) -> dict | None:
+    cleanup = cleanup_row.get("cleanup") or {}
+    cleaned_path = cleanup.get("replacement_crop_path") or cleanup.get("cleaned_crop_path")
+    bbox = cleanup.get("bbox") or detection.get("selected_text_box_xyxy")
+    if not cleaned_path or not bbox or not Path(cleaned_path).exists():
+        return None
+    return {
+        "record_id": detection.get("record_id"),
+        "bbox": [int(value) for value in bbox],
+        "cleaned_crop_path": cleaned_path,
+        "cleanup_mask_path": None if cleanup.get("replacement_crop_path") else cleanup.get("cleanup_mask_path"),
+        "layout_preview_path": "",
+        "text_overlay_required": False,
+    }
+
+
+def _safe_name(value: str) -> str:
+    return "".join(char if char.isalnum() else "-" for char in value).strip("-") or "page"
 
 
 def _load_font_mapping(path: str | Path | None) -> dict[str, str]:
@@ -140,6 +198,7 @@ def _write_report(
         "## JSX Behavior",
         "",
         "- Adds page-level `repaired_image_path` as a bitmap layer named `修复图像` above the original image when a Phase 7 preview run is supplied.",
+        "- Synthesizes page-level `repaired_image_path` from cleanup crops when no Phase 7 repaired page is supplied and source crop files exist.",
         "- Skips per-record cleanup patch layers when a page-level repaired image is available.",
         "- Places `cleanup.effective_crop_path` as a bitmap patch layer only when no page-level repaired image is available.",
         "- Creates one editable Photoshop paragraph text layer per exported layer using `text_bbox` width, height, and initial position.",

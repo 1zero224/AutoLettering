@@ -9,6 +9,7 @@ from .photoshop_jsx import JSX_SOURCE
 
 
 SCHEMA_VERSION = "autolettering.photoshop.v1"
+FINAL_REPLACEMENT_METHODS = {"gpt_image2_masked_edit", "cta_first_masked_edit"}
 
 
 def build_photoshop_manifest(
@@ -54,7 +55,10 @@ def _manifest_layers(
         font_row = font_rows.get(record_id)
         if detection is None or font_row is None:
             continue
-        layer = _layer_record(detection, font_row, layout, cleanup_rows.get(record_id), font_mapping)
+        cleanup_row = cleanup_rows.get(record_id)
+        if _cleanup_already_contains_replacement_text(cleanup_row):
+            continue
+        layer = _layer_record(detection, font_row, layout, cleanup_row, font_mapping)
         if layer is not None:
             layers.append(layer)
     return layers
@@ -311,6 +315,14 @@ def _cleanup_payload(cleanup_row: dict | None, image_size: tuple[int, int] | Non
         "effective_method": replacement_method or method,
         "effective_crop_path": replacement_crop_path or cleaned_crop_path,
     }
+
+
+def _cleanup_already_contains_replacement_text(cleanup_row: dict | None) -> bool:
+    if cleanup_row is None:
+        return False
+    cleanup = cleanup_row.get("cleanup") or {}
+    method = cleanup.get("replacement_method") or cleanup.get("method")
+    return method in FINAL_REPLACEMENT_METHODS
 
 
 def _optional_bbox_payload(value: object) -> dict | None:

@@ -126,6 +126,43 @@ def test_assign_labelplus_points_to_ctd_masks_merges_vertical_continuation_compo
         assert mask.getpixel((40, 500)) == 0
 
 
+def test_assign_labelplus_points_to_ctd_masks_merges_tall_promo_side_column(tmp_path: Path):
+    components = [
+        _component(tmp_path, "component-0001", (1182, 371, 1270, 459), 5329),
+        _component(tmp_path, "component-0002", (1186, 462, 1268, 497), 1990),
+        _component(tmp_path, "component-0003", (1186, 493, 1260, 527), 1795),
+        _component(tmp_path, "component-0004", (1180, 526, 1272, 563), 2301),
+        _component(tmp_path, "component-0005", (1202, 569, 1281, 645), 3687),
+        _component(tmp_path, "component-0006", (1177, 647, 1274, 749), 5347),
+        _component(tmp_path, "component-0007", (1176, 752, 1278, 848), 5572),
+        _component(tmp_path, "component-0008", (1200, 844, 1244, 943), 2942),
+        _component(tmp_path, "component-0009", (1172, 950, 1282, 1056), 9897),
+        _component(tmp_path, "component-0011", (1164, 1073, 1290, 1132), 6635),
+        _component(tmp_path, "component-0014", (1196, 1136, 1258, 1198), 2853),
+        _component(tmp_path, "component-0015", (1191, 1205, 1263, 1305), 5702),
+        _component(tmp_path, "component-0021", (1156, 1313, 1298, 1515), 19025),
+        _component(tmp_path, "component-0025", (1172, 1523, 1282, 1831), 27331),
+        _component(tmp_path, "component-0031", (1198, 1833, 1223, 1925), 2185),
+        _component(tmp_path, "component-0032", (1230, 1833, 1256, 1900), 1580),
+        _component(tmp_path, "component-wide-logo", (124, 1296, 483, 1406), 30299),
+        _component(tmp_path, "component-bottom-banner", (144, 1662, 1058, 1769), 80601),
+    ]
+    labels = [_label(1, 1297, 451)]
+
+    matches = assign_labelplus_points_to_ctd_masks(labels, components, max_edge_distance_px=80)
+
+    match = matches["page.png#1"]
+    assert match.status == "matched"
+    assert match.bbox_xyxy == (1156, 371, 1298, 1925)
+    assert match.component_id == (
+        "component-0001+component-0002+component-0003+component-0004+component-0005+"
+        "component-0006+component-0007+component-0008+component-0009+component-0011+"
+        "component-0014+component-0015+component-0021+component-0025+component-0031+component-0032"
+    )
+    assert "component-wide-logo" not in match.component_id
+    assert "component-bottom-banner" not in match.component_id
+
+
 def test_assign_labelplus_points_to_ctd_masks_rejects_ambiguous_component_claims():
     components = [
         CtdMaskComponent(
@@ -187,7 +224,7 @@ def test_ballonstranslator_ctd_config_reads_running_config(tmp_path: Path):
 
 
 def _component(tmp_path: Path, component_id: str, bbox: tuple[int, int, int, int], area: int) -> CtdMaskComponent:
-    image = Image.new("L", (240, 640), 0)
+    image = Image.new("L", (1440, 2048), 0)
     ImageDraw.Draw(image).rectangle((bbox[0], bbox[1], bbox[2] - 1, bbox[3] - 1), fill=255)
     mask_path = tmp_path / f"{component_id}.png"
     image.save(mask_path)

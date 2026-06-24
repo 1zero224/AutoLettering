@@ -151,6 +151,7 @@ def _detect_record(
         payload["ctd_match"] = match_payload
     if result.status == "fallback_required":
         payload["fallback"] = _mimo_gpt_fallback_payload(label, image.width, image.height, radius_x, radius_y)
+    payload["lettering_route"] = _lettering_route_payload(payload, detection_strategy)
     full_bbox, body_bbox = _add_derived_text_bboxes(payload)
     draw_detection_debug(
         image.image_path,
@@ -276,10 +277,83 @@ def _mimo_gpt_fallback_payload(
     radius_x: int,
     radius_y: int,
 ) -> dict:
+    source_bbox = build_search_region(label.x_px, label.y_px, image_width, image_height, radius_x, radius_y)
+    context_bbox = _near_square_bbox(source_bbox, image_width, image_height)
     return {
         "method": "mimo_crop_then_gpt_image2_masked_edit",
-        "context_bbox_xyxy": list(build_search_region(label.x_px, label.y_px, image_width, image_height, radius_x, radius_y)),
+        "context_bbox_xyxy": list(context_bbox),
+        "source_context_bbox_xyxy": list(source_bbox),
+        "context_shape": "near_square",
         "translated_text": label.translated_text,
+    }
+
+
+def _near_square_bbox(
+    bbox: tuple[int, int, int, int],
+    image_width: int,
+    image_height: int,
+) -> tuple[int, int, int, int]:
+    x1, y1, x2, y2 = bbox
+    width = x2 - x1
+    height = y2 - y1
+    target = max(width, height)
+    return _expand_bbox_to_size(bbox, image_width, image_height, target, target)
+
+
+def _expand_bbox_to_size(
+    bbox: tuple[int, int, int, int],
+    image_width: int,
+    image_height: int,
+    target_width: int,
+    target_height: int,
+) -> tuple[int, int, int, int]:
+    x1, y1, x2, y2 = bbox
+    center_x = (x1 + x2) / 2
+    center_y = (y1 + y2) / 2
+    new_x1 = int(round(center_x - target_width / 2))
+    new_y1 = int(round(center_y - target_height / 2))
+    new_x2 = new_x1 + target_width
+    new_y2 = new_y1 + target_height
+    if new_x1 < 0:
+        new_x2 -= new_x1
+        new_x1 = 0
+    if new_y1 < 0:
+        new_y2 -= new_y1
+        new_y1 = 0
+    if new_x2 > image_width:
+        shift = new_x2 - image_width
+        new_x1 = max(0, new_x1 - shift)
+        new_x2 = image_width
+    if new_y2 > image_height:
+        shift = new_y2 - image_height
+        new_y1 = max(0, new_y1 - shift)
+        new_y2 = image_height
+    return new_x1, new_y1, new_x2, new_y2
+
+
+def _lettering_route_payload(payload: dict, detection_strategy: str) -> dict:
+    if _is_cta_mask_strategy(detection_strategy) and payload.get("status") == "ok":
+        return {
+            "route": "cta_mask_lama_large_512px",
+            "text_region_source": "cta_mask",
+            "repair_method": "lama_large_512px",
+            "requires_mimo_locator": False,
+            "requires_gpt_image2_replacement": False,
+        }
+    if payload.get("status") == "fallback_required":
+        return {
+            "route": "mimo_locator_gpt_image2_masked_edit",
+            "text_region_source": "mimo_vision_model",
+            "repair_method": "gpt_image2_masked_edit",
+            "requires_mimo_locator": True,
+            "requires_gpt_image2_replacement": True,
+        }
+    return {
+        "route": "cv_detect_then_configured_cleanup",
+        "text_region_source": "cv_text_detection",
+        "repair_method": "configured_by_phase6",
+        "requires_mimo_locator": False,
+        "requires_gpt_image2_replacement": False,
     }
 
 
