@@ -19,6 +19,14 @@ def test_phase2_detection_cli_accepts_ctd_mask_strategy():
     assert args.ctd_max_edge_distance_px == 16
 
 
+def test_phase2_detection_cli_defaults_ctd_mask_edge_distance_for_real_mask_edges():
+    parser = phase2_detect_text_regions.build_parser()
+
+    args = parser.parse_args([])
+
+    assert args.ctd_max_edge_distance_px == 20.0
+
+
 def test_phase6_nonbubble_cli_can_disable_mimo_locator():
     parser = phase6_nonbubble_cleanup.build_parser()
 

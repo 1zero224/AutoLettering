@@ -192,8 +192,84 @@ MIMO evaluation:
 - `fallback_required` rows are now carried into Phase 6, but GPT is only called when MIMO locator status is `ok`.
 - MIMO bbox parsing accepts either one JSON object or a one-item JSON array.
 - MIMO bbox validation rejects out-of-bounds coordinates instead of falling back to an unsafe whole-crop mask.
-- GPT fallback uses a tight edit crop around the MIMO bbox rather than the entire LabelPlus search crop.
+- GPT fallback uses the full LabelPlus context crop as the GPT input and makes only the target bbox transparent, matching the gpt-image-playground mask-edit style.
 - GPT replacement crop composition keeps bbox outside the edit crop untouched; inside the masked bbox it attempts to preserve manga tone and paste only confident dark text strokes.
+
+## 2026-06-25 Update: Mask-Edge Matching And Full-Context GPT Fallback
+
+The CTD path now matches the requested geometry more closely:
+
+- CTD parameters are read from `BallonsTranslator/config/config.json`; the current running config uses `ctd.detect_size=1280`, `device=cpu`, `det_rearrange_max_batches=4`, and `mask dilate size=2`.
+- All configured CTD keys are passed through, including `font size multiplier`, `font size max`, and `font size min`.
+- Component splitting uses 8-connected components.
+- LabelPlus points are matched against real CTD mask edge segments, not only the component bbox edge.
+- Points inside a solid mask still use true distance to the nearest mask edge, not a special `0px` shortcut.
+- Matching is one-to-one across the page by sorting all label/component candidates by mask-edge distance, then claiming the nearest available component group.
+
+Regression tests added:
+
+- Hollow bbox case: a point inside a component bbox but far from the real mask edge no longer matches.
+- Solid mask case: a point deep inside a filled component still fails a small edge-distance threshold.
+- Diagonal mask case: diagonal contact stays in one 8-connected component.
+- BallonsTranslator config loader reads the running CTD config.
+
+The mask-edge distance is stricter than the previous bbox-edge distance. For `GBC06_01.png#16`, the nearest CTD edge distance is `18.788px`, so the real experiment uses a `20px` threshold:
+
+```powershell
+python experiments/phase2_detect_text_regions.py --labelplus-file "GBC06 (已翻 斗笠)/翻译_0.txt" --output-root outputs/runs --run-id phase2-gbc06-ctd-mask-01-16-maskedge-config1280-v3-trueedge-th20 --sample-limit 1 --record-id "GBC06_01.png#16" --detection-strategy ctd_mask
+```
+
+Result:
+
+- Status: `ok`
+- Matched component id: `component-0001+component-0012+component-0016+component-0018+component-0026`
+- Final bbox: `[1349, 122, 1407, 684]`
+- Mask-edge distance: `18.788`
+- Source coverage: full `桃香からの突然の提案`
+
+Fallback locator changes:
+
+- MIMO locator input now gets a coordinate-grid crop in `fallback_locator_input/*.png`; GPT still gets the clean context crop.
+- Locator JSON parser accepts `bbox_xyxy`, `bbox`, `bbox_percent_xyxy`, `bbox_normalized_xyxy`, and one-level nested bbox arrays.
+- Out-of-bounds locator output triggers one strict retry with crop dimensions and the previous invalid response.
+- A second MIMO pass validates whether the bbox covers the target original Japanese text. Rejected bboxes do not call `gpt-image-2`.
+- If the bbox is semantically correct but reported as too tight, Phase 6 keeps the full context crop and expands only the transparent mask bbox.
+- The run writes a near-square locator grid at `visuals/fallback-locator-grid.png`.
+
+Five-record fallback dry-run:
+
+```powershell
+python experiments/phase6_nonbubble_cleanup.py --detection-run-dir outputs/runs/phase2-gbc06-ctd-mask-fallback-candidates-v1 --output-root outputs/runs --run-id phase6-gbc06-ctd-fallback-mimo-semantic-gate-v3-parse-validation-retry --sample-limit 5
+```
+
+Result:
+
+- `GBC06_16.png#5`, `GBC06_17.png#3`, `GBC06_18.png#2`, `GBC06_21.png#6`: locator + semantic gate accepted, GPT dry-run only.
+- `GBC06_02.png#14`: rejected because bbox missed part of the large sound effect.
+- Locator grid: `outputs/runs/phase6-gbc06-ctd-fallback-mimo-semantic-gate-v3-parse-validation-retry/visuals/fallback-locator-grid.png`
+- MIMO grid evaluation: `outputs/runs/phase6-gbc06-ctd-fallback-mimo-semantic-gate-v3-parse-validation-retry/reports/mimo-fallback-locator-grid-evaluation.json`
+
+The MIMO locator remains unstable across repeated runs. A later dry-run (`phase6-gbc06-ctd-fallback-mimo-full-context-gate-v4`) accepted `GBC06_02.png#14` and `GBC06_21.png#6` but rejected some visually acceptable boxes. The current operational stance is conservative: a semantic rejection blocks GPT rather than risking a wrong masked edit.
+
+Controlled `gpt-image-2` replacement on `GBC06_16.png#5`:
+
+1. Tight edit crop experiment:
+   - Run: `outputs/runs/phase6-gbc06-ctd-fallback-gpt-semantic-gate-16-5-v1`
+   - Grid: `visuals/gpt-image2-16-5-optimized-comparison-grid.png`
+   - MIMO evaluation: `reports/mimo-gpt-image2-16-5-optimized-evaluation.json`
+   - Result: gray box removed by postprocessing, but the replacement glyph became an unreadable black blob.
+   - MIMO score: `1/10`, recommendation `reject`.
+
+2. Full-context masked edit experiment:
+   - Run: `outputs/runs/phase6-gbc06-ctd-fallback-gpt-full-context-16-5-v1`
+   - Input: full LabelPlus context crop, not the tight crop.
+   - Mask: transparent only over the target bbox.
+   - Grid: `visuals/gpt-image2-full-context-16-5-comparison-grid.png`
+   - MIMO evaluation: `reports/mimo-gpt-image2-full-context-16-5-evaluation.json`
+   - Result: target text `哼` correct, original removed, gray-box artifact removed after masked composition, artwork preserved.
+   - MIMO score: `10/10`, recommendation `Accept`.
+
+Based on that experiment, Phase 6 fallback now sends the clean full context crop to `gpt-image-2` and masks only the target text region. It no longer uses the tight edit crop as the default operational path.
 
 ## Current Recommendation
 

@@ -15,7 +15,7 @@ from autolettering.models.gpt_image import (
     normalize_gpt_output_to_crop,
     normalize_openai_base_url,
 )
-from autolettering.phase6_nonbubble import run_phase6_nonbubble_cleanup
+from autolettering.phase6_nonbubble import _local_background_color, run_phase6_nonbubble_cleanup
 
 
 def test_build_text_mask_and_gpt_mask_use_expected_alpha_convention():
@@ -618,12 +618,20 @@ def test_run_phase6_nonbubble_cleanup_fallback_uses_mimo_bbox_and_gpt_mask(tmp_p
     )
 
     row = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]
+    assert (run_dir / "visuals" / "fallback-locator-grid.png").exists()
     assert row["status"] == "cleaned"
     assert row["cleanup"]["method"] == "gpt_image2_masked_edit"
-    assert row["cleanup"]["bbox"] == [19, 10, 78, 71]
+    assert row["cleanup"]["bbox"] == [10, 10, 100, 80]
     assert row["cleanup"]["layout_text_bbox"] == [35, 25, 62, 55]
     assert row["fallback_locator"]["status"] == "ok"
+    assert Path(row["fallback_locator"]["locator_image_path"]).parent.name == "fallback_locator_input"
+    assert row["fallback_locator_validation"]["status"] == "accepted"
+    assert Path(row["fallback_locator_validation"]["validation_image_path"]).exists()
     assert row["gpt_image2_edit"]["status"] == "ok"
+    assert Path(row["gpt_image2_edit"]["request"]["image_path"]).parent.name == "fallback_input"
+    assert Path(row["cleanup"]["replacement_crop_path"]).parent.name == "fallback_replacement_crop"
+    with Image.open(row["fallback_locator"]["locator_image_path"]).convert("RGB") as locator_image:
+        assert _has_reddish_pixel(locator_image)
     with Image.open(row["gpt_image2_edit"]["request"]["mask_path"]) as mask:
         assert mask.getpixel((25, 15))[3] == 0
         assert mask.getpixel((0, 0))[3] == 255
@@ -668,8 +676,224 @@ def test_run_phase6_nonbubble_cleanup_fallback_accepts_mimo_bbox_array_response(
 
     row = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]
     assert row["fallback_locator"]["status"] == "ok"
+    assert row["fallback_locator_validation"]["status"] == "accepted"
     assert row["cleanup"]["layout_text_bbox"] == [35, 25, 62, 55]
     assert row["gpt_image2_edit"]["status"] == "ok"
+
+
+def test_run_phase6_nonbubble_cleanup_fallback_accepts_mimo_percent_bbox(tmp_path: Path):
+    image_path = _write_nonbubble_image(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(
+        detection_run / "detections.jsonl",
+        image_path,
+        rows=[
+            {
+                "record_id": "page.png#2",
+                "status": "fallback_required",
+                "group_name": "框外",
+                "selected_text_box_xyxy": None,
+                "fallback": {
+                    "method": "mimo_crop_then_gpt_image2_masked_edit",
+                    "context_bbox_xyxy": [10, 10, 100, 80],
+                    "translated_text": "背景文字",
+                },
+            }
+        ],
+    )
+
+    run_dir = run_phase6_nonbubble_cleanup(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-fallback-percent",
+        sample_limit=1,
+        mimo_client=_FakeMimoLocatorPercent(),
+    )
+
+    row = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]
+    assert row["fallback_locator"]["status"] == "ok"
+    assert row["fallback_locator_validation"]["status"] == "accepted"
+    assert row["fallback_locator"]["local_bbox_xyxy"] == [25, 15, 52, 45]
+    assert row["cleanup"]["layout_text_bbox"] == [35, 25, 62, 55]
+    assert row["gpt_image2_edit"]["status"] == "dry_run"
+
+
+def test_run_phase6_nonbubble_cleanup_fallback_retries_invalid_mimo_bbox(tmp_path: Path):
+    image_path = _write_nonbubble_image(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(
+        detection_run / "detections.jsonl",
+        image_path,
+        rows=[
+            {
+                "record_id": "page.png#2",
+                "status": "fallback_required",
+                "group_name": "框外",
+                "selected_text_box_xyxy": None,
+                "fallback": {
+                    "method": "mimo_crop_then_gpt_image2_masked_edit",
+                    "context_bbox_xyxy": [10, 10, 100, 80],
+                    "translated_text": "背景文字",
+                },
+            }
+        ],
+    )
+    mimo = _FakeMimoLocatorRetry()
+
+    run_dir = run_phase6_nonbubble_cleanup(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-fallback-retry",
+        sample_limit=1,
+        mimo_client=mimo,
+    )
+
+    row = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]
+    assert mimo.kinds == [
+        "phase6_fallback_text_locator",
+        "phase6_fallback_text_locator_retry",
+        "phase6_fallback_text_locator_validation",
+    ]
+    assert row["status"] == "cleaned"
+    assert row["fallback_locator"]["retry_of_error"] == "ValueError"
+    assert row["fallback_locator"]["local_bbox_xyxy"] == [25, 15, 52, 45]
+    assert row["fallback_locator_validation"]["status"] == "accepted"
+    assert row["gpt_image2_edit"]["status"] == "dry_run"
+
+
+def test_run_phase6_nonbubble_cleanup_fallback_accepts_nested_mimo_bbox(tmp_path: Path):
+    image_path = _write_nonbubble_image(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(
+        detection_run / "detections.jsonl",
+        image_path,
+        rows=[
+            {
+                "record_id": "page.png#2",
+                "status": "fallback_required",
+                "group_name": "框外",
+                "selected_text_box_xyxy": None,
+                "fallback": {
+                    "method": "mimo_crop_then_gpt_image2_masked_edit",
+                    "context_bbox_xyxy": [10, 10, 100, 80],
+                    "translated_text": "背景文字",
+                },
+            }
+        ],
+    )
+
+    run_dir = run_phase6_nonbubble_cleanup(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-fallback-nested-bbox",
+        sample_limit=1,
+        mimo_client=_FakeMimoLocatorNestedBbox(),
+    )
+
+    row = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]
+    assert row["fallback_locator"]["status"] == "ok"
+    assert row["fallback_locator"]["local_bbox_xyxy"] == [25, 15, 52, 45]
+    assert row["fallback_locator_validation"]["status"] == "accepted"
+    assert row["gpt_image2_edit"]["status"] == "dry_run"
+
+
+def test_run_phase6_nonbubble_cleanup_fallback_retries_inconclusive_semantic_validation(tmp_path: Path):
+    image_path = _write_nonbubble_image(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(
+        detection_run / "detections.jsonl",
+        image_path,
+        rows=[
+            {
+                "record_id": "page.png#2",
+                "status": "fallback_required",
+                "group_name": "框外",
+                "selected_text_box_xyxy": None,
+                "fallback": {
+                    "method": "mimo_crop_then_gpt_image2_masked_edit",
+                    "context_bbox_xyxy": [10, 10, 100, 80],
+                    "translated_text": "背景文字",
+                },
+            }
+        ],
+    )
+    mimo = _FakeMimoLocatorValidationRetry()
+
+    run_dir = run_phase6_nonbubble_cleanup(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-fallback-validation-retry",
+        sample_limit=1,
+        mimo_client=mimo,
+    )
+
+    row = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]
+    assert mimo.kinds == [
+        "phase6_fallback_text_locator",
+        "phase6_fallback_text_locator_validation",
+        "phase6_fallback_text_locator_validation_retry",
+    ]
+    assert row["status"] == "cleaned"
+    assert row["fallback_locator_validation"]["status"] == "accepted"
+    assert row["fallback_locator_validation"]["retry_of_error"] == "semantic_validation_inconclusive"
+    assert row["gpt_image2_edit"]["status"] == "dry_run"
+
+
+def test_run_phase6_nonbubble_cleanup_fallback_does_not_call_gpt_when_semantic_validation_rejects(
+    tmp_path: Path,
+    monkeypatch,
+):
+    image_path = _write_nonbubble_image(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(
+        detection_run / "detections.jsonl",
+        image_path,
+        rows=[
+            {
+                "record_id": "page.png#2",
+                "status": "fallback_required",
+                "group_name": "框外",
+                "selected_text_box_xyxy": None,
+                "fallback": {
+                    "method": "mimo_crop_then_gpt_image2_masked_edit",
+                    "context_bbox_xyxy": [10, 10, 100, 80],
+                    "translated_text": "背景文字",
+                },
+            }
+        ],
+    )
+    calls = {"gpt": 0}
+
+    class FakeGptClient:
+        def edit_image(self, image_path: str, mask_path: str, prompt: str, output_path: str) -> dict:
+            calls["gpt"] += 1
+            return _FakeGptClient().edit_image(image_path, mask_path, prompt, output_path)
+
+    monkeypatch.setattr("autolettering.phase6_nonbubble.GptImageEditClient", lambda config: FakeGptClient())
+
+    run_dir = run_phase6_nonbubble_cleanup(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-fallback-semantic-reject",
+        sample_limit=1,
+        gpt_config=GptImageConfig(base_url="https://example.test/v1/images", api_key="test", model="gpt-image-2"),
+        call_gpt_image=True,
+        mimo_client=_FakeMimoLocatorSemanticReject(),
+    )
+
+    row = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]
+    assert calls["gpt"] == 0
+    assert row["status"] == "failed"
+    assert row["fallback_locator"]["status"] == "ok"
+    assert row["fallback_locator_validation"]["status"] == "rejected"
+    assert row["fallback_locator_validation"]["semantic_correct"] is False
+    assert row["gpt_image2_edit"]["status"] == "not_called"
+    assert row["gpt_image2_edit"]["reason"] == "fallback_locator_semantic_rejected"
 
 
 def test_run_phase6_nonbubble_cleanup_fallback_does_not_call_gpt_when_mimo_bbox_is_invalid(tmp_path: Path, monkeypatch):
@@ -716,6 +940,7 @@ def test_run_phase6_nonbubble_cleanup_fallback_does_not_call_gpt_when_mimo_bbox_
     assert calls["gpt"] == 0
     assert row["status"] == "failed"
     assert row["fallback_locator"]["status"] == "failed"
+    assert row["fallback_locator_validation"]["status"] == "not_called"
     assert row["gpt_image2_edit"]["status"] == "not_called"
 
 
@@ -737,6 +962,28 @@ def test_normalize_openai_base_url_removes_image_endpoint_suffix():
     assert normalize_openai_base_url("https://example.test/v1") == "https://example.test/v1"
 
 
+def test_local_background_color_prefers_outer_light_background_over_line_art():
+    image = Image.new("RGB", (80, 80), "white")
+    draw = ImageDraw.Draw(image)
+    draw.line((8, 8, 72, 72), fill=(25, 25, 25), width=3)
+    draw.rectangle((28, 24, 54, 56), fill=(245, 245, 245))
+    draw.rectangle((36, 32, 46, 48), fill="black")
+
+    color = _local_background_color(image, (32, 28, 50, 52))
+
+    assert min(color) >= 235
+
+
+def test_local_background_color_preserves_dark_panel_background():
+    image = Image.new("RGB", (80, 80), (24, 24, 24))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((36, 32, 46, 48), fill="white")
+
+    color = _local_background_color(image, (32, 28, 50, 52))
+
+    assert max(color) <= 40
+
+
 class _FakeGptClient:
     def edit_image(self, image_path: str, mask_path: str, prompt: str, output_path: str) -> dict:
         output = Path(output_path)
@@ -748,7 +995,15 @@ class _FakeGptClient:
 class _FakeMimoLocator:
     def analyze_image(self, image_path: str, prompt: str, kind: str = "image_analysis", max_completion_tokens: int | None = None):
         assert Path(image_path).exists()
+        if kind == "phase6_fallback_text_locator_validation":
+            assert Path(image_path).parent.name == "fallback_locator_validation_input"
+            assert "yellow bbox" in prompt
+            assert "semantic_correct" in prompt
+            return _mimo_validation_response(kind, image_path, accepted=True)
+        assert Path(image_path).parent.name == "fallback_locator_input"
         assert "背景文字" in prompt
+        assert "coordinate grid" in prompt
+        assert "bbox_percent_xyxy" in prompt
         return {
             "raw_text": json.dumps(
                 {
@@ -765,6 +1020,8 @@ class _FakeMimoLocator:
 
 class _FakeMimoLocatorArray:
     def analyze_image(self, image_path: str, prompt: str, kind: str = "image_analysis", max_completion_tokens: int | None = None):
+        if kind == "phase6_fallback_text_locator_validation":
+            return _mimo_validation_response(kind, image_path, accepted=True)
         return {
             "raw_text": json.dumps(
                 [
@@ -774,6 +1031,25 @@ class _FakeMimoLocatorArray:
                         "reasoning_summary": "target text region",
                     }
                 ],
+                ensure_ascii=False,
+            ),
+            "request": {"kind": kind, "image_path": str(image_path)},
+            "response": {"status": "ok"},
+        }
+
+
+class _FakeMimoLocatorPercent:
+    def analyze_image(self, image_path: str, prompt: str, kind: str = "image_analysis", max_completion_tokens: int | None = None):
+        if kind == "phase6_fallback_text_locator_validation":
+            return _mimo_validation_response(kind, image_path, accepted=True)
+        assert Path(image_path).parent.name == "fallback_locator_input"
+        return {
+            "raw_text": json.dumps(
+                {
+                    "bbox_percent_xyxy": [27.777, 21.428, 57.777, 64.285],
+                    "confidence": 0.78,
+                    "reasoning_summary": "target text region from grid percent coordinates",
+                },
                 ensure_ascii=False,
             ),
             "request": {"kind": kind, "image_path": str(image_path)},
@@ -795,6 +1071,144 @@ class _FakeMimoLocatorInvalidBbox:
             "request": {"kind": kind, "image_path": str(image_path)},
             "response": {"status": "ok"},
         }
+
+
+class _FakeMimoLocatorRetry:
+    def __init__(self):
+        self.kinds = []
+
+    def analyze_image(self, image_path: str, prompt: str, kind: str = "image_analysis", max_completion_tokens: int | None = None):
+        self.kinds.append(kind)
+        if kind == "phase6_fallback_text_locator":
+            return {
+                "raw_text": json.dumps(
+                    {
+                        "bbox_xyxy": [401, 385, 831, 539],
+                        "confidence": 0.99,
+                        "reasoning_summary": "out of crop bounds",
+                    },
+                    ensure_ascii=False,
+                ),
+                "request": {"kind": kind, "image_path": str(image_path)},
+                "response": {"status": "ok"},
+            }
+        if kind == "phase6_fallback_text_locator_retry":
+            assert "Previous invalid response" in prompt
+            return {
+                "raw_text": json.dumps(
+                    {
+                        "bbox_xyxy": [25, 15, 52, 45],
+                        "confidence": 0.82,
+                        "reasoning_summary": "corrected target text region",
+                    },
+                    ensure_ascii=False,
+                ),
+                "request": {"kind": kind, "image_path": str(image_path)},
+                "response": {"status": "ok"},
+            }
+        return _mimo_validation_response(kind, image_path, accepted=True)
+
+
+class _FakeMimoLocatorNestedBbox:
+    def analyze_image(self, image_path: str, prompt: str, kind: str = "image_analysis", max_completion_tokens: int | None = None):
+        if kind == "phase6_fallback_text_locator_validation":
+            return _mimo_validation_response(kind, image_path, accepted=True)
+        return {
+            "raw_text": json.dumps(
+                {
+                    "bbox_xyxy": [[25, 15, 52, 45]],
+                    "confidence": 0.82,
+                    "reasoning_summary": "target text region",
+                },
+                ensure_ascii=False,
+            ),
+            "request": {"kind": kind, "image_path": str(image_path)},
+            "response": {"status": "ok"},
+        }
+
+
+class _FakeMimoLocatorValidationRetry:
+    def __init__(self):
+        self.kinds = []
+
+    def analyze_image(self, image_path: str, prompt: str, kind: str = "image_analysis", max_completion_tokens: int | None = None):
+        self.kinds.append(kind)
+        if kind == "phase6_fallback_text_locator":
+            return {
+                "raw_text": json.dumps(
+                    {
+                        "bbox_xyxy": [25, 15, 52, 45],
+                        "confidence": 0.82,
+                        "reasoning_summary": "target text region",
+                    },
+                    ensure_ascii=False,
+                ),
+                "request": {"kind": kind, "image_path": str(image_path)},
+                "response": {"status": "ok"},
+            }
+        if kind == "phase6_fallback_text_locator_validation":
+            return {
+                "raw_text": json.dumps(
+                    {
+                        "semantic_correct": False,
+                        "tight_enough": True,
+                        "bbox_on_blank_area": False,
+                        "bbox_targets_unrelated_text": False,
+                        "visible_original_text": "背景文字",
+                        "recommendation": "reject",
+                        "reasoning_summary": "overly strict rejection despite the target being visible",
+                    },
+                    ensure_ascii=False,
+                ),
+                "request": {"kind": kind, "image_path": str(image_path)},
+                "response": {"status": "ok"},
+            }
+        return _mimo_validation_response(kind, image_path, accepted=True)
+
+
+class _FakeMimoLocatorSemanticReject:
+    def analyze_image(self, image_path: str, prompt: str, kind: str = "image_analysis", max_completion_tokens: int | None = None):
+        if kind == "phase6_fallback_text_locator_validation":
+            return _mimo_validation_response(kind, image_path, accepted=False)
+        return {
+            "raw_text": json.dumps(
+                {
+                    "bbox_xyxy": [25, 15, 52, 45],
+                    "confidence": 0.82,
+                    "reasoning_summary": "target text region",
+                },
+                ensure_ascii=False,
+            ),
+            "request": {"kind": kind, "image_path": str(image_path)},
+            "response": {"status": "ok"},
+        }
+
+
+def _mimo_validation_response(kind: str, image_path: str | Path, accepted: bool) -> dict:
+    payload = {
+        "semantic_correct": accepted,
+        "tight_enough": accepted,
+        "bbox_on_blank_area": not accepted,
+        "bbox_targets_unrelated_text": not accepted,
+        "visible_original_text": "背景文字" if accepted else "",
+        "recommendation": "accept" if accepted else "reject",
+        "reasoning_summary": "bbox matches target text" if accepted else "bbox is on the wrong region",
+    }
+    return {
+        "raw_text": json.dumps(payload, ensure_ascii=False),
+        "request": {"kind": kind, "image_path": str(image_path)},
+        "response": {"status": "ok"},
+    }
+
+
+def _has_reddish_pixel(image: Image.Image) -> bool:
+    width, height = image.size
+    for y in range(height):
+        for x in range(width):
+            red, green, blue = image.getpixel((x, y))
+            if red > 150 and red > green + 40 and red > blue + 40:
+                return True
+    return False
 
 
 def _write_nonbubble_image(path: Path) -> Path:

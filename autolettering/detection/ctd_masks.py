@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+import json
 import os
 from pathlib import Path
 import sys
@@ -19,6 +20,8 @@ class CtdMaskComponent:
     area_px: int
     centroid_xy: tuple[float, float]
     mask_path: Path
+    edge_pixels_xy: tuple[tuple[int, int], ...] | None = None
+    edge_segments_xyxy: tuple[tuple[int, int, int, int], ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -74,21 +77,29 @@ def assign_labelplus_points_to_ctd_masks(
     components: list[CtdMaskComponent],
     max_edge_distance_px: float = 12.0,
 ) -> dict[str, CtdMaskMatch]:
-    claims: set[str] = set()
-    matches: dict[str, CtdMaskMatch] = {}
+    matches: dict[str, CtdMaskMatch] = {label.id: _fallback(label.id, "no_ctd_mask_within_threshold") for label in labels}
+    if not labels or not components:
+        return matches
+
+    candidates: list[tuple[float, ManifestLabel, CtdMaskComponent]] = []
     for label in labels:
-        candidate = _nearest_component(label, components)
-        if candidate is None or candidate[1] > max_edge_distance_px:
-            matches[label.id] = _fallback(label.id, "no_ctd_mask_within_threshold")
+        for component in components:
+            distance = _point_to_component_edge_distance(label.x_px, label.y_px, component)
+            if distance <= max_edge_distance_px:
+                candidates.append((distance, label, component))
+
+    claims: set[str] = set()
+    matched_labels: set[str] = set()
+    for distance, label, component in sorted(candidates, key=lambda item: (item[0], item[1].id, item[2].component_id)):
+        if label.id in matched_labels:
             continue
-        component, distance = candidate
         group = _vertical_component_group(component, components)
         member_ids = {item.component_id for item in group}
         if claims & member_ids:
-            matches[label.id] = _fallback(label.id, "component_already_claimed")
             continue
         merged = _merged_component(group)
         claims.update(member_ids)
+        matched_labels.add(label.id)
         matches[label.id] = CtdMaskMatch(
             record_id=label.id,
             status="matched",
@@ -98,6 +109,14 @@ def assign_labelplus_points_to_ctd_masks(
             distance_px=round(distance, 3),
             failure_reason=None,
         )
+
+    close_claimed_labels = {
+        label.id
+        for distance, label, component in candidates
+        if label.id not in matched_labels and component.component_id in claims
+    }
+    for record_id in close_claimed_labels:
+        matches[record_id] = _fallback(record_id, "component_already_claimed")
     return matches
 
 
@@ -114,23 +133,17 @@ def _component_record(
     mask[np.array(ys), np.array(xs)] = 255
     mask_path = output_dir / f"{component_id}.png"
     Image.fromarray(mask, mode="L").save(mask_path)
+    edge_pixels = _edge_pixels(mask)
+    edge_segments = _edge_segments(mask)
     return CtdMaskComponent(
         component_id=component_id,
         bbox_xyxy=(x1, y1, x2, y2),
         area_px=len(pixels),
         centroid_xy=(round(float(np.mean(xs)), 3), round(float(np.mean(ys)), 3)),
         mask_path=mask_path,
+        edge_pixels_xy=edge_pixels,
+        edge_segments_xyxy=edge_segments,
     )
-
-
-def _nearest_component(
-    label: ManifestLabel,
-    components: list[CtdMaskComponent],
-) -> tuple[CtdMaskComponent, float] | None:
-    if not components:
-        return None
-    scored = [(component, _point_to_rect_edge_distance(label.x_px, label.y_px, component.bbox_xyxy)) for component in components]
-    return min(scored, key=lambda item: item[1])
 
 
 def _vertical_component_group(
@@ -171,7 +184,7 @@ def _merged_component(group: list[CtdMaskComponent]) -> CtdMaskComponent:
         return group[0]
     bbox = _union_bbox([item.bbox_xyxy for item in group])
     component_id = "+".join(item.component_id for item in group)
-    mask_path = _write_merged_mask(group, component_id)
+    mask_path, merged_mask = _write_merged_mask(group, component_id)
     total_area = sum(item.area_px for item in group)
     centroid_x = sum(item.centroid_xy[0] * item.area_px for item in group) / max(1, total_area)
     centroid_y = sum(item.centroid_xy[1] * item.area_px for item in group) / max(1, total_area)
@@ -181,10 +194,12 @@ def _merged_component(group: list[CtdMaskComponent]) -> CtdMaskComponent:
         area_px=total_area,
         centroid_xy=(round(float(centroid_x), 3), round(float(centroid_y), 3)),
         mask_path=mask_path,
+        edge_pixels_xy=_edge_pixels(merged_mask),
+        edge_segments_xyxy=_edge_segments(merged_mask),
     )
 
 
-def _write_merged_mask(group: list[CtdMaskComponent], component_id: str) -> Path:
+def _write_merged_mask(group: list[CtdMaskComponent], component_id: str) -> tuple[Path, np.ndarray]:
     arrays: list[np.ndarray] = []
     for component in group:
         with Image.open(component.mask_path) as image:
@@ -192,16 +207,115 @@ def _write_merged_mask(group: list[CtdMaskComponent], component_id: str) -> Path
     merged = np.maximum.reduce(arrays)
     output = group[0].mask_path.parent / f"{component_id}.png"
     Image.fromarray(merged, mode="L").save(output)
-    return output
+    return output, merged
 
 
 def _point_to_rect_edge_distance(x: int, y: int, bbox: tuple[int, int, int, int]) -> float:
+    x1, y1, x2, y2 = bbox
+    if x1 <= x <= x2 and y1 <= y <= y2:
+        return float(min(x - x1, x2 - x, y - y1, y2 - y))
+    dx = max(x1 - x, 0, x - x2)
+    dy = max(y1 - y, 0, y - y2)
+    return float((dx * dx + dy * dy) ** 0.5)
+
+
+def _point_to_component_edge_distance(x: int, y: int, component: CtdMaskComponent) -> float:
+    edge_segments = component.edge_segments_xyxy
+    if edge_segments is None:
+        edge_segments = _load_edge_segments(component.mask_path)
+    if edge_segments is None:
+        return _point_to_rect_edge_distance(x, y, component.bbox_xyxy)
+    if not edge_segments:
+        return _point_to_rect_region_distance(x, y, component.bbox_xyxy)
+    return _point_to_segments_distance(x, y, edge_segments)
+
+
+def _point_to_rect_region_distance(x: int, y: int, bbox: tuple[int, int, int, int]) -> float:
     x1, y1, x2, y2 = bbox
     if x1 <= x <= x2 and y1 <= y <= y2:
         return 0.0
     dx = max(x1 - x, 0, x - x2)
     dy = max(y1 - y, 0, y - y2)
     return float((dx * dx + dy * dy) ** 0.5)
+
+
+def _load_edge_segments(mask_path: Path) -> tuple[tuple[int, int, int, int], ...] | None:
+    try:
+        with Image.open(mask_path) as image:
+            mask = np.array(image.convert("L"), dtype=np.uint8)
+    except (FileNotFoundError, OSError):
+        return None
+    return _edge_segments(mask)
+
+
+def _point_to_segments_distance(
+    x: int,
+    y: int,
+    segments: tuple[tuple[int, int, int, int], ...],
+) -> float:
+    data = np.array(segments, dtype=np.float64)
+    x1 = data[:, 0]
+    y1 = data[:, 1]
+    x2 = data[:, 2]
+    y2 = data[:, 3]
+    vx = x2 - x1
+    vy = y2 - y1
+    length_sq = np.maximum(vx * vx + vy * vy, 1.0)
+    t = np.clip(((float(x) - x1) * vx + (float(y) - y1) * vy) / length_sq, 0.0, 1.0)
+    proj_x = x1 + t * vx
+    proj_y = y1 + t * vy
+    squared = (proj_x - float(x)) ** 2 + (proj_y - float(y)) ** 2
+    return float(np.sqrt(float(squared.min())))
+
+
+def _edge_pixels(mask: np.ndarray) -> tuple[tuple[int, int], ...]:
+    binary = mask > 0
+    if not bool(binary.any()):
+        return ()
+    edge = binary & ~_erode_8(binary)
+    ys, xs = np.where(edge)
+    return tuple((int(x), int(y)) for y, x in zip(ys, xs))
+
+
+def _edge_segments(mask: np.ndarray) -> tuple[tuple[int, int, int, int], ...]:
+    binary = mask > 0
+    if not bool(binary.any()):
+        return ()
+    padded = np.pad(binary, 1, mode="constant", constant_values=False)
+    center = padded[1:-1, 1:-1]
+    left = center & ~padded[1:-1, :-2]
+    right = center & ~padded[1:-1, 2:]
+    top = center & ~padded[:-2, 1:-1]
+    bottom = center & ~padded[2:, 1:-1]
+    segments: list[tuple[int, int, int, int]] = []
+    for ys, xs, side in (
+        (*np.where(left), "left"),
+        (*np.where(right), "right"),
+        (*np.where(top), "top"),
+        (*np.where(bottom), "bottom"),
+    ):
+        for y, x in zip(ys, xs):
+            px = int(x)
+            py = int(y)
+            if side == "left":
+                segments.append((px, py, px, py + 1))
+            elif side == "right":
+                segments.append((px + 1, py, px + 1, py + 1))
+            elif side == "top":
+                segments.append((px, py, px + 1, py))
+            else:
+                segments.append((px, py + 1, px + 1, py + 1))
+    return tuple(segments)
+
+
+def _erode_8(binary: np.ndarray) -> np.ndarray:
+    padded = np.pad(binary, 1, mode="constant", constant_values=False)
+    neighbors = [
+        padded[dy : dy + binary.shape[0], dx : dx + binary.shape[1]]
+        for dy in range(3)
+        for dx in range(3)
+    ]
+    return np.logical_and.reduce(neighbors)
 
 
 def _union_bbox(bboxes: list[tuple[int, int, int, int]]) -> tuple[int, int, int, int]:
@@ -255,7 +369,16 @@ def _component_pixels(binary: np.ndarray, visited: np.ndarray, start_x: int, sta
     while queue:
         x, y = queue.popleft()
         pixels.append((y, x))
-        for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+        for nx, ny in (
+            (x - 1, y - 1),
+            (x, y - 1),
+            (x + 1, y - 1),
+            (x - 1, y),
+            (x + 1, y),
+            (x - 1, y + 1),
+            (x, y + 1),
+            (x + 1, y + 1),
+        ):
             if nx < 0 or ny < 0 or nx >= width or ny >= height:
                 continue
             if visited[ny, nx] or not binary[ny, nx]:
@@ -280,16 +403,41 @@ def _run_ballonstranslator_ctd(image_path: str | Path, ballonstranslator_root: s
         raise RuntimeError(f"cannot_read_image:{image_path}")
 
     cwd = Path.cwd()
+    config = _ballonstranslator_ctd_config(root)
     os.chdir(root)
     try:
         from ballontranslator.modules.textdetector.detector_ctd import ComicTextDetector
 
         detector = ComicTextDetector()
-        detector.updateParam("device", "cpu")
-        detector.updateParam("detect_size", 1024)
-        detector.updateParam("det_rearrange_max_batches", 4)
-        detector.updateParam("mask dilate size", 2)
+        for key, value in config.items():
+            detector.updateParam(key, value)
         mask, _blocks = detector.detect(image, None)
     finally:
         os.chdir(cwd)
     return mask
+
+
+def _ballonstranslator_ctd_config(root: Path) -> dict[str, object]:
+    defaults: dict[str, object] = {
+        "device": "cpu",
+        "detect_size": 1024,
+        "det_rearrange_max_batches": 4,
+        "mask dilate size": 2,
+    }
+    config_path = root / "config" / "config.json"
+    if not config_path.exists():
+        return defaults
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return defaults
+    configured = (
+        payload.get("module", {})
+        .get("textdetector_params", {})
+        .get("ctd", {})
+    )
+    if not isinstance(configured, dict):
+        return defaults
+    result = defaults.copy()
+    result.update(configured)
+    return result

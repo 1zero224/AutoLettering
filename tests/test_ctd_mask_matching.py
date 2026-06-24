@@ -4,6 +4,7 @@ from PIL import Image, ImageDraw
 
 from autolettering.detection.ctd_masks import (
     CtdMaskComponent,
+    _ballonstranslator_ctd_config,
     assign_labelplus_points_to_ctd_masks,
     split_mask_components,
 )
@@ -42,6 +43,20 @@ def test_split_mask_components_returns_closed_components_with_bboxes(tmp_path: P
     assert all(component.mask_path.exists() for component in components)
 
 
+def test_split_mask_components_uses_8_connected_diagonal_pixels(tmp_path: Path):
+    image = Image.new("L", (40, 40), 0)
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((10, 10, 14, 14), fill=255)
+    draw.rectangle((15, 15, 19, 19), fill=255)
+    mask_path = tmp_path / "diagonal-mask.png"
+    image.save(mask_path)
+
+    components = split_mask_components(mask_path, min_area=5)
+
+    assert len(components) == 1
+    assert components[0].bbox_xyxy == (10, 10, 20, 20)
+
+
 def test_assign_labelplus_points_to_ctd_masks_uses_edge_distance_and_unique_matching(tmp_path: Path):
     components = split_mask_components(_mask(tmp_path / "mask.png"), min_area=20)
     labels = [_label(1, 38, 80), _label(2, 253, 101)]
@@ -55,6 +70,35 @@ def test_assign_labelplus_points_to_ctd_masks_uses_edge_distance_and_unique_matc
     assert matches["page.png#2"].status == "matched"
     assert matches["page.png#2"].component_id == components[1].component_id
     assert matches["page.png#2"].distance_px == 2
+
+
+def test_assign_labelplus_points_to_ctd_masks_uses_real_mask_edge_not_bbox_region(tmp_path: Path):
+    image = Image.new("L", (160, 160), 0)
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((30, 30, 130, 130), outline=255, width=6)
+    mask_path = tmp_path / "hollow-mask.png"
+    image.save(mask_path)
+    components = split_mask_components(mask_path, min_area=20)
+    labels = [_label(1, 80, 80)]
+
+    matches = assign_labelplus_points_to_ctd_masks(labels, components, max_edge_distance_px=8)
+
+    assert matches["page.png#1"].status == "fallback_required"
+    assert matches["page.png#1"].failure_reason == "no_ctd_mask_within_threshold"
+
+
+def test_assign_labelplus_points_to_ctd_masks_uses_edge_distance_even_inside_solid_mask(tmp_path: Path):
+    image = Image.new("L", (160, 160), 0)
+    ImageDraw.Draw(image).rectangle((30, 30, 130, 130), fill=255)
+    mask_path = tmp_path / "solid-mask.png"
+    image.save(mask_path)
+    components = split_mask_components(mask_path, min_area=20)
+    labels = [_label(1, 80, 80)]
+
+    matches = assign_labelplus_points_to_ctd_masks(labels, components, max_edge_distance_px=8)
+
+    assert matches["page.png#1"].status == "fallback_required"
+    assert matches["page.png#1"].failure_reason == "no_ctd_mask_within_threshold"
 
 
 def test_assign_labelplus_points_to_ctd_masks_merges_vertical_continuation_components(tmp_path: Path):
@@ -118,6 +162,28 @@ def test_assign_labelplus_points_to_ctd_masks_falls_back_when_no_mask_is_close()
     assert matches["page.png#1"].status == "fallback_required"
     assert matches["page.png#1"].component_id is None
     assert matches["page.png#1"].failure_reason == "no_ctd_mask_within_threshold"
+
+
+def test_ballonstranslator_ctd_config_reads_running_config(tmp_path: Path):
+    root = tmp_path / "BallonsTranslator"
+    config_dir = root / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.json").write_text(
+        """{"module":{"textdetector_params":{"ctd":{"detect_size":1280,"det_rearrange_max_batches":5,"device":"cpu","mask dilate size":3,"font size multiplier":1.2,"font size max":40,"font size min":8}}}}""",
+        encoding="utf-8",
+    )
+
+    config = _ballonstranslator_ctd_config(root)
+
+    assert config == {
+        "device": "cpu",
+        "detect_size": 1280,
+        "det_rearrange_max_batches": 5,
+        "mask dilate size": 3,
+        "font size multiplier": 1.2,
+        "font size max": 40,
+        "font size min": 8,
+    }
 
 
 def _component(tmp_path: Path, component_id: str, bbox: tuple[int, int, int, int], area: int) -> CtdMaskComponent:

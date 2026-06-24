@@ -86,6 +86,36 @@ def test_run_phase2_ctd_strategy_records_fallback_required_when_no_component_is_
     assert record["fallback"]["context_bbox_xyxy"] == [0, 0, 240, 240]
 
 
+def test_run_phase2_defaults_ctd_mask_edge_distance_to_twenty(tmp_path: Path, monkeypatch):
+    project_dir = tmp_path / "sample_project"
+    project_dir.mkdir()
+    image_path = project_dir / "page.png"
+    _write_project_image(image_path)
+    _write_labelplus(project_dir / "翻译_0.txt")
+    captured = {}
+
+    monkeypatch.setattr(
+        "autolettering.phase2.detect_ctd_mask_components_for_image",
+        lambda image, output_dir, **kwargs: [],
+    )
+
+    def fake_assign(labels, components, max_edge_distance_px):
+        captured["max_edge_distance_px"] = max_edge_distance_px
+        return {}
+
+    monkeypatch.setattr("autolettering.phase2.assign_labelplus_points_to_ctd_masks", fake_assign)
+
+    run_phase2(
+        project_dir / "翻译_0.txt",
+        output_root=tmp_path / "outputs",
+        run_id="phase2-ctd-default-threshold",
+        sample_limit=1,
+        detection_strategy="ctd_mask",
+    )
+
+    assert captured["max_edge_distance_px"] == 20.0
+
+
 def _write_project_image(path: Path) -> None:
     image = Image.new("RGB", (240, 240), "white")
     draw = ImageDraw.Draw(image)
