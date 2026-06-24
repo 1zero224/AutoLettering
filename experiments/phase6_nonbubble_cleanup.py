@@ -25,6 +25,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--call-gpt-image", action="store_true")
     parser.add_argument("--skip-mimo", action="store_true")
     parser.add_argument(
+        "--allow-cta-method-override",
+        action="store_true",
+        help="Experiment only: let --inpaint-method override the default CTA/CTD matched LaMa path.",
+    )
+    parser.add_argument(
         "--inpaint-method",
         default="bt_lama_large",
         choices=[
@@ -55,6 +60,7 @@ def main() -> None:
         call_gpt_image=args.call_gpt_image,
         inpaint_method=args.inpaint_method,
         mimo_client=None if args.skip_mimo else MimoVisionClient(_mimo_config_from_env()),
+        allow_cta_method_override=args.allow_cta_method_override,
     )
     print(run_dir)
 

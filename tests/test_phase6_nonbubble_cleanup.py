@@ -513,6 +513,80 @@ def test_run_phase6_nonbubble_cleanup_ctd_match_uses_lama_large_and_ctd_mask(tmp
     assert calls["bbox"] == (20, 15, 90, 75)
     assert row["cleanup"]["method"] == "bt_lama_large_inpaint"
     assert row["gpt_image2_edit"]["status"] == "not_applicable"
+    assert row["gpt_image2_edit"]["reason"] == "cta_mask_matched_inpaint_path"
+    assert row["gpt_image2_edit"]["inpaint_method"] == "lama_large_512px"
+
+
+def test_run_phase6_nonbubble_cleanup_ctd_match_can_experimentally_override_method(tmp_path: Path, monkeypatch):
+    image_path = _write_nonbubble_image(tmp_path / "page.png")
+    mask_path = tmp_path / "ctd-component-mask.png"
+    Image.new("L", (120, 100), 0).save(mask_path)
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(
+        detection_run / "detections.jsonl",
+        image_path,
+        rows=[
+            {
+                "record_id": "page.png#2",
+                "group_name": "框外",
+                "detection_method": "cta_mask",
+                "selected_text_box_xyxy": [20, 15, 90, 75],
+                "cta_match": {
+                    "status": "matched",
+                    "mask_path": str(mask_path),
+                    "component_id": "component-0001",
+                    "bbox_xyxy": [20, 15, 90, 75],
+                },
+            }
+        ],
+    )
+    calls = {}
+
+    def fake_inpaint(**kwargs):
+        calls.update(kwargs)
+        output_dir = Path(kwargs["output_dir"])
+        cleaned = output_dir / "cleaned.png"
+        mask = output_dir / "mask.png"
+        gpt_mask = output_dir / "gpt-mask.png"
+        before_after = output_dir / "before-after.png"
+        input_crop = output_dir / "input.png"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (70, 60), "white").save(cleaned)
+        Image.new("RGB", (70, 60), "black").save(input_crop)
+        Image.new("L", (70, 60), 255).save(mask)
+        Image.new("RGBA", (70, 60), (0, 0, 0, 0)).save(gpt_mask)
+        Image.new("RGB", (140, 60), "white").save(before_after)
+        return NonBubbleInpaintResult(
+            record_id=kwargs["record_id"],
+            method="bt_patchmatch_inpaint",
+            bbox=kwargs["bbox"],
+            input_crop_path=input_crop,
+            text_mask_path=mask,
+            gpt_mask_path=gpt_mask,
+            cleaned_crop_path=cleaned,
+            before_after_path=before_after,
+            dark_pixel_count=42,
+        )
+
+    monkeypatch.setattr("autolettering.phase6_nonbubble.inpaint_nonbubble_text", fake_inpaint)
+
+    run_dir = run_phase6_nonbubble_cleanup(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-cta-method-override",
+        sample_limit=1,
+        inpaint_method="bt_patchmatch",
+        allow_cta_method_override=True,
+    )
+
+    row = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]
+    assert calls["method"] == "bt_patchmatch"
+    assert calls["text_mask_path"] == str(mask_path)
+    assert row["cleanup"]["method"] == "bt_patchmatch_inpaint"
+    assert row["gpt_image2_edit"]["status"] == "not_applicable"
+    assert row["gpt_image2_edit"]["reason"] == "cta_mask_matched_inpaint_path"
+    assert row["gpt_image2_edit"]["inpaint_method"] == "bt_patchmatch"
 
 
 def test_run_phase6_nonbubble_cleanup_ctd_match_uses_full_component_bbox_not_trimmed_body(tmp_path: Path, monkeypatch):

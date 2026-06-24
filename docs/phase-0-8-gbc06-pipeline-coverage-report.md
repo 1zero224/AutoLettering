@@ -148,6 +148,23 @@ Phase 2-only to complete Phase 1-8 coverage:
 --run-id phase0-8-gbc06-pipeline-coverage-v18-gbc06-17-complete --next-limit 12
 ```
 
+Current v19 keeps the v18 structural and quality scope, adds the CTA matched
+large non-bubble title chain for `GBC06_29.png#2`, and promotes that record from
+Phase 2-only to complete Phase 1-8 coverage:
+
+```powershell
+--detection-run-dir outputs/runs/phase2-gbc06-29-2-cta-mask-v1
+--font-selection-run-dir outputs/runs/phase3-gbc06-29-2-mimo-font-selection-v1
+--layout-run-dir outputs/runs/phase4-gbc06-29-2-layout-v3-large-title-conservative
+--angle-run-dir outputs/runs/phase5-gbc06-29-2-angle-v1
+--cleanup-run-dir outputs/runs/phase6-gbc06-29-2-cta-lama-v1
+--preview-run-dir outputs/runs/phase7-8-gbc06-29-2-cta-lama-large-title-v3/runs/phase7-preview
+--export-run-dir outputs/runs/phase7-8-gbc06-29-2-cta-lama-large-title-v3/runs/phase8-export
+--phase7-preview-evaluation-run-dir outputs/runs/phase7-8-gbc06-29-2-cta-lama-large-title-v3/runs/phase7-evaluation
+--phase8-export-audit-run-dir outputs/runs/phase8-gbc06-29-2-cta-lama-large-title-audit-v3
+--run-id phase0-8-gbc06-pipeline-coverage-v19-gbc06-29-complete --next-limit 12
+```
+
 ## Generated Artifacts
 
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage/pipeline-coverage.json`
@@ -184,6 +201,8 @@ Phase 2-only to complete Phase 1-8 coverage:
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v17-gbc06-06-complete/reports/pipeline-coverage-report.md`
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v18-gbc06-17-complete/pipeline-coverage.json`
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v18-gbc06-17-complete/reports/pipeline-coverage-report.md`
+- `outputs/runs/phase0-8-gbc06-pipeline-coverage-v19-gbc06-29-complete/pipeline-coverage.json`
+- `outputs/runs/phase0-8-gbc06-pipeline-coverage-v19-gbc06-29-complete/reports/pipeline-coverage-report.md`
 
 `outputs/` remains ignored by Git. The source-backed summary below records the key numbers so the experiment is traceable in the repository.
 
@@ -193,8 +212,8 @@ Base stage: `phase2_detection`
 
 ```text
 base_record_count=35
-complete_record_count=33
-incomplete_record_count=2
+complete_record_count=34
+incomplete_record_count=1
 ```
 
 Stage counts:
@@ -202,26 +221,26 @@ Stage counts:
 ```text
 phase1_labelplus       covered=35 missing=0
 phase2_detection       covered=35 missing=0
-phase3_font_selection  covered=33 missing=2
-phase4_layout          covered=33 missing=2
-phase5_angle           covered=33 missing=2
-phase6_cleanup         covered=33 missing=2
-phase7_preview         covered=33 missing=2
-phase8_export          covered=33 missing=2
+phase3_font_selection  covered=34 missing=1
+phase4_layout          covered=34 missing=1
+phase5_angle           covered=34 missing=1
+phase6_cleanup         covered=34 missing=1
+phase7_preview         covered=34 missing=1
+phase8_export          covered=34 missing=1
 ```
 
 Quality audits:
 
 ```text
-phase7_preview evaluations=13 evaluated=13 usable=13/13 failed=0 low_score=0 records=33 record_issues=0
-phase8_export audits=4 passed=4/4 records=7 vertical_top_layers=6 missing_anchor=0 unexpected_anchor=0 record_issues=0 missing_jsx_anchor_logic=0
+phase7_preview evaluations=14 evaluated=14 usable=14/14 failed=0 low_score=0 records=34 record_issues=0
+phase8_export audits=5 passed=5/5 records=8 vertical_top_layers=7 missing_anchor=0 unexpected_anchor=0 record_issues=0 missing_jsx_anchor_logic=0
 ```
 
 Group coverage:
 
 ```text
 框内: base=30 complete=30
-框外: base=5  complete=3
+框外: base=5  complete=4
 ```
 
 ## Next Records
@@ -261,13 +280,12 @@ GBC06_02.png#12
 GBC06_02.png#13
 ```
 
-The v18 report promotes the five diverse expansion records into the coverage
-base. `GBC06_18.png#3`, `GBC06_06.png#3`, and `GBC06_17.png#3` are complete
-across Phase 1-8 and all attached quality gates. The other two diverse records
-are now visible as next work:
+The v19 report promotes the five diverse expansion records into the coverage
+base. `GBC06_18.png#3`, `GBC06_06.png#3`, `GBC06_17.png#3`, and
+`GBC06_29.png#2` are complete across Phase 1-8 and all attached quality gates.
+The remaining diverse record is now visible as next work:
 
 ```text
-GBC06_29.png#2   框外  first_missing_stage=phase3_font_selection
 GBC06_33.png#1   框外  first_missing_stage=phase3_font_selection
 ```
 
@@ -296,13 +314,11 @@ GBC06_03.png#11  框内  GBC06_03.png
 ```
 
 For quality and diversity, the next expansion should continue covering mixed
-layout types. `GBC06_18.png#3` and `GBC06_06.png#3` have now moved from
-candidate to complete, and `GBC06_17.png#3` has now moved from candidate to
-complete after correcting the black-card target. The remaining diverse base
-records are:
+layout types. `GBC06_18.png#3`, `GBC06_06.png#3`, `GBC06_17.png#3`, and
+`GBC06_29.png#2` have now moved from candidate to complete. The remaining
+diverse base record is:
 
 ```text
-GBC06_29.png#2   框外  囚禁中挣脱而出！                          large non-bubble page text
 GBC06_33.png#1   框外  漫画第一卷 / 2026年6月29日发售！！          color promotional side text with numbers
 ```
 
@@ -312,7 +328,7 @@ The two current authoritative artifacts used for that selection, `phase1-gbc06-s
 
 The current detection prototype has produced 35 candidate records across the
 core `GBC06_01.png`/`GBC06_02.png` batches plus the diverse expansion records.
-The v18 coverage report can merge multiple detection run directories, counts 33
+The v19 coverage report can merge multiple detection run directories, counts 34
 records as complete across Phase 1 through Phase 8, and additionally treats
 Phase 7 MIMO preview evaluation failures plus Phase 8 export audit failures as
 quality issues that make affected records incomplete.
@@ -375,16 +391,71 @@ as a failed comparison for this small dark-card crop because it left visible
 ghosting, while `bt_patchmatch` removed the title cleanly enough without
 damaging the logo.
 
+The `GBC06_29.png#2` diverse run validates the CTA matched path on a large
+non-bubble vertical title. Phase 2 uses BallonsTranslator CTA/CTD masks and
+matches the merged closed component
+`component-0004+component-0005+component-0006+component-0007+component-0008+component-0009`
+to the LabelPlus point by `7.211px` mask-edge distance, yielding the full title
+bbox `[86, 815, 354, 1985]`. MIMO selected
+`[toolbox]与墨体-简体-Bold(v2.4).ttf` with confidence `0.85`; Phase 5 estimated
+a `1.5` degree vertical micro-angle, and Phase 4 correctly ignored that
+micro-rotation for final `angle_degrees=0.0`.
+
+The retained validation chain uses `phase2-gbc06-29-2-cta-mask-v1`,
+`phase3-gbc06-29-2-mimo-font-selection-v1`,
+`phase4-gbc06-29-2-layout-v3-large-title-conservative`,
+`phase5-gbc06-29-2-angle-v1`, `phase6-gbc06-29-2-cta-lama-v1`, and
+`phase7-8-gbc06-29-2-cta-lama-large-title-v3`. The final layout is vertical,
+top-aligned, `font_size=102`, `angle_degrees=0.0`, and uses
+`bt_lama_large_inpaint`. Phase 7 MIMO scored it `9`, `usable=true`, with no
+issues; Phase 8 export audit passed with one vertical top anchor and
+page-level repaired-image layer.
+
+Two negative controls are preserved. `bt_patchmatch` was run through
+`phase6-gbc06-29-2-cta-patchmatch-v1` with the experimental CTA method override
+and scored `4` in the integrated preview; it left more visible repair artifacts
+than LaMa. A real `gpt-image-2` direct replacement call in
+`phase6-gbc06-29-2-gpt-replace-v1` completed at the API level, but MIMO marked
+the generated text quality unacceptable: exact simplified Chinese text `0`,
+no-Japanese remaining `0`, typography/layout `0`, while preservation outside
+the mask was `10`. Therefore `gpt_ok_count=1` in that manifest should be read
+only as transport success, not quality success.
+
 ## Verification
 
-Fresh targeted verification for the coverage tool, Phase 7 evaluation failure preservation, and the latest Phase 4 top-alignment regression:
+Fresh targeted verification for the latest Phase 4 large-title cap, Phase 6 CTA
+method override, experiment CLIs, Phase 7 preview, and Phase 8 export audit:
 
 ```powershell
-python -m pytest tests/test_pipeline_coverage.py tests/test_pipeline_quality_coverage.py tests/test_pipeline_quality_phase7.py tests/test_phase7_preview_evaluation.py tests/test_phase4_layout.py tests/test_phase8_export_quality_audit.py -q
+python -m pytest tests/test_phase4_layout.py tests/test_phase6_nonbubble_cleanup.py tests/test_experiment_clis.py tests/test_phase7_preview.py tests/test_phase8_export_quality_audit.py -q
 ```
 
 Observed result:
 
 ```text
-79 passed in 6.99s
+100 passed in 6.33s
+```
+
+Full regression:
+
+```powershell
+python -m pytest -q
+```
+
+Observed result:
+
+```text
+254 passed in 21.07s
+```
+
+Diff hygiene:
+
+```powershell
+git diff --check
+```
+
+Observed result:
+
+```text
+exit 0, no whitespace errors reported
 ```

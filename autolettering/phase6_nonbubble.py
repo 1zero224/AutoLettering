@@ -30,12 +30,16 @@ def run_phase6_nonbubble_cleanup(
     call_gpt_image: bool = False,
     inpaint_method: str = "bt_lama_large",
     mimo_client=None,
+    allow_cta_method_override: bool = False,
 ) -> Path:
     run_dir = Path(output_root) / (run_id or "phase6-nonbubble-cleanup")
     run_dir.mkdir(parents=True, exist_ok=True)
     detections = _load_nonbubble_detections(Path(detection_run_dir) / "detections.jsonl", sample_limit, record_ids)
     client = GptImageEditClient(gpt_config) if call_gpt_image and gpt_config else None
-    rows = [_cleanup_one(run_dir, detection, gpt_config, client, inpaint_method, mimo_client) for detection in detections]
+    rows = [
+        _cleanup_one(run_dir, detection, gpt_config, client, inpaint_method, mimo_client, allow_cta_method_override)
+        for detection in detections
+    ]
     _write_jsonl(run_dir / "cleanup-results.jsonl", rows)
     _write_fallback_locator_grid(run_dir, rows)
     _write_report(run_dir / "reports" / "phase6-nonbubble-report.md", detection_run_dir, rows)
@@ -64,11 +68,12 @@ def _cleanup_one(
     client: GptImageEditClient | None,
     inpaint_method: str,
     mimo_client,
+    allow_cta_method_override: bool,
 ) -> dict:
     if detection.get("status") == "fallback_required":
         return _fallback_gpt_cleanup_one(run_dir, detection, config, client, mimo_client)
     bbox = _cleanup_bbox_for_detection(detection)
-    method = _method_for_detection(detection, inpaint_method)
+    method = _method_for_detection(detection, inpaint_method, allow_cta_method_override)
     result = inpaint_nonbubble_text(
         image_path=detection["image_path"],
         bbox=bbox,
@@ -80,7 +85,11 @@ def _cleanup_one(
     )
     cleanup = _cleanup_payload(result)
     if _is_ctd_matched_detection(detection):
-        gpt_payload = {"status": "not_applicable", "reason": "ctd_mask_matched_lama_large_path"}
+        gpt_payload = {
+            "status": "not_applicable",
+            "reason": "cta_mask_matched_inpaint_path",
+            "inpaint_method": method,
+        }
     else:
         prompt = gpt_image_edit_prompt(detection.get("translated_text", ""))
         gpt_payload = _gpt_image_payload(run_dir, detection["record_id"], result, prompt, config, client)
@@ -278,8 +287,8 @@ def _crop_size(bbox: tuple[int, int, int, int]) -> tuple[int, int]:
     return x2 - x1, y2 - y1
 
 
-def _method_for_detection(detection: dict, requested_method: str) -> str:
-    if _is_ctd_matched_detection(detection):
+def _method_for_detection(detection: dict, requested_method: str, allow_cta_method_override: bool = False) -> str:
+    if _is_ctd_matched_detection(detection) and not allow_cta_method_override:
         return "lama_large_512px"
     return requested_method
 

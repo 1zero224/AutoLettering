@@ -241,10 +241,11 @@ def _max_font_size(
 ) -> int:
     if orientation != "vertical" or detection is None or target_bbox is None:
         return 72
+    base_limit = _base_vertical_font_limit(detection, target_bbox)
     decorated_limit = _decorated_title_font_limit(detection, tuple(target_bbox), translated_text)
     column_width = _source_column_width(detection, tuple(target_bbox))
     if column_width is None:
-        return decorated_limit or 72
+        return decorated_limit or base_limit
     if _very_short_vertical_translation(translated_text):
         multiplier = 0.9
     elif _short_vertical_translation(translated_text):
@@ -254,10 +255,26 @@ def _max_font_size(
     else:
         multiplier = 1.18
     width_limit = int(round(column_width * multiplier))
-    limits = [72, width_limit]
+    limits = [base_limit, width_limit]
     if decorated_limit is not None:
         limits.append(decorated_limit)
     return max(12, min(limits))
+
+
+def _base_vertical_font_limit(detection: dict, target_bbox: list[int]) -> int:
+    if _large_nonbubble_cta_title(detection, target_bbox):
+        return max(72, min(132, int(round(_width(tuple(target_bbox)) * 0.38))))
+    return 72
+
+
+def _large_nonbubble_cta_title(detection: dict, target_bbox: list[int]) -> bool:
+    bbox = tuple(target_bbox)
+    return (
+        detection.get("group_name") != "框内"
+        and detection.get("detection_method") in {"cta_mask", "ctd_mask"}
+        and _width(bbox) >= 180
+        and _height(bbox) >= _width(bbox) * 3
+    )
 
 
 def _decorated_title_font_limit(

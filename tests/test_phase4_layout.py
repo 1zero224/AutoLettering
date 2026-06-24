@@ -775,6 +775,38 @@ def test_run_phase4_caps_multicolumn_vertical_translation_below_source_column_wi
     assert layout["font_size"] <= 31
 
 
+def test_run_phase4_allows_large_nonbubble_cta_title_to_exceed_default_cap(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+    source_crop_path = tmp_path / "source-crop.png"
+    Image.new("RGB", (268, 1170), "white").save(source_crop_path)
+    phase2_run = tmp_path / "phase2-detection"
+    phase3_run = tmp_path / "phase3-selection"
+    for path in [phase2_run, phase3_run]:
+        path.mkdir()
+    _write_font_selection(
+        phase3_run / "font-selections.jsonl",
+        font_path,
+        source_crop_path,
+        translated_text="囚禁中挣脱而出！",
+    )
+    _write_large_nonbubble_cta_title_detection(phase2_run / "detections.jsonl")
+
+    run_dir = run_phase4(
+        selection_run_dir=phase3_run,
+        detection_run_dir=phase2_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase4-large-nonbubble-title",
+        sample_limit=1,
+    )
+
+    layout = _read_jsonl(run_dir / "layout-results.jsonl")[0]["layout"]
+    assert layout["target_bbox"] == [86, 815, 354, 1985]
+    assert layout["orientation"] == "vertical"
+    assert layout["vertical_align"] == "top"
+    assert layout["font_size"] > 72
+    assert layout["font_size"] <= 102
+
+
 def test_run_phase4_uses_mask_bbox_for_overlapping_bubble_layout_target(tmp_path: Path):
     font_path = _copy_font(tmp_path)
     source_crop_path = tmp_path / "source-crop.png"
@@ -1131,6 +1163,29 @@ def _write_light_on_dark_detection(path: Path) -> None:
         "candidate_boxes": [
             {"xyxy": [10, 10, 110, 90], "area": 8000, "score": 0.95, "polarity": "light_on_dark"},
         ],
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _write_large_nonbubble_cta_title_detection(path: Path) -> None:
+    payload = {
+        "record_id": "page.png#1",
+        "status": "ok",
+        "image_name": "page.png",
+        "group_name": "框外",
+        "detection_method": "cta_mask",
+        "selected_text_box_xyxy": [86, 815, 354, 1985],
+        "selected_text_full_xyxy": [86, 815, 354, 1985],
+        "selected_text_body_xyxy": [86, 815, 354, 1985],
+        "candidate_boxes": [
+            {"xyxy": [86, 815, 354, 1985], "area": 313560, "score": 1.0, "polarity": "ctd_mask"},
+        ],
+        "cta_match": {
+            "status": "matched",
+            "bbox_xyxy": [86, 815, 354, 1985],
+            "component_id": "component-title",
+            "mask_path": "component-title.png",
+        },
     }
     path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
 
