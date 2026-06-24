@@ -18,15 +18,16 @@ def build_photoshop_manifest(
     cleanup_rows: dict[str, dict],
     sample_limit: int,
     font_mapping: dict[str, str] | None = None,
-    repaired_pages: dict[str, str] | None = None,
+    repaired_pages: dict[str, object] | None = None,
 ) -> dict:
     layers = _manifest_layers(detection_rows, font_rows, layout_rows, cleanup_rows, sample_limit, font_mapping or {})
+    pages = _group_layers_by_page(layers, repaired_pages or {}, detection_rows)
     return {
         "schema_version": SCHEMA_VERSION,
-        "pages": _group_layers_by_page(layers, repaired_pages or {}),
+        "pages": pages,
         "summary": {
             "record_count": len(layers),
-            "page_count": len({layer["image_name"] for layer in layers}),
+            "page_count": len(pages),
         },
     }
 
@@ -53,7 +54,9 @@ def _manifest_layers(
         font_row = font_rows.get(record_id)
         if detection is None or font_row is None:
             continue
-        layers.append(_layer_record(detection, font_row, layout, cleanup_rows.get(record_id), font_mapping))
+        layer = _layer_record(detection, font_row, layout, cleanup_rows.get(record_id), font_mapping)
+        if layer is not None:
+            layers.append(layer)
     return layers
 
 
@@ -63,9 +66,11 @@ def _layer_record(
     layout_row: dict,
     cleanup_row: dict | None,
     font_mapping: dict[str, str],
-) -> dict:
-    bbox = detection["selected_text_box_xyxy"]
+) -> dict | None:
     layout = layout_row["layout"]
+    bbox = _layer_bbox(detection, cleanup_row, layout)
+    if bbox is None:
+        return None
     text_bbox = _text_bbox(layout, cleanup_row, bbox)
     image_size = _image_size(detection["image_path"])
     return {
@@ -73,7 +78,7 @@ def _layer_record(
         "image_name": detection["image_name"],
         "image_path": detection["image_path"],
         "layer_name": f"AL {detection['record_id']}",
-        "text_layer_name": f"嵌字图层 {detection['record_id']}",
+        "text_layer_name": "",
         "cleanup_layer_name": f"修复区域 {detection['record_id']}",
         "text": layout.get("line_breaks") or detection.get("translated_text", ""),
         "translated_text": detection.get("translated_text", ""),
@@ -90,28 +95,85 @@ def _layer_record(
     }
 
 
+def _layer_bbox(detection: dict, cleanup_row: dict | None, layout: dict) -> list[int] | None:
+    selected = detection.get("selected_text_box_xyxy")
+    if selected:
+        return [int(value) for value in selected]
+    cleanup = cleanup_row.get("cleanup", {}) if cleanup_row else {}
+    for candidate in (cleanup.get("bbox"), cleanup.get("layout_text_bbox"), layout.get("target_bbox")):
+        if isinstance(candidate, list) and len(candidate) == 4:
+            return [int(value) for value in candidate]
+    return None
+
+
 def _text_bbox(layout: dict, cleanup_row: dict | None, fallback_bbox: list[int]) -> list[int]:
     cleanup = cleanup_row.get("cleanup", {}) if cleanup_row else {}
     return cleanup.get("layout_text_bbox") or layout.get("target_bbox") or fallback_bbox
 
 
-def _group_layers_by_page(layers: list[dict], repaired_pages: dict[str, str]) -> list[dict]:
+def _group_layers_by_page(layers: list[dict], repaired_pages: dict[str, object], detection_rows: dict[str, dict]) -> list[dict]:
     pages: dict[str, dict] = {}
     for layer in layers:
-        page = pages.setdefault(
-            layer["image_name"],
-            {
-                "image_name": layer["image_name"],
-                "image_path": layer["image_path"],
-                "width": layer["position"]["page_width"],
-                "height": layer["position"]["page_height"],
-                "repaired_image_path": repaired_pages.get(layer["image_name"]),
-                "layer_order": ["text_layers", "repaired_image", "original_image"],
-                "layers": [],
-            },
-        )
+        page = pages.setdefault(layer["image_name"], _page_payload_from_layer(layer, repaired_pages.get(layer["image_name"])))
         page["layers"].append(layer)
+        layer["text_layer_name"] = f"嵌字图层{len(page['layers'])}"
+    for image_name, repaired_info in repaired_pages.items():
+        if image_name in pages:
+            continue
+        page = _page_payload_from_repaired_page(image_name, repaired_info, detection_rows)
+        if page is not None:
+            pages[image_name] = page
     return list(pages.values())
+
+
+def _page_payload_from_layer(layer: dict, repaired_info: object) -> dict:
+    return {
+        "image_name": layer["image_name"],
+        "image_path": layer["image_path"],
+        "width": layer["position"]["page_width"],
+        "height": layer["position"]["page_height"],
+        "repaired_image_path": _repaired_image_path(repaired_info),
+        "layer_order": ["text_layers", "repaired_image", "original_image"],
+        "layers": [],
+    }
+
+
+def _page_payload_from_repaired_page(image_name: str, repaired_info: object, detection_rows: dict[str, dict]) -> dict | None:
+    info = repaired_info if isinstance(repaired_info, dict) else {}
+    image_path = (
+        info.get("image_path")
+        or info.get("original_page_path")
+        or _detection_image_path_for_page(image_name, detection_rows)
+    )
+    repaired_image_path = _repaired_image_path(repaired_info)
+    if not image_path or not repaired_image_path:
+        return None
+    width, height = _image_size(image_path)
+    return {
+        "image_name": image_name,
+        "image_path": str(image_path),
+        "width": width,
+        "height": height,
+        "repaired_image_path": repaired_image_path,
+        "layer_order": ["text_layers", "repaired_image", "original_image"],
+        "layers": [],
+    }
+
+
+def _detection_image_path_for_page(image_name: str, detection_rows: dict[str, dict]) -> str | None:
+    for detection in detection_rows.values():
+        if detection.get("image_name") == image_name and detection.get("image_path"):
+            return str(detection["image_path"])
+    return None
+
+
+def _repaired_image_path(repaired_info: object) -> str | None:
+    if isinstance(repaired_info, str):
+        return repaired_info
+    if isinstance(repaired_info, dict):
+        value = repaired_info.get("repaired_image_path") or repaired_info.get("cleaned_page_path")
+        return str(value) if value else None
+    return None
 
 
 def _bbox_payload(bbox: list[int]) -> dict:

@@ -22,7 +22,7 @@ def run_phase8_photoshop_export(
     run_dir.mkdir(parents=True, exist_ok=True)
     font_mapping = _load_font_mapping(font_mapping_path)
     manifest = build_photoshop_manifest(
-        detection_rows=_load_jsonl_by_id(Path(detection_run_dir) / "detections.jsonl", "ok"),
+        detection_rows=_load_jsonl_by_id(Path(detection_run_dir) / "detections.jsonl", {"ok", "fallback_required"}),
         font_rows=_load_jsonl_by_id(Path(font_selection_run_dir) / "font-selections.jsonl", "selected"),
         layout_rows=_load_jsonl(Path(layout_run_dir) / "layout-results.jsonl", "layout_generated"),
         cleanup_rows=load_cleanup_rows_by_id(cleanup_run_dir),
@@ -53,29 +53,53 @@ def _load_font_mapping(path: str | Path | None) -> dict[str, str]:
     return {str(key): str(value) for key, value in payload.items() if value}
 
 
-def _load_repaired_pages(path: str | Path | None) -> dict[str, str]:
+def _load_repaired_pages(path: str | Path | None) -> dict[str, dict]:
     if path is None:
         return {}
-    rows = _load_jsonl(Path(path) / "preview-results.jsonl", "page_preview_generated")
-    repaired: dict[str, str] = {}
+    run_dir = Path(path)
+    repaired = _load_repaired_pages_from_manifest(run_dir / "manifest.json")
+    preview_results_path = run_dir / "preview-results.jsonl"
+    if not preview_results_path.exists():
+        return repaired
+    rows = _load_jsonl(preview_results_path, "page_preview_generated")
     for row in rows:
         cleaned = row.get("preview", {}).get("cleaned_page_path")
         if row.get("image_name") and cleaned:
-            repaired[row["image_name"]] = cleaned
+            repaired[row["image_name"]] = {
+                "image_path": row.get("preview", {}).get("original_page_path"),
+                "repaired_image_path": cleaned,
+            }
     return repaired
 
 
-def _load_jsonl(path: Path, status: str) -> list[dict]:
+def _load_repaired_pages_from_manifest(path: Path) -> dict[str, dict]:
+    if not path.exists():
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    repaired: dict[str, dict] = {}
+    for page in payload.get("pages", []):
+        image_name = page.get("image_name")
+        cleaned = page.get("cleaned_page_path")
+        if image_name and cleaned:
+            repaired[image_name] = {
+                "image_path": page.get("original_page_path"),
+                "repaired_image_path": cleaned,
+            }
+    return repaired
+
+
+def _load_jsonl(path: Path, status: str | set[str]) -> list[dict]:
     rows: list[dict] = []
+    allowed = {status} if isinstance(status, str) else status
     with path.open("r", encoding="utf-8") as handle:
         for line in handle:
             payload = json.loads(line)
-            if payload.get("status") == status:
+            if payload.get("status") in allowed:
                 rows.append(payload)
     return rows
 
 
-def _load_jsonl_by_id(path: Path, status: str) -> dict[str, dict]:
+def _load_jsonl_by_id(path: Path, status: str | set[str]) -> dict[str, dict]:
     rows: dict[str, dict] = {}
     for payload in _load_jsonl(path, status):
         rows[payload["record_id"]] = payload

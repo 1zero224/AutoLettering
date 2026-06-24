@@ -69,6 +69,9 @@ def test_run_phase7_8_smoke_writes_integrated_manifest_and_reports(tmp_path: Pat
     assert (preview_run / "pages" / "page-png.png").exists()
     assert (evaluation_run / "preview-evaluation.jsonl").exists()
     assert (export_run / "photoshop-manifest.json").exists()
+    export_manifest = json.loads((export_run / "photoshop-manifest.json").read_text(encoding="utf-8"))
+    assert export_manifest["pages"][0]["repaired_image_path"] == str(preview_run / "pages" / "cleaned" / "page-png.png")
+    assert [layer["text_layer_name"] for layer in export_manifest["pages"][0]["layers"]] == ["嵌字图层1", "嵌字图层2"]
     assert "- Evaluation score: 8" in report
     assert "- Missing cleanup layers: 0" in report
 

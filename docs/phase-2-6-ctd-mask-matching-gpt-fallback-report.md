@@ -130,6 +130,25 @@ The manifest page has:
 
 The JSX imports `repaired_image_path` as a page-level bitmap layer named `修复图像`. If that page-level repaired image exists, it skips per-record cleanup patch layers and then creates editable text layers above it.
 
+Updated Phase 8 export contract smoke:
+
+```powershell
+python experiments/phase8_photoshop_export.py --detection-run-dir outputs/runs/phase2-gbc06-ctd-mask-01-16-v3-merged --font-selection-run-dir outputs/runs/phase3-gbc06-01-16-manual-song-selection-v1 --layout-run-dir outputs/runs/phase4-gbc06-01-16-layout-song-fs40-top-noangle-v10 --cleanup-run-dir outputs/runs/phase6-gbc06-ctd-lama-01-16-v4-merged --preview-run-dir outputs/runs/phase7-gbc06-ctd-lama-01-16-fs40-noangle-top-v2 --output-root outputs/runs --run-id phase8-gbc06-ctd-lama-01-16-fs40-psd-structure-v4 --sample-limit 1
+```
+
+Key artifacts:
+
+- `outputs/runs/phase8-gbc06-ctd-lama-01-16-fs40-psd-structure-v4/photoshop-manifest.json`
+- `outputs/runs/phase8-gbc06-ctd-lama-01-16-fs40-psd-structure-v4/photoshop-import.jsx`
+
+The updated manifest/JSX contract now matches the requested PSD stack:
+
+- Editable text layer names are sequential per page; this smoke exports `嵌字图层1` for `GBC06_01.png#16` while preserving `record_id` separately for traceability.
+- `layer_order` remains `["text_layers", "repaired_image", "original_image"]`.
+- `repaired_image_path` is the Phase 7 full-page cleaned image: `outputs\runs\phase7-gbc06-ctd-lama-01-16-fs40-noangle-top-v2\pages\cleaned\GBC06-01-png.png`.
+- `photoshop-import.jsx` still names the full-page repaired bitmap layer `修复图像` and now best-effort renames the original base layer to `原图`.
+- Phase 8 accepts `fallback_required` detection rows; if CTD has no selected bbox but cleanup/layout has a bbox, export can still build the corresponding record or repaired-page-only PSD entry.
+
 ### GPT Fallback Path
 
 Candidate detection command:

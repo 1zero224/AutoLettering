@@ -119,6 +119,18 @@ JSX_SOURCE = """#target photoshop
         if (layerData.layout.angle_degrees) { layer.rotate(layerData.layout.angle_degrees); }
         applyVerticalTopAnchor(layer, layerData);
     }
+    function nameOriginalLayer(doc) {
+        try {
+            doc.activeLayer = doc.backgroundLayer;
+            var background = doc.activeLayer;
+            background.name = '原图';
+            return;
+        } catch (err) {}
+        try {
+            var layer = doc.layers[doc.layers.length - 1];
+            layer.name = '原图';
+        } catch (err2) {}
+    }
     var scriptFile = new File($.fileName);
     var root = scriptFile.parent.fsName;
     var manifest = parseJson(readText(root + '/photoshop-manifest.json'));
@@ -127,6 +139,7 @@ JSX_SOURCE = """#target photoshop
     for (var i = 0; i < manifest.pages.length; i++) {
         var page = manifest.pages[i];
         var doc = app.open(new File(page.image_path));
+        nameOriginalLayer(doc);
         var hasRepairedImage = addRepairedImageLayer(doc, page);
         for (var j = 0; j < page.layers.length; j++) {
             if (!hasRepairedImage) {

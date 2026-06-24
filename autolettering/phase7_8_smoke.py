@@ -45,6 +45,7 @@ def run_phase7_8_smoke(
         run_id="phase8-export",
         sample_limit=sample_limit,
         font_mapping_path=font_mapping_path,
+        preview_run_dir=phase7_run,
     )
 
     manifest = _manifest(

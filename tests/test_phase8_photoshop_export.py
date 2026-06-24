@@ -15,7 +15,7 @@ def test_run_phase8_photoshop_export_writes_manifest_and_jsx(tmp_path: Path):
     assert manifest["summary"] == {"record_count": 1, "page_count": 1}
     assert manifest["pages"][0]["layer_order"] == ["text_layers", "repaired_image", "original_image"]
     assert layer["record_id"] == "page.png#1"
-    assert layer["text_layer_name"] == "嵌字图层 page.png#1"
+    assert layer["text_layer_name"] == "嵌字图层1"
     assert layer["cleanup_layer_name"] == "修复区域 page.png#1"
     assert layer["bbox"]["xyxy"] == [10, 20, 80, 90]
     assert layer["text_bbox"]["xyxy"] == [30, 40, 60, 85]
@@ -138,6 +138,130 @@ def test_run_phase8_photoshop_export_uses_phase7_cleaned_page_as_repaired_image_
     assert "Skips per-record cleanup patch layers" in report
     assert "Expected page-level repaired image layers: 1" in checklist
     assert "Expected cleanup patch layers: 0" in checklist
+
+
+def test_run_phase8_photoshop_export_uses_phase7_manifest_for_repaired_page_without_text_layers(tmp_path: Path):
+    image_path = tmp_path / "page.png"
+    Image.new("RGB", (120, 160), "white").save(image_path)
+    repaired_page = tmp_path / "cleaned-page.png"
+    Image.new("RGB", (120, 160), "gray").save(repaired_page)
+    detection_run = _mkdir(tmp_path / "phase2")
+    font_run = _mkdir(tmp_path / "phase3")
+    layout_run = _mkdir(tmp_path / "phase4")
+    cleanup_run = _mkdir(tmp_path / "phase6")
+    preview_run = _mkdir(tmp_path / "phase7")
+    _write_jsonl(detection_run / "detections.jsonl", [_detection_payload(image_path, status="fallback_required", selected_bbox=None)])
+    _write_jsonl(font_run / "font-selections.jsonl", [])
+    _write_jsonl(layout_run / "layout-results.jsonl", [])
+    _write_jsonl(cleanup_run / "cleanup-results.jsonl", [_cleanup_payload(tmp_path / "local.png", repaired_page)])
+    (preview_run / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "autolettering.phase7.preview.v1",
+                "pages": [
+                    {
+                        "image_name": "page.png",
+                        "original_page_path": str(image_path),
+                        "cleaned_page_path": str(repaired_page),
+                        "record_count": 1,
+                        "records": [
+                            {
+                                "record_id": "page.png#1",
+                                "cleanup_method": "gpt_image2_masked_edit",
+                                "text_overlay_required": False,
+                            }
+                        ],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    run_dir = run_phase8_photoshop_export(
+        detection_run,
+        font_run,
+        layout_run,
+        cleanup_run,
+        tmp_path / "outputs",
+        sample_limit=1,
+        preview_run_dir=preview_run,
+    )
+
+    manifest = json.loads((run_dir / "photoshop-manifest.json").read_text(encoding="utf-8"))
+    page = manifest["pages"][0]
+    assert manifest["summary"] == {"record_count": 0, "page_count": 1}
+    assert page["image_name"] == "page.png"
+    assert page["image_path"] == str(image_path)
+    assert page["repaired_image_path"] == str(repaired_page)
+    assert page["layers"] == []
+    checklist = (run_dir / "reports" / "photoshop-validation-checklist.md").read_text(encoding="utf-8")
+    assert "- Expected editable text layers: 0" in checklist
+    assert "- Expected page-level repaired image layers: 1" in checklist
+
+
+def test_run_phase8_photoshop_export_names_text_layers_sequentially_per_page(tmp_path: Path):
+    image_path = tmp_path / "page.png"
+    Image.new("RGB", (120, 160), "white").save(image_path)
+    detection_run = _mkdir(tmp_path / "phase2")
+    font_run = _mkdir(tmp_path / "phase3")
+    layout_run = _mkdir(tmp_path / "phase4")
+    cleanup_run = _mkdir(tmp_path / "phase6")
+    record_ids = ["page.png#1", "page.png#2"]
+    _write_jsonl(
+        detection_run / "detections.jsonl",
+        [_detection_payload(image_path, record_id=record_id) for record_id in record_ids],
+    )
+    _write_jsonl(font_run / "font-selections.jsonl", [_font_payload(tmp_path / "font.ttf", record_id) for record_id in record_ids])
+    _write_jsonl(layout_run / "layout-results.jsonl", [_layout_payload(record_id) for record_id in record_ids])
+    _write_jsonl(cleanup_run / "cleanup-results.jsonl", [_cleanup_payload(tmp_path / f"cleaned-{index}.png", record_id=record_id) for index, record_id in enumerate(record_ids, start=1)])
+
+    run_dir = run_phase8_photoshop_export(
+        detection_run,
+        font_run,
+        layout_run,
+        cleanup_run,
+        tmp_path / "outputs",
+        sample_limit=2,
+    )
+
+    manifest = json.loads((run_dir / "photoshop-manifest.json").read_text(encoding="utf-8"))
+    layers = manifest["pages"][0]["layers"]
+    assert [layer["text_layer_name"] for layer in layers] == ["嵌字图层1", "嵌字图层2"]
+    assert [layer["record_id"] for layer in layers] == record_ids
+
+
+def test_run_phase8_photoshop_export_uses_cleanup_bbox_for_fallback_detection_when_layout_exists(tmp_path: Path):
+    image_path = tmp_path / "page.png"
+    Image.new("RGB", (120, 160), "white").save(image_path)
+    detection_run = _mkdir(tmp_path / "phase2")
+    font_run = _mkdir(tmp_path / "phase3")
+    layout_run = _mkdir(tmp_path / "phase4")
+    cleanup_run = _mkdir(tmp_path / "phase6")
+    _write_jsonl(detection_run / "detections.jsonl", [_detection_payload(image_path, status="fallback_required", selected_bbox=None)])
+    _write_jsonl(font_run / "font-selections.jsonl", [_font_payload(tmp_path / "font.ttf")])
+    _write_jsonl(layout_run / "layout-results.jsonl", [_layout_payload()])
+    _write_jsonl(
+        cleanup_run / "cleanup-results.jsonl",
+        [_cleanup_payload(tmp_path / "cleaned.png", cleanup_bbox=[35, 25, 62, 55], method="bt_lama_large_inpaint")],
+    )
+
+    run_dir = run_phase8_photoshop_export(
+        detection_run,
+        font_run,
+        layout_run,
+        cleanup_run,
+        tmp_path / "outputs",
+        sample_limit=1,
+    )
+
+    manifest = json.loads((run_dir / "photoshop-manifest.json").read_text(encoding="utf-8"))
+    layer = manifest["pages"][0]["layers"][0]
+    assert layer["record_id"] == "page.png#1"
+    assert layer["bbox"]["xyxy"] == [35, 25, 62, 55]
+    assert layer["cleanup"]["method"] == "bt_lama_large_inpaint"
+    assert layer["text_layer_name"] == "嵌字图层1"
 
 
 def test_run_phase8_photoshop_export_places_cleanup_patch_by_cleanup_bbox(tmp_path: Path):
@@ -300,6 +424,8 @@ def _run_standard_phase8_export(tmp_path: Path) -> Path:
 def _assert_rich_jsx_importer(jsx: str) -> None:
     for expected in [
         "photoshop-manifest.json",
+        "function nameOriginalLayer",
+        "layer.name = '原图'",
         "LayerKind.TEXT",
         "function addRepairedImageLayer",
         "page.repaired_image_path",
@@ -329,21 +455,28 @@ def _assert_rich_jsx_importer(jsx: str) -> None:
     assert jsx.index("layer.rotate(layerData.layout.angle_degrees)") < jsx.rindex("applyVerticalTopAnchor(layer, layerData)")
 
 
-def _detection_payload(image_path: Path) -> dict:
+def _detection_payload(
+    image_path: Path,
+    record_id: str = "page.png#1",
+    status: str = "ok",
+    selected_bbox: list[int] | None = None,
+) -> dict:
+    if selected_bbox is None and status == "ok":
+        selected_bbox = [10, 20, 80, 90]
     return {
-        "record_id": "page.png#1",
-        "status": "ok",
+        "record_id": record_id,
+        "status": status,
         "image_name": "page.png",
         "image_path": str(image_path),
         "translated_text": "测试",
         "group_name": "框内",
-        "selected_text_box_xyxy": [10, 20, 80, 90],
+        "selected_text_box_xyxy": selected_bbox,
     }
 
 
-def _font_payload(font_path: Path) -> dict:
+def _font_payload(font_path: Path, record_id: str = "page.png#1") -> dict:
     return {
-        "record_id": "page.png#1",
+        "record_id": record_id,
         "status": "selected",
         "selected_font_id": "font-test",
         "selected_font": {
@@ -357,9 +490,9 @@ def _font_payload(font_path: Path) -> dict:
     }
 
 
-def _layout_payload() -> dict:
+def _layout_payload(record_id: str = "page.png#1") -> dict:
     return {
-        "record_id": "page.png#1",
+        "record_id": record_id,
         "status": "layout_generated",
         "layout": {
             "line_breaks": "测\n试",
@@ -386,9 +519,11 @@ def _cleanup_payload(
     text_bbox: list[int] | None = None,
     mask_bbox: list[int] | None = None,
     layout_text_bbox: list[int] | None = None,
+    record_id: str = "page.png#1",
+    method: str = "bubble_fill",
 ) -> dict:
     cleanup = {
-        "method": "bubble_fill",
+        "method": method,
         "cleaned_crop_path": str(cleaned_path),
         "before_after_path": str(cleaned_path),
     }
@@ -405,7 +540,7 @@ def _cleanup_payload(
         cleanup["replacement_method"] = "gpt_image2_masked_edit"
         cleanup["replacement_crop_path"] = str(replacement_path)
     return {
-        "record_id": "page.png#1",
+        "record_id": record_id,
         "status": "cleaned",
         "cleanup": cleanup,
     }
