@@ -13,8 +13,10 @@ def build_quality_summary(
     phase7_preview_evaluation_run_dir: RunDirInput,
     phase8_export_audit_run_dir: RunDirInput,
     phase6_gpt_quality_run_dir: RunDirInput = None,
+    phase6_cleanup_quality_run_dir: RunDirInput = None,
 ) -> dict[str, dict]:
     return {
+        "phase6_cleanup": _phase6_cleanup_quality_summary(phase6_cleanup_quality_run_dir),
         "phase6_gpt_replacement": _phase6_gpt_replacement_quality_summary(phase6_gpt_quality_run_dir),
         "phase7_preview": _phase7_preview_quality_summary(phase7_preview_evaluation_run_dir),
         "phase8_export": _phase8_export_quality_summary(phase8_export_audit_run_dir),
@@ -23,6 +25,7 @@ def build_quality_summary(
 
 def quality_issues_by_record(quality: dict) -> dict[str, list[str]]:
     issues: dict[str, list[str]] = {}
+    _merge_record_issues(issues, _phase6_cleanup_issues(quality.get("phase6_cleanup", {})))
     _merge_record_issues(issues, _phase6_gpt_replacement_issues(quality.get("phase6_gpt_replacement", {})))
     _merge_record_issues(issues, _phase7_preview_issues(quality.get("phase7_preview", {})))
     phase8 = quality.get("phase8_export", {})
@@ -36,12 +39,28 @@ def quality_issues_by_record(quality: dict) -> dict[str, list[str]]:
 
 
 def quality_markdown_lines(quality: dict) -> list[str]:
+    phase6_cleanup = quality.get("phase6_cleanup", {})
     phase6 = quality.get("phase6_gpt_replacement", {})
     phase7 = quality.get("phase7_preview", {})
     phase8 = quality.get("phase8_export", {})
-    if not _has_phase6_gpt_quality(phase6) and not _has_phase7_quality(phase7) and not _has_phase8_quality(phase8):
+    if (
+        not _has_phase6_cleanup_quality(phase6_cleanup)
+        and not _has_phase6_gpt_quality(phase6)
+        and not _has_phase7_quality(phase7)
+        and not _has_phase8_quality(phase8)
+    ):
         return ["", "## Quality Audits", "", "- None"]
     lines = ["", "## Quality Audits"]
+    if _has_phase6_cleanup_quality(phase6_cleanup):
+        lines.extend([
+            "",
+            "### phase6_cleanup",
+            "",
+            f"- Cleanup evaluations: {phase6_cleanup['evaluation_count']}",
+            f"- Usable cleanups: {phase6_cleanup['usable_count']}/{phase6_cleanup['evaluated_count']}",
+            f"- Failed evaluations: {phase6_cleanup['failed_count']}",
+            f"- Record issues: {phase6_cleanup['record_issue_count']}",
+        ])
     if _has_phase6_gpt_quality(phase6):
         lines.extend([
             "",
@@ -78,6 +97,68 @@ def quality_markdown_lines(quality: dict) -> list[str]:
             f"- Missing JSX anchor logic audits: {phase8['jsx_anchor_logic_missing_count']}",
         ])
     return lines
+
+
+def _phase6_cleanup_quality_summary(run_dir: RunDirInput) -> dict:
+    rows = _phase6_cleanup_rows(run_dir)
+    records = _phase6_cleanup_records(rows)
+    return {
+        "evaluation_count": len(rows),
+        "evaluated_count": sum(1 for row in rows if row.get("status") == "evaluated"),
+        "usable_count": sum(1 for row in rows if row.get("status") == "evaluated" and row.get("usable") is True),
+        "failed_count": sum(1 for row in rows if row.get("status") != "evaluated"),
+        "record_count": len(records),
+        "record_issue_count": sum(len(record.get("issues") or []) for record in records),
+        "records": records,
+    }
+
+
+def _phase6_cleanup_rows(run_dir: RunDirInput) -> list[dict]:
+    rows: list[dict] = []
+    for item in _run_dirs(run_dir):
+        path = Path(item) / "cleanup-quality.jsonl"
+        if path.exists():
+            rows.extend(_jsonl_rows(path))
+    return rows
+
+
+def _phase6_cleanup_records(rows: list[dict]) -> list[dict]:
+    by_record: dict[str, dict] = {}
+    for row in rows:
+        record_id = row.get("record_id")
+        if not record_id:
+            continue
+        by_record[str(record_id)] = {
+            "record_id": str(record_id),
+            "image_name": row.get("image_name"),
+            "status": row.get("status"),
+            "usable": row.get("usable"),
+            "original_text_removed": row.get("original_text_removed"),
+            "art_preserved": row.get("art_preserved"),
+            "issues": _phase6_cleanup_row_issues(row),
+        }
+    return list(by_record.values())
+
+
+def _phase6_cleanup_row_issues(row: dict) -> list[str]:
+    if row.get("status") != "evaluated":
+        return ["phase6_cleanup_evaluation_failed"]
+    issues: list[str] = []
+    if row.get("original_text_removed") is False:
+        issues.append("phase6_cleanup_original_text_visible")
+    if row.get("art_preserved") is False:
+        issues.append("phase6_cleanup_art_not_preserved")
+    if row.get("usable") is not True and not issues:
+        issues.append("phase6_cleanup_unusable")
+    return _dedupe(issues)
+
+
+def _phase6_cleanup_issues(phase6_cleanup: dict) -> dict[str, list[str]]:
+    return {
+        str(record["record_id"]): [str(issue) for issue in record.get("issues", [])]
+        for record in phase6_cleanup.get("records", [])
+        if record.get("record_id") and record.get("issues")
+    }
 
 
 def _phase6_gpt_replacement_quality_summary(run_dir: RunDirInput) -> dict:
@@ -261,6 +342,10 @@ def _has_phase7_quality(phase7: dict) -> bool:
     return bool(phase7 and phase7.get("evaluation_count"))
 
 
+def _has_phase6_cleanup_quality(phase6_cleanup: dict) -> bool:
+    return bool(phase6_cleanup and phase6_cleanup.get("evaluation_count"))
+
+
 def _has_phase6_gpt_quality(phase6: dict) -> bool:
     return bool(phase6 and phase6.get("run_count"))
 
@@ -327,6 +412,10 @@ def _strip_json_wrapper(raw_text: str) -> str:
             lines = lines[:-1]
         text = "\n".join(lines).strip()
     return text
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    return list(dict.fromkeys(values))
 
 
 def _run_dirs(run_dir: RunDirInput) -> list[str | Path]:

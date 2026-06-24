@@ -164,6 +164,99 @@ def test_build_pipeline_coverage_marks_phase6_gpt_quality_failures_incomplete(tm
     ]
 
 
+def test_build_pipeline_coverage_marks_phase6_cleanup_quality_failures_incomplete(tmp_path: Path):
+    phase1 = tmp_path / "phase1"
+    phase2 = tmp_path / "phase2"
+    phase3 = tmp_path / "phase3"
+    phase4 = tmp_path / "phase4"
+    phase5 = tmp_path / "phase5"
+    phase6 = tmp_path / "phase6"
+    phase7 = tmp_path / "phase7"
+    phase8 = tmp_path / "phase8"
+    cleanup_quality = tmp_path / "phase6-cleanup-quality"
+    _write_phase1_manifest(phase1 / "manifest.json")
+    _write_jsonl(phase2 / "detections.jsonl", [_row("r1", "ok")])
+    _write_jsonl(phase3 / "font-selections.jsonl", [_row("r1", "selected")])
+    _write_jsonl(phase4 / "layout-results.jsonl", [_row("r1", "layout_generated")])
+    _write_jsonl(phase5 / "angle-results.jsonl", [_row("r1", "angle_estimated")])
+    _write_jsonl(phase6 / "cleanup-results.jsonl", [_row("r1", "cleaned")])
+    _write_phase7_preview(phase7 / "preview-results.jsonl", ["r1"])
+    _write_phase8_manifest(phase8 / "photoshop-manifest.json", ["r1"])
+    _write_jsonl(
+        cleanup_quality / "cleanup-quality.jsonl",
+        [
+            {
+                "record_id": "r1",
+                "image_name": "page.png",
+                "status": "evaluated",
+                "usable": False,
+                "original_text_removed": False,
+                "art_preserved": True,
+                "issues": ["visible_original_text"],
+            }
+        ],
+    )
+
+    report = build_pipeline_coverage(
+        phase1_run_dir=phase1,
+        detection_run_dir=phase2,
+        font_selection_run_dir=phase3,
+        layout_run_dir=phase4,
+        angle_run_dir=phase5,
+        cleanup_run_dirs=[phase6],
+        preview_run_dir=phase7,
+        export_run_dir=phase8,
+        phase6_cleanup_quality_run_dir=cleanup_quality,
+    )
+
+    quality = report["quality"]["phase6_cleanup"]
+    assert quality["evaluation_count"] == 1
+    assert quality["usable_count"] == 0
+    assert quality["record_issue_count"] == 1
+    assert report["summary"]["complete_record_count"] == 0
+    assert report["records"]["r1"]["quality_issues"] == ["phase6_cleanup_original_text_visible"]
+    assert report["next_records"] == [
+        {"record_id": "r1", "group_name": "框内", "first_quality_issue": "phase6_cleanup_original_text_visible"}
+    ]
+
+
+def test_build_pipeline_coverage_marks_phase6_cleanup_quality_api_failures_incomplete(tmp_path: Path):
+    phase1 = tmp_path / "phase1"
+    phase2 = tmp_path / "phase2"
+    cleanup_quality = tmp_path / "phase6-cleanup-quality"
+    _write_phase1_manifest(phase1 / "manifest.json")
+    _write_jsonl(phase2 / "detections.jsonl", [_row("r1", "ok")])
+    _write_jsonl(
+        cleanup_quality / "cleanup-quality.jsonl",
+        [
+            {
+                "record_id": "r1",
+                "image_name": "page.png",
+                "status": "failed",
+                "usable": None,
+                "original_text_removed": None,
+                "art_preserved": None,
+                "failure_reason": "api_error:RuntimeError",
+            }
+        ],
+    )
+
+    report = build_pipeline_coverage(
+        phase1_run_dir=phase1,
+        detection_run_dir=phase2,
+        phase6_cleanup_quality_run_dir=cleanup_quality,
+    )
+
+    quality = report["quality"]["phase6_cleanup"]
+    assert quality["evaluation_count"] == 1
+    assert quality["failed_count"] == 1
+    assert report["summary"]["complete_record_count"] == 0
+    assert report["records"]["r1"]["quality_issues"] == ["phase6_cleanup_evaluation_failed"]
+    assert report["next_records"] == [
+        {"record_id": "r1", "group_name": "框内", "first_quality_issue": "phase6_cleanup_evaluation_failed"}
+    ]
+
+
 def test_build_pipeline_coverage_reads_legacy_phase6_gpt_mimo_evaluation(tmp_path: Path):
     phase1 = tmp_path / "phase1"
     phase2 = tmp_path / "phase2"

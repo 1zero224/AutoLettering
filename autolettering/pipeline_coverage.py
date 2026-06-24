@@ -32,6 +32,7 @@ def build_pipeline_coverage(
     cleanup_run_dirs: Iterable[str | Path] | None = None,
     preview_run_dir: RunDirInput = None,
     export_run_dir: RunDirInput = None,
+    phase6_cleanup_quality_run_dir: RunDirInput = None,
     phase6_gpt_quality_run_dir: RunDirInput = None,
     phase7_preview_evaluation_run_dir: RunDirInput = None,
     phase8_export_audit_run_dir: RunDirInput = None,
@@ -57,6 +58,7 @@ def build_pipeline_coverage(
         phase7_preview_evaluation_run_dir,
         phase8_export_audit_run_dir,
         phase6_gpt_quality_run_dir=phase6_gpt_quality_run_dir,
+        phase6_cleanup_quality_run_dir=phase6_cleanup_quality_run_dir,
     )
     records = _record_coverage(base_ids, meta, stages, quality_issues_by_record(quality))
     phase1_pending_detection = _phase1_pending_detection_records(phase1_ids, detection_all, meta, next_limit)

@@ -210,6 +210,52 @@ def test_pipeline_coverage_cli_accepts_multiple_detection_runs(tmp_path: Path, m
     assert payload["stages"]["phase2_detection"]["covered_record_ids"] == ["r1", "r2"]
 
 
+def test_pipeline_coverage_cli_accepts_phase6_cleanup_quality_run(tmp_path: Path, monkeypatch, capsys):
+    phase1 = tmp_path / "phase1"
+    phase2 = tmp_path / "phase2"
+    cleanup_quality = tmp_path / "phase6-cleanup-quality"
+    output_root = tmp_path / "outputs"
+    _write_phase1_manifest(phase1 / "manifest.json")
+    _write_jsonl(phase2 / "detections.jsonl", [_row("r1", "ok")])
+    _write_jsonl(
+        cleanup_quality / "cleanup-quality.jsonl",
+        [
+            {
+                "record_id": "r1",
+                "status": "evaluated",
+                "usable": False,
+                "original_text_removed": False,
+                "art_preserved": True,
+            }
+        ],
+    )
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "pipeline_coverage_report.py",
+            "--phase1-run-dir",
+            str(phase1),
+            "--detection-run-dir",
+            str(phase2),
+            "--phase6-cleanup-quality-run-dir",
+            str(cleanup_quality),
+            "--output-root",
+            str(output_root),
+            "--run-id",
+            "cli-cleanup-quality",
+        ],
+    )
+
+    pipeline_coverage_report.main()
+
+    captured = capsys.readouterr()
+    assert "cli-cleanup-quality" in captured.out
+    payload = json.loads((output_root / "cli-cleanup-quality" / "pipeline-coverage.json").read_text(encoding="utf-8"))
+    assert payload["quality"]["phase6_cleanup"]["evaluation_count"] == 1
+    assert payload["records"]["r1"]["quality_issues"] == ["phase6_cleanup_original_text_visible"]
+
+
 def _row(record_id: str, status: str) -> dict:
     return {"record_id": record_id, "status": status}
 

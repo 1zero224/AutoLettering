@@ -1,6 +1,6 @@
 import os
 
-from experiments import phase2_detect_text_regions, phase6_nonbubble_cleanup
+from experiments import phase2_detect_text_regions, phase6_cleanup_quality, phase6_nonbubble_cleanup
 
 
 def test_phase2_detection_cli_accepts_ctd_mask_strategy():
@@ -53,4 +53,18 @@ def test_phase6_nonbubble_cli_builds_mimo_config_from_env(monkeypatch):
     assert config.base_url == "https://mimo.example/v1"
     assert config.api_key == "secret-value"
     assert config.model == "mimo-v2.5"
+    assert config.thinking_type == "disabled"
+
+
+def test_phase6_cleanup_quality_cli_builds_mimo_config_from_env(monkeypatch):
+    monkeypatch.setenv("MIMO_BASE_URL", "https://mimo.example/v1")
+    monkeypatch.setenv("MIMO_API_KEY", "secret-value")
+    monkeypatch.setenv("MIMO_VISION_MODEL", "mimo-v2.5")
+
+    config = phase6_cleanup_quality._mimo_config_from_env()
+
+    assert config.base_url == "https://mimo.example/v1"
+    assert config.api_key == "secret-value"
+    assert config.model == "mimo-v2.5"
+    assert config.max_completion_tokens == 900
     assert config.thinking_type == "disabled"
