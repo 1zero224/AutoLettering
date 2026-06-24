@@ -21,6 +21,7 @@ def main() -> None:
     parser.add_argument("--cleanup-run-dir", action="append", default=None)
     parser.add_argument("--preview-run-dir", action="append", default=None)
     parser.add_argument("--export-run-dir", action="append", default=None)
+    parser.add_argument("--phase6-gpt-quality-run-dir", action="append", default=None)
     parser.add_argument("--phase7-preview-evaluation-run-dir", action="append", default=None)
     parser.add_argument("--phase8-export-audit-run-dir", action="append", default=None)
     parser.add_argument("--output-root", default="outputs/runs")
@@ -39,6 +40,7 @@ def main() -> None:
         cleanup_run_dirs=[Path(value) for value in args.cleanup_run_dir or []],
         preview_run_dir=_optional_paths(args.preview_run_dir),
         export_run_dir=_optional_paths(args.export_run_dir),
+        phase6_gpt_quality_run_dir=_optional_paths(args.phase6_gpt_quality_run_dir),
         phase7_preview_evaluation_run_dir=_optional_paths(args.phase7_preview_evaluation_run_dir),
         phase8_export_audit_run_dir=_optional_paths(args.phase8_export_audit_run_dir),
         next_limit=args.next_limit,

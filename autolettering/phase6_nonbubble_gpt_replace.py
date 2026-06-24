@@ -245,7 +245,11 @@ def _write_mimo_evaluation(run_dir: Path, grid_path: Path, rows: list[dict], cli
     output = run_dir / "reports" / "mimo-gpt-replace-evaluation.json"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(response, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return {"path": str(output), "status": response.get("response", {}).get("status")}
+    return {
+        "path": str(output),
+        "status": response.get("response", {}).get("status"),
+        "quality": _mimo_quality_payload(response),
+    }
 
 
 def _write_manifest(
@@ -256,6 +260,7 @@ def _write_manifest(
     grid_path: Path,
     mimo_result: dict | None,
 ) -> None:
+    quality = _gpt_quality_counts(rows, mimo_result)
     payload = {
         "schema_version": GPT_REPLACE_SCHEMA_VERSION,
         "detection_run_dir": str(detection_run_dir),
@@ -264,6 +269,8 @@ def _write_manifest(
         "gpt_ok_count": sum(1 for row in rows if row.get("gpt_image2_replace", {}).get("status") == "ok"),
         "gpt_failed_count": sum(1 for row in rows if row.get("gpt_image2_replace", {}).get("status") == "failed"),
         "gpt_dry_run_count": sum(1 for row in rows if row.get("gpt_image2_replace", {}).get("status") == "dry_run"),
+        "gpt_quality_checked_count": quality["checked_count"],
+        "gpt_quality_failed_count": quality["failed_count"],
         "bt_failed_count": sum(1 for row in rows for repair in row.get("bt_repairs", []) if repair.get("status") == "failed"),
         "grid_path": str(grid_path),
         "mimo": mimo_result,
@@ -279,6 +286,8 @@ def _write_report(
     grid_path: Path,
     mimo_result: dict | None,
 ) -> None:
+    quality = _gpt_quality_counts(rows, mimo_result)
+    mimo_quality = _mimo_quality(mimo_result)
     lines = [
         "# Phase 6 Non-Bubble GPT Replacement Experiment",
         "",
@@ -291,6 +300,8 @@ def _write_report(
         f"- GPT image-2 replacement ok: {sum(1 for row in rows if row.get('gpt_image2_replace', {}).get('status') == 'ok')}",
         f"- GPT image-2 dry runs: {sum(1 for row in rows if row.get('gpt_image2_replace', {}).get('status') == 'dry_run')}",
         f"- GPT image-2 failures: {sum(1 for row in rows if row.get('gpt_image2_replace', {}).get('status') == 'failed')}",
+        f"- GPT image-2 quality checks: {quality['checked_count']}",
+        f"- GPT image-2 quality failures: {quality['failed_count']}",
         f"- BT method failures: {sum(1 for row in rows for repair in row.get('bt_repairs', []) if repair.get('status') == 'failed')}",
         "",
         "## Artifacts",
@@ -305,8 +316,69 @@ def _write_report(
     ]
     if mimo_result:
         lines.append(f"- MIMO evaluation: `{mimo_result['path']}`")
+        lines.append(f"- MIMO GPT image-2 status: `{mimo_quality.get('gpt_image2_status', 'unknown')}`")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _gpt_quality_counts(rows: list[dict], mimo_result: dict | None) -> dict:
+    gpt_ok_count = sum(1 for row in rows if row.get("gpt_image2_replace", {}).get("status") == "ok")
+    quality = _mimo_quality(mimo_result)
+    if quality.get("gpt_image2_status") not in {"acceptable", "unacceptable"}:
+        return {"checked_count": 0, "failed_count": 0}
+    return {
+        "checked_count": gpt_ok_count,
+        "failed_count": gpt_ok_count if quality["gpt_image2_status"] == "unacceptable" else 0,
+    }
+
+
+def _mimo_quality(mimo_result: dict | None) -> dict:
+    if not isinstance(mimo_result, dict):
+        return {"gpt_image2_status": "not_evaluated"}
+    quality = mimo_result.get("quality")
+    if isinstance(quality, dict):
+        return quality
+    return {"gpt_image2_status": "unknown"}
+
+
+def _mimo_quality_payload(response: dict) -> dict:
+    try:
+        payload = json.loads(_strip_json_wrapper(response.get("raw_text", "")))
+    except Exception as exc:
+        return {
+            "gpt_image2_status": "unknown",
+            "unacceptable_methods": [],
+            "failure_reason": f"invalid_mimo_quality_json:{type(exc).__name__}",
+        }
+    unacceptable = [str(item) for item in payload.get("unacceptable_methods", []) if str(item).strip()]
+    gpt_status = "unacceptable" if any(_is_gpt_image2_method_label(item) for item in unacceptable) else "acceptable"
+    return {
+        "gpt_image2_status": gpt_status,
+        "unacceptable_methods": unacceptable,
+        "gpt_image2_scores": payload.get("gpt_image2_scores"),
+        "bt_ranking": payload.get("bt_ranking"),
+        "best_overall_for_user_choice": payload.get("best_overall_for_user_choice"),
+        "reasoning_summary": payload.get("reasoning_summary"),
+        "caveats": payload.get("caveats"),
+        "failure_reason": None,
+    }
+
+
+def _is_gpt_image2_method_label(value: str) -> bool:
+    normalized = value.lower().replace("_", "-").replace(" ", "")
+    return "gpt-image-2" in normalized or "gptimage2" in normalized
+
+
+def _strip_json_wrapper(raw_text: str) -> str:
+    text = raw_text.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    return text
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:

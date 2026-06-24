@@ -69,6 +69,39 @@ def test_run_phase6_nonbubble_gpt_replace_records_bt_method_failures(tmp_path: P
     assert manifest["bt_failed_count"] == 1
 
 
+def test_run_phase6_nonbubble_gpt_replace_surfaces_mimo_quality_failure(tmp_path: Path, monkeypatch):
+    image_path = _write_nonbubble_image(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(detection_run / "detections.jsonl", image_path)
+    monkeypatch.setattr("autolettering.phase6_nonbubble_gpt_replace.GptImageEditClient", lambda config: _FakeGptClient())
+    monkeypatch.setattr(
+        "autolettering.inpaint.nonbubble.balloons_patchmatch_inpaint",
+        lambda crop_arg, mask_arg: Image.new("RGB", crop_arg.size, "white"),
+    )
+
+    run_dir = run_phase6_nonbubble_gpt_replace(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-gpt-replace-quality-failure-test",
+        sample_limit=1,
+        gpt_config=GptImageConfig(base_url="https://example.test/v1/images", api_key="test", model="gpt-image-2"),
+        call_gpt_image=True,
+        bt_methods=["bt_patchmatch"],
+        mimo_client=_FakeMimoClient(),
+    )
+
+    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["gpt_ok_count"] == 1
+    assert manifest["gpt_quality_checked_count"] == 1
+    assert manifest["gpt_quality_failed_count"] == 1
+    assert manifest["mimo"]["quality"]["gpt_image2_status"] == "unacceptable"
+    assert manifest["mimo"]["quality"]["unacceptable_methods"] == ["gpt-image-2 cn"]
+    report = (run_dir / "reports" / "phase6-nonbubble-gpt-replace-report.md").read_text(encoding="utf-8")
+    assert "- GPT image-2 quality failures: 1" in report
+    assert "- MIMO GPT image-2 status: `unacceptable`" in report
+
+
 class _FakeGptClient:
     def edit_image(self, image_path: str, mask_path: str, prompt: str, output_path: str) -> dict:
         output = Path(output_path)
@@ -76,6 +109,28 @@ class _FakeGptClient:
         with Image.open(image_path) as image:
             Image.new("RGB", image.size, "white").save(output)
         return {"status": "ok", "output_path": str(output), "response": {"usage": {"total_tokens": 1}}}
+
+
+class _FakeMimoClient:
+    def analyze_image(self, image_path: str, prompt: str, kind: str = "image_analysis", max_completion_tokens: int | None = None):
+        return {
+            "raw_text": json.dumps(
+                {
+                    "gpt_image2_scores": {
+                        "exact_simplified_chinese_text_correctness": 0,
+                        "no_japanese_text_remaining": 0,
+                    },
+                    "bt_ranking": ["bt_patchmatch"],
+                    "unacceptable_methods": ["gpt-image-2 cn"],
+                    "best_overall_for_user_choice": "bt_patchmatch",
+                    "reasoning_summary": "gpt-image-2 produced the wrong language.",
+                    "caveats": "fake response",
+                },
+                ensure_ascii=False,
+            ),
+            "request": {"kind": kind, "image_path": str(image_path), "prompt_chars": len(prompt)},
+            "response": {"status": "ok"},
+        }
 
 
 def _write_nonbubble_image(path: Path) -> Path:

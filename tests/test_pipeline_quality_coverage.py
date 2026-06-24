@@ -120,6 +120,72 @@ def test_build_pipeline_coverage_marks_missing_jsx_anchor_logic_as_quality_issue
     assert report["next_records"][0]["first_quality_issue"] == "missing_jsx_anchor_logic"
 
 
+def test_build_pipeline_coverage_marks_phase6_gpt_quality_failures_incomplete(tmp_path: Path):
+    phase1 = tmp_path / "phase1"
+    phase2 = tmp_path / "phase2"
+    phase3 = tmp_path / "phase3"
+    phase4 = tmp_path / "phase4"
+    phase5 = tmp_path / "phase5"
+    phase6 = tmp_path / "phase6"
+    phase7 = tmp_path / "phase7"
+    phase8 = tmp_path / "phase8"
+    gpt_quality = tmp_path / "phase6-gpt-quality"
+    _write_phase1_manifest(phase1 / "manifest.json")
+    _write_jsonl(phase2 / "detections.jsonl", [_row("r1", "ok")])
+    _write_jsonl(phase3 / "font-selections.jsonl", [_row("r1", "selected")])
+    _write_jsonl(phase4 / "layout-results.jsonl", [_row("r1", "layout_generated")])
+    _write_jsonl(phase5 / "angle-results.jsonl", [_row("r1", "angle_estimated")])
+    _write_jsonl(phase6 / "cleanup-results.jsonl", [_row("r1", "cleaned")])
+    _write_phase7_preview(phase7 / "preview-results.jsonl", ["r1"])
+    _write_phase8_manifest(phase8 / "photoshop-manifest.json", ["r1"])
+    _write_phase6_gpt_manifest(gpt_quality / "manifest.json")
+    _write_jsonl(gpt_quality / "gpt-replace-results.jsonl", [_row("r1", "processed")])
+
+    report = build_pipeline_coverage(
+        phase1_run_dir=phase1,
+        detection_run_dir=phase2,
+        font_selection_run_dir=phase3,
+        layout_run_dir=phase4,
+        angle_run_dir=phase5,
+        cleanup_run_dirs=[phase6],
+        preview_run_dir=phase7,
+        export_run_dir=phase8,
+        phase6_gpt_quality_run_dir=gpt_quality,
+    )
+
+    quality = report["quality"]["phase6_gpt_replacement"]
+    assert quality["run_count"] == 1
+    assert quality["gpt_quality_failed_count"] == 1
+    assert quality["record_issue_count"] == 1
+    assert report["summary"]["complete_record_count"] == 0
+    assert report["records"]["r1"]["quality_issues"] == ["phase6_gpt_image2_quality_unacceptable"]
+    assert report["next_records"] == [
+        {"record_id": "r1", "group_name": "框内", "first_quality_issue": "phase6_gpt_image2_quality_unacceptable"}
+    ]
+
+
+def test_build_pipeline_coverage_reads_legacy_phase6_gpt_mimo_evaluation(tmp_path: Path):
+    phase1 = tmp_path / "phase1"
+    phase2 = tmp_path / "phase2"
+    gpt_quality = tmp_path / "phase6-gpt-quality"
+    _write_phase1_manifest(phase1 / "manifest.json")
+    _write_jsonl(phase2 / "detections.jsonl", [_row("r1", "ok")])
+    _write_legacy_phase6_gpt_manifest(gpt_quality / "manifest.json")
+    _write_phase6_gpt_mimo_evaluation(gpt_quality / "reports" / "mimo-gpt-replace-evaluation.json")
+    _write_jsonl(gpt_quality / "gpt-replace-results.jsonl", [_row("r1", "processed")])
+
+    report = build_pipeline_coverage(
+        phase1_run_dir=phase1,
+        detection_run_dir=phase2,
+        phase6_gpt_quality_run_dir=gpt_quality,
+    )
+
+    quality = report["quality"]["phase6_gpt_replacement"]
+    assert quality["gpt_quality_checked_count"] == 1
+    assert quality["gpt_quality_failed_count"] == 1
+    assert report["records"]["r1"]["quality_issues"] == ["phase6_gpt_image2_quality_unacceptable"]
+
+
 def test_write_pipeline_coverage_report_includes_quality_section(tmp_path: Path):
     phase1 = tmp_path / "phase1"
     phase2 = tmp_path / "phase2"
@@ -169,6 +235,60 @@ def _write_phase8_manifest(path: Path, record_ids: list[str] | None = None) -> N
     payload = {"pages": [{"layers": [{"record_id": record_id} for record_id in record_ids or ["r1", "r2"]]}]}
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _write_phase7_preview(path: Path, record_ids: list[str] | None = None) -> None:
+    rows = [{"status": "page_preview_generated", "records": [{"record_id": record_id} for record_id in record_ids or ["r1"]]}]
+    _write_jsonl(path, rows)
+
+
+def _write_phase6_gpt_manifest(path: Path) -> None:
+    payload = {
+        "schema_version": "autolettering.phase6.nonbubble_gpt_replace.v1",
+        "record_count": 1,
+        "gpt_ok_count": 1,
+        "gpt_quality_checked_count": 1,
+        "gpt_quality_failed_count": 1,
+        "mimo": {
+            "quality": {
+                "gpt_image2_status": "unacceptable",
+                "unacceptable_methods": ["gpt-image-2 cn"],
+            }
+        },
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
+def _write_legacy_phase6_gpt_manifest(path: Path) -> None:
+    payload = {
+        "schema_version": "autolettering.phase6.nonbubble_gpt_replace.v1",
+        "record_count": 1,
+        "gpt_ok_count": 1,
+        "gpt_failed_count": 0,
+        "mimo": {
+            "path": str(path.parent / "reports" / "mimo-gpt-replace-evaluation.json"),
+            "status": "ok",
+        },
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
+def _write_phase6_gpt_mimo_evaluation(path: Path) -> None:
+    payload = {
+        "raw_text": json.dumps(
+            {
+                "gpt_image2_scores": {"exact_simplified_chinese_text_correctness": 0},
+                "unacceptable_methods": ["gpt-image-2 cn"],
+                "best_overall_for_user_choice": "lama_large_512px",
+            },
+            ensure_ascii=False,
+        ),
+        "response": {"status": "ok"},
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
 def _write_phase8_export_audit(

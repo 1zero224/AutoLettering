@@ -12,8 +12,10 @@ PHASE7_MIN_USABLE_SCORE = 7
 def build_quality_summary(
     phase7_preview_evaluation_run_dir: RunDirInput,
     phase8_export_audit_run_dir: RunDirInput,
+    phase6_gpt_quality_run_dir: RunDirInput = None,
 ) -> dict[str, dict]:
     return {
+        "phase6_gpt_replacement": _phase6_gpt_replacement_quality_summary(phase6_gpt_quality_run_dir),
         "phase7_preview": _phase7_preview_quality_summary(phase7_preview_evaluation_run_dir),
         "phase8_export": _phase8_export_quality_summary(phase8_export_audit_run_dir),
     }
@@ -21,6 +23,7 @@ def build_quality_summary(
 
 def quality_issues_by_record(quality: dict) -> dict[str, list[str]]:
     issues: dict[str, list[str]] = {}
+    _merge_record_issues(issues, _phase6_gpt_replacement_issues(quality.get("phase6_gpt_replacement", {})))
     _merge_record_issues(issues, _phase7_preview_issues(quality.get("phase7_preview", {})))
     phase8 = quality.get("phase8_export", {})
     global_issues = ["missing_jsx_anchor_logic"] if phase8.get("jsx_anchor_logic_missing_count") else []
@@ -33,11 +36,22 @@ def quality_issues_by_record(quality: dict) -> dict[str, list[str]]:
 
 
 def quality_markdown_lines(quality: dict) -> list[str]:
+    phase6 = quality.get("phase6_gpt_replacement", {})
     phase7 = quality.get("phase7_preview", {})
     phase8 = quality.get("phase8_export", {})
-    if not _has_phase7_quality(phase7) and not _has_phase8_quality(phase8):
+    if not _has_phase6_gpt_quality(phase6) and not _has_phase7_quality(phase7) and not _has_phase8_quality(phase8):
         return ["", "## Quality Audits", "", "- None"]
     lines = ["", "## Quality Audits"]
+    if _has_phase6_gpt_quality(phase6):
+        lines.extend([
+            "",
+            "### phase6_gpt_replacement",
+            "",
+            f"- GPT replacement runs: {phase6['run_count']}",
+            f"- GPT quality checked: {phase6['gpt_quality_checked_count']}",
+            f"- GPT quality failures: {phase6['gpt_quality_failed_count']}",
+            f"- Record issues: {phase6['record_issue_count']}",
+        ])
     if _has_phase7_quality(phase7):
         lines.extend([
             "",
@@ -64,6 +78,107 @@ def quality_markdown_lines(quality: dict) -> list[str]:
             f"- Missing JSX anchor logic audits: {phase8['jsx_anchor_logic_missing_count']}",
         ])
     return lines
+
+
+def _phase6_gpt_replacement_quality_summary(run_dir: RunDirInput) -> dict:
+    manifests = _phase6_gpt_replacement_manifests(run_dir)
+    runs = [_phase6_gpt_replacement_run(item, manifest) for item, manifest in manifests]
+    records = _phase6_gpt_replacement_records(run_dir, runs)
+    return {
+        "run_count": len(runs),
+        "gpt_quality_checked_count": sum(run["checked_count"] for run in runs),
+        "gpt_quality_failed_count": sum(run["failed_count"] for run in runs),
+        "record_count": len(records),
+        "record_issue_count": sum(len(record.get("issues") or []) for record in records),
+        "records": records,
+    }
+
+
+def _phase6_gpt_replacement_manifests(run_dir: RunDirInput) -> list[tuple[Path, dict]]:
+    manifests: list[tuple[Path, dict]] = []
+    for item in _run_dirs(run_dir):
+        path = Path(item) / "manifest.json"
+        if path.exists():
+            manifests.append((Path(item), json.loads(path.read_text(encoding="utf-8"))))
+    return manifests
+
+
+def _phase6_gpt_replacement_run(run_dir: Path, manifest: dict) -> dict:
+    unacceptable = _phase6_gpt_replacement_unacceptable(run_dir, manifest)
+    gpt_ok_count = int(manifest.get("gpt_ok_count") or 0)
+    checked_count = int(manifest.get("gpt_quality_checked_count") or 0)
+    failed_count = int(manifest.get("gpt_quality_failed_count") or 0)
+    if checked_count == 0 and unacceptable:
+        checked_count = gpt_ok_count
+    if failed_count == 0 and unacceptable:
+        failed_count = gpt_ok_count
+    return {
+        "run_dir": run_dir,
+        "unacceptable": unacceptable,
+        "checked_count": checked_count,
+        "failed_count": failed_count,
+    }
+
+
+def _phase6_gpt_replacement_records(run_dir: RunDirInput, runs: list[dict]) -> list[dict]:
+    if not any(run["unacceptable"] for run in runs):
+        return []
+    by_record: dict[str, dict] = {}
+    for item in [run["run_dir"] for run in runs if run["unacceptable"]]:
+        path = Path(item) / "gpt-replace-results.jsonl"
+        if not path.exists():
+            continue
+        for row in _jsonl_rows(path):
+            record_id = row.get("record_id")
+            if not record_id:
+                continue
+            by_record[str(record_id)] = {
+                "record_id": str(record_id),
+                "image_name": row.get("image_name"),
+                "issues": ["phase6_gpt_image2_quality_unacceptable"],
+            }
+    return list(by_record.values())
+
+
+def _phase6_gpt_replacement_unacceptable(run_dir: Path, manifest: dict) -> bool:
+    if int(manifest.get("gpt_quality_failed_count") or 0) > 0:
+        return True
+    mimo = manifest.get("mimo") if isinstance(manifest.get("mimo"), dict) else {}
+    quality = (mimo.get("quality") or {}) if isinstance(mimo, dict) else {}
+    if quality.get("gpt_image2_status") == "unacceptable":
+        return True
+    return _legacy_mimo_gpt_replacement_unacceptable(run_dir, mimo)
+
+
+def _legacy_mimo_gpt_replacement_unacceptable(run_dir: Path, mimo: dict) -> bool:
+    path_value = mimo.get("path") if isinstance(mimo, dict) else None
+    if not path_value:
+        return False
+    path = Path(path_value)
+    if not path.is_absolute():
+        path = run_dir / path
+        if not path.exists():
+            path = run_dir / Path(path_value).name
+        if not path.exists():
+            path = run_dir / "reports" / Path(path_value).name
+    if not path.exists():
+        return False
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        raw_text = str(payload.get("raw_text", ""))
+        parsed = json.loads(_strip_json_wrapper(raw_text))
+    except Exception:
+        return False
+    unacceptable = [str(item) for item in parsed.get("unacceptable_methods", []) if str(item).strip()]
+    return any(_is_gpt_image2_method_label(item) for item in unacceptable)
+
+
+def _phase6_gpt_replacement_issues(phase6: dict) -> dict[str, list[str]]:
+    return {
+        str(record["record_id"]): [str(issue) for issue in record.get("issues", [])]
+        for record in phase6.get("records", [])
+        if record.get("record_id") and record.get("issues")
+    }
 
 
 def _phase7_preview_quality_summary(run_dir: RunDirInput) -> dict:
@@ -146,6 +261,10 @@ def _has_phase7_quality(phase7: dict) -> bool:
     return bool(phase7 and phase7.get("evaluation_count"))
 
 
+def _has_phase6_gpt_quality(phase6: dict) -> bool:
+    return bool(phase6 and phase6.get("run_count"))
+
+
 def _has_phase8_quality(phase8: dict) -> bool:
     return bool(phase8 and phase8.get("audit_count"))
 
@@ -193,9 +312,30 @@ def _count_record_issue(records: list[dict], issue: str) -> int:
     return sum(1 for record in records if issue in (record.get("issues") or []))
 
 
+def _is_gpt_image2_method_label(value: str) -> bool:
+    normalized = value.lower().replace("_", "-").replace(" ", "")
+    return "gpt-image-2" in normalized or "gptimage2" in normalized
+
+
+def _strip_json_wrapper(raw_text: str) -> str:
+    text = raw_text.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    return text
+
+
 def _run_dirs(run_dir: RunDirInput) -> list[str | Path]:
     if run_dir is None:
         return []
     if isinstance(run_dir, str | Path):
         return [run_dir]
     return list(run_dir)
+
+
+def _jsonl_rows(path: Path) -> list[dict]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
