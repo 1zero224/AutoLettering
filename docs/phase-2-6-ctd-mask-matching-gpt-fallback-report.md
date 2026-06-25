@@ -535,6 +535,39 @@ Important behavior:
 - The best current evidence is a usable locator candidate, not a successful GPT replacement. The remaining blocker is locator stability under repeated MIMO calls, especially when MIMO returns a valid but too-low retry bbox.
 - MIMO validation is helpful but not sufficient as the sole gate: v10 visually targeted the wrong upper panel while MIMO marked it tight. Programmatic anchor/window guards are required before trusting `accepted + tight_enough=true`.
 
+### 2026-06-26 Follow-up: Right-edge Cap, Accepted-below-anchor Guard, And GPT Replacement Trials
+
+Additional real runs for `GBC06_02.png#14` targeted the same bottom-panel sound effect after the earlier anchor recovery work. The implemented changes are:
+
+- Persist rejected recovery candidates under `fallback_locator.anchor_recovery_attempt` / `fallback_locator.tightness_retry`, including candidate bbox, refinement metadata, validation status, reasoning, and validation image path. This keeps failed candidate evidence visible in later grids and JSONL.
+- Add a right-edge cap for anchor-recovered light-background sound effects. It trims sparse right-side screentone or a strong panel-divider column after the target text, without changing the left/top/bottom bounds.
+- Add an accepted-below-anchor guard: even when MIMO marks a bbox as `accepted` and `tight_enough=true`, Phase 6 retries deterministic anchor recovery if the bbox extends far below the LabelPlus anchor and horizontally covers the anchor. This prevents low hair/blank-region boxes from reaching GPT.
+- Strengthen the GPT image prompt with an explicit character sequence and exact character count, e.g. `啪 | 嗒 | 啪 | 嗒 | 啪 | 嗒`, plus warnings not to substitute `啪` or `嗒`.
+
+Locator and GPT replacement runs:
+
+| Run | Final locator bbox | Validation | GPT/MIMO result | Manual conclusion |
+| --- | --- | --- | --- | --- |
+| `phase6-gbc06-02-14-fallback-context-mimo-v18-panel-divider-cap` | `[38, 398, 525, 488]` | `accepted`, `tight_enough=true` | `dry_run` | Locator became usable: full sound effect is covered and right panel screentone is excluded. |
+| `phase6-gbc06-02-14-fallback-context-mimo-v19-accepted-guard` | `[38, 396, 525, 488]` | `accepted`, `tight_enough=true` | `dry_run` | Guard recovered a too-low MIMO result back to the target sound-effect band. |
+| `phase6-gbc06-02-14-fallback-context-gpt-v3-panel-divider-cap` | `[38, 397, 525, 488]` | `accepted`, `tight_enough=true` | MIMO score `0`, `usable=false`, observed text `啦嗒啦嗒啦` | Region and style were close, but exact text failed and generated artifacts remained. |
+| `phase6-gbc06-02-14-fallback-context-gpt-v4-exact-sequence-prompt` | `[0, 455, 652, 570]` | `accepted`, `tight_enough=true` | MIMO score `10`, `usable=true` | False-positive evaluation: manual review shows the edit region was too low and mostly cleared hair/blank area rather than producing a usable translation. |
+| `phase6-gbc06-02-14-fallback-context-gpt-v5-guarded-exact-prompt` | `[38, 400, 520, 480]` | `accepted`, `tight_enough=true` | MIMO score `0`, `usable=false`, observed text `嗒嗒哈哈` | Better guarded region, but exact text still failed; GPT omitted `啪` and substituted wrong characters. |
+
+Important artifacts:
+
+- Locator overlay: `outputs/runs/phase6-gbc06-02-14-fallback-context-mimo-v19-accepted-guard/debug/fallback_locator_overlays/GBC06-02-png-14.png`
+- GPT v3 quality sheet: `outputs/runs/phase6-gbc06-02-14-gpt-v3-mimo-quality/debug/replacement_quality_sheets/GBC06-02-png-14.png`
+- GPT v4 quality sheet: `outputs/runs/phase6-gbc06-02-14-gpt-v4-mimo-quality/debug/replacement_quality_sheets/GBC06-02-png-14.png`
+- GPT v5 quality sheet: `outputs/runs/phase6-gbc06-02-14-gpt-v5-mimo-quality/debug/replacement_quality_sheets/GBC06-02-png-14.png`
+- Near-square comparison grid: `outputs/runs/phase6-gbc06-02-14-gpt-comparison-v1/visuals/gpt-v3-v4-v5-comparison.png`
+
+Current conclusion for this sample:
+
+- The fallback locator path is now usable enough to produce a tight target region for manual inspection and controlled GPT calls.
+- `gpt-image-2` direct replacement is still not usable for this sound-effect sample. Across real calls it either generates the wrong Chinese characters or edits the wrong/too-low region when the locator is unstable.
+- MIMO replacement evaluation is useful as evidence but not sufficient as an automatic acceptance gate. It correctly rejected v3/v5, but falsely accepted v4, so manual review or an additional OCR/shape check is still required before consuming GPT direct replacements.
+
 ## Current Recommendation
 
 Use the CTD matched path with `lama_large_512px` for non-bubble text when CTD detects the original text. This is the currently usable route.

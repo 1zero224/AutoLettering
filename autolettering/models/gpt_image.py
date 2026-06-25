@@ -59,9 +59,29 @@ def gpt_image_edit_prompt(translated_text: str) -> str:
         "Never generate Japanese kana or Japanese-only kanji variants. Use simplified Chinese punctuation and characters exactly as provided.",
         "If the area is vertical, keep a natural vertical manga lettering layout.",
         *_glyph_variant_warnings(translated_text),
+        *_exact_target_text_constraints(translated_text),
         f"Target Chinese text: {translated_text}",
     ]
     return "\n".join(lines)
+
+
+def _exact_target_text_constraints(translated_text: str) -> list[str]:
+    if not translated_text:
+        return []
+    length_label = "visible Chinese characters" if all(_is_cjk_unified(char) for char in translated_text) else "visible target characters"
+    constraints = [
+        f"Character sequence: {' | '.join(translated_text)}",
+        f"Write exactly {len(translated_text)} {length_label}; each listed character must appear once in order.",
+    ]
+    if "啪" in translated_text:
+        constraints.append("Do not replace `啪` with `啦`, `吧`, `拍`, `哇`, or any visually similar character.")
+    if "嗒" in translated_text:
+        constraints.append("Do not replace `嗒` with `哒`, `啦`, `搭`, `塔`, or any visually similar character.")
+    return constraints
+
+
+def _is_cjk_unified(char: str) -> bool:
+    return "\u4e00" <= char <= "\u9fff"
 
 
 def _glyph_variant_warnings(translated_text: str) -> list[str]:
