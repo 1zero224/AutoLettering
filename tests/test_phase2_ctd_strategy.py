@@ -1,4 +1,5 @@
 import json
+import csv
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -103,6 +104,29 @@ def test_run_phase2_cta_strategy_writes_mask_component_as_primary_text_region(tm
     assert record["cta_match"]["status"] == "matched"
     assert record["cta_match"]["component_id"] == "component-0001"
     assert record["ctd_match"] == record["cta_match"]
+    expected_diagnostics = {
+        "schema_version": "autolettering.cta_mask_match_diagnostics.v1",
+        "record_id": "page.png#1",
+        "match_status": "matched",
+        "failure_reason": None,
+        "threshold_px": 20.0,
+        "candidate_count": 1,
+        "within_threshold_count": 1,
+        "nearest_component_id": "component-0001",
+        "nearest_edge_distance_px": 14.0,
+        "selected_component_id": "component-0001",
+        "top_candidates": [
+            {
+                "component_id": "component-0001",
+                "component_bbox_xyxy": [88, 70, 116, 151],
+                "component_mask_path": str(component_mask),
+                "edge_distance_px": 14.0,
+                "within_threshold": True,
+            }
+        ],
+    }
+    assert record["cta_match_diagnostics"] == expected_diagnostics
+    assert record["ctd_match_diagnostics"] == expected_diagnostics
     ctd_dir = run_dir / "debug" / "ctd_masks" / "page"
     components = json.loads((ctd_dir / "cta-closed-mask-components.json").read_text(encoding="utf-8"))
     assert components["schema_version"] == "autolettering.cta_mask_components.v1"
@@ -129,6 +153,12 @@ def test_run_phase2_cta_strategy_writes_mask_component_as_primary_text_region(tm
             "threshold_px": 20.0,
         }
     ]
+    with (run_dir / "reports" / "manual-review.csv").open("r", encoding="utf-8", newline="") as handle:
+        review_row = next(csv.DictReader(handle))
+    assert review_row["mask_match_status"] == "matched"
+    assert review_row["mask_match_nearest_component_id"] == "component-0001"
+    assert review_row["mask_match_nearest_edge_distance_px"] == "14.0"
+    assert review_row["mask_match_within_threshold_count"] == "1"
 
 
 def test_run_phase2_ctd_strategy_records_fallback_required_when_no_component_is_close(tmp_path: Path, monkeypatch):
@@ -176,6 +206,28 @@ def test_run_phase2_ctd_strategy_records_fallback_required_when_no_component_is_
     assert record["text_region_mask_path"] is None
     assert record["text_region_mask_bbox_xyxy"] is None
     assert record["match_status"] == "fallback_required"
+    assert record["ctd_match_diagnostics"] == {
+        "schema_version": "autolettering.cta_mask_match_diagnostics.v1",
+        "record_id": "page.png#1",
+        "match_status": "fallback_required",
+        "failure_reason": "no_ctd_mask_within_threshold",
+        "threshold_px": 8,
+        "candidate_count": 1,
+        "within_threshold_count": 0,
+        "nearest_component_id": "component-0001",
+        "nearest_edge_distance_px": 83.451,
+        "selected_component_id": None,
+        "top_candidates": [
+            {
+                "component_id": "component-0001",
+                "component_bbox_xyxy": [160, 20, 190, 50],
+                "component_mask_path": str(component_mask),
+                "edge_distance_px": 83.451,
+                "within_threshold": False,
+            }
+        ],
+    }
+    assert record["cta_match_diagnostics"] == record["ctd_match_diagnostics"]
     assert record["fallback"]["method"] == "mimo_crop_then_gpt_image2_masked_edit"
     assert record["fallback"]["trigger_reason"] == "no_ctd_mask_within_threshold"
     assert record["fallback"]["upstream_match_attempted"] is True

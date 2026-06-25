@@ -25,6 +25,9 @@ from .text_bbox import selected_text_bbox
 from .text_body_bbox import selected_text_body_bbox
 
 
+CTA_MATCH_DIAGNOSTICS_SCHEMA_VERSION = "autolettering.cta_mask_match_diagnostics.v1"
+
+
 def run_phase2(
     labelplus_file: str | Path,
     output_root: str | Path = "outputs/runs",
@@ -92,11 +95,11 @@ def _write_detections(
 ) -> tuple[int, int]:
     ok_count = failed_count = 0
     rows: list[dict] = []
-    ctd_matches = (
-        _ctd_matches_by_record(run_dir, selected_records, ctd_max_edge_distance_px)
-        if _is_cta_mask_strategy(detection_strategy)
-        else {}
-    )
+    if _is_cta_mask_strategy(detection_strategy):
+        ctd_matches, ctd_diagnostics = _ctd_matches_by_record(run_dir, selected_records, ctd_max_edge_distance_px)
+    else:
+        ctd_matches = {}
+        ctd_diagnostics = {}
     with (run_dir / "detections.jsonl").open("w", encoding="utf-8", newline="\n") as handle:
         for image, label in selected_records:
             payload = _detect_record(
@@ -107,6 +110,7 @@ def _write_detections(
                 radius_y,
                 detection_strategy=detection_strategy,
                 ctd_match=ctd_matches.get(label.id),
+                ctd_match_diagnostics=ctd_diagnostics.get(label.id),
                 ctd_max_edge_distance_px=ctd_max_edge_distance_px,
             )
             rows.append(payload)
@@ -125,6 +129,7 @@ def _detect_record(
     radius_y: int,
     detection_strategy: str = "cv",
     ctd_match: CtdMaskMatch | None = None,
+    ctd_match_diagnostics: dict | None = None,
     ctd_max_edge_distance_px: float | None = None,
 ) -> dict:
     result = _detect_with_strategy(
@@ -153,6 +158,10 @@ def _detect_record(
         if _is_cta_mask_strategy(detection_strategy):
             payload["cta_match"] = match_payload
         payload["ctd_match"] = match_payload
+    if ctd_match_diagnostics is not None:
+        if _is_cta_mask_strategy(detection_strategy):
+            payload["cta_match_diagnostics"] = ctd_match_diagnostics
+        payload["ctd_match_diagnostics"] = ctd_match_diagnostics
     if result.status == "fallback_required":
         payload["fallback"] = _mimo_gpt_fallback_payload(
             label,
@@ -226,13 +235,16 @@ def _ctd_matches_by_record(
     run_dir: Path,
     selected_records: list[tuple[ManifestImage, ManifestLabel]],
     max_edge_distance_px: float,
-) -> dict[str, CtdMaskMatch]:
+) -> tuple[dict[str, CtdMaskMatch], dict[str, dict]]:
     matches: dict[str, CtdMaskMatch] = {}
+    diagnostics: dict[str, dict] = {}
     for image, labels in _group_labels_by_image(selected_records):
         components = _detect_page_components(run_dir, image)
-        _write_ctd_distance_rows(run_dir, image, labels, components, max_edge_distance_px)
-        matches.update(assign_labelplus_points_to_ctd_masks(labels, components, max_edge_distance_px=max_edge_distance_px))
-    return matches
+        distance_rows = _write_ctd_distance_rows(run_dir, image, labels, components, max_edge_distance_px)
+        image_matches = assign_labelplus_points_to_ctd_masks(labels, components, max_edge_distance_px=max_edge_distance_px)
+        matches.update(image_matches)
+        diagnostics.update(_ctd_match_diagnostics_by_record(labels, distance_rows, image_matches, max_edge_distance_px))
+    return matches, diagnostics
 
 
 def _group_labels_by_image(
@@ -271,9 +283,64 @@ def _write_ctd_distance_rows(
     labels: list[ManifestLabel],
     components: list[CtdMaskComponent],
     max_edge_distance_px: float,
-) -> None:
+) -> list[dict]:
     rows = labelplus_ctd_mask_distance_rows(labels, components, max_edge_distance_px=max_edge_distance_px)
     _write_jsonl(_ctd_mask_output_dir(run_dir, image) / "ctd-mask-edge-distances.jsonl", rows)
+    return rows
+
+
+def _ctd_match_diagnostics_by_record(
+    labels: list[ManifestLabel],
+    distance_rows: list[dict],
+    matches: dict[str, CtdMaskMatch],
+    threshold_px: float,
+) -> dict[str, dict]:
+    rows_by_record: dict[str, list[dict]] = {}
+    for row in distance_rows:
+        rows_by_record.setdefault(row["record_id"], []).append(row)
+    return {
+        label.id: _ctd_match_diagnostics_payload(
+            label.id,
+            rows_by_record.get(label.id, []),
+            matches.get(label.id),
+            threshold_px,
+        )
+        for label in labels
+    }
+
+
+def _ctd_match_diagnostics_payload(
+    record_id: str,
+    rows: list[dict],
+    match: CtdMaskMatch | None,
+    threshold_px: float,
+    top_limit: int = 5,
+) -> dict:
+    sorted_rows = sorted(rows, key=lambda item: (item["edge_distance_px"], item["component_id"]))
+    nearest = sorted_rows[0] if sorted_rows else None
+    return {
+        "schema_version": CTA_MATCH_DIAGNOSTICS_SCHEMA_VERSION,
+        "record_id": record_id,
+        "match_status": match.status if match else "fallback_required",
+        "failure_reason": match.failure_reason if match else "ctd_not_run",
+        "threshold_px": threshold_px,
+        "candidate_count": len(sorted_rows),
+        "within_threshold_count": sum(1 for row in sorted_rows if row.get("within_threshold")),
+        "nearest_component_id": nearest.get("component_id") if nearest else None,
+        "nearest_edge_distance_px": nearest.get("edge_distance_px") if nearest else None,
+        "selected_component_id": match.component_id if match and match.status == "matched" else None,
+        "top_candidates": [_ctd_match_candidate_payload(row) for row in sorted_rows[:top_limit]],
+    }
+
+
+def _ctd_match_candidate_payload(row: dict) -> dict:
+    return {
+        "component_id": row["component_id"],
+        "component_bbox_xyxy": row["component_bbox_xyxy"],
+        "component_mask_path": row["component_mask_path"],
+        "edge_distance_px": row["edge_distance_px"],
+        "within_threshold": row["within_threshold"],
+    }
 
 
 def _ctd_mask_output_dir(run_dir: Path, image: ManifestImage) -> Path:
@@ -498,6 +565,10 @@ def _write_manual_review_csv(output_path: Path, rows: list[dict]) -> None:
         "selected_text_box_xyxy",
         "selected_text_full_xyxy",
         "selected_text_body_xyxy",
+        "mask_match_status",
+        "mask_match_nearest_component_id",
+        "mask_match_nearest_edge_distance_px",
+        "mask_match_within_threshold_count",
         "debug_image_path",
         "manual_decision",
         "review_notes",
@@ -511,6 +582,7 @@ def _write_manual_review_csv(output_path: Path, rows: list[dict]) -> None:
 
 
 def _manual_review_row(row: dict) -> dict:
+    diagnostics = row.get("cta_match_diagnostics") or row.get("ctd_match_diagnostics") or {}
     return {
         "record_id": row["record_id"],
         "status": row["status"],
@@ -520,10 +592,20 @@ def _manual_review_row(row: dict) -> dict:
         "selected_text_box_xyxy": json.dumps(row.get("selected_text_box_xyxy"), ensure_ascii=False),
         "selected_text_full_xyxy": json.dumps(row.get("selected_text_full_xyxy"), ensure_ascii=False),
         "selected_text_body_xyxy": json.dumps(row.get("selected_text_body_xyxy"), ensure_ascii=False),
+        "mask_match_status": diagnostics.get("match_status", ""),
+        "mask_match_nearest_component_id": diagnostics.get("nearest_component_id", ""),
+        "mask_match_nearest_edge_distance_px": _csv_value(diagnostics.get("nearest_edge_distance_px")),
+        "mask_match_within_threshold_count": _csv_value(diagnostics.get("within_threshold_count")),
         "debug_image_path": row.get("debug_image_path", ""),
         "manual_decision": "",
         "review_notes": "",
     }
+
+
+def _csv_value(value: object) -> str:
+    if value is None:
+        return ""
+    return str(value)
 
 
 def _write_phase2_report(
@@ -558,6 +640,9 @@ def _write_phase2_report(
         "- `debug/ctd_masks/<page>/cta-closed-mask-components.json`",
         "- `debug/ctd_masks/<page>/ctd-mask-edge-distances.jsonl`",
         "- `reports/manual-review.csv`",
+        "",
+        "CTA/CTD detection rows include `cta_match_diagnostics` / `ctd_match_diagnostics` with nearest mask candidates, threshold counts, and the selected component id.",
+        "`manual-review.csv` repeats the nearest mask-match fields for fast spreadsheet triage.",
         "",
         "Debug overlay colors: raw selected box = red, full text evidence box = green, body text box = purple.",
     ]
