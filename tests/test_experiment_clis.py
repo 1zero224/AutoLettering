@@ -1,6 +1,7 @@
 from experiments import (
     phase2_detect_text_regions,
     phase2_6_cta_first_cleanup,
+    phase2_cta_threshold_sweep,
     phase3_context_font_selection,
     phase6_cleanup_quality,
     phase6_cleanup_gate,
@@ -44,6 +45,38 @@ def test_phase2_detection_cli_defaults_ctd_mask_edge_distance_for_real_mask_edge
     args = parser.parse_args([])
 
     assert args.ctd_max_edge_distance_px == 20.0
+
+
+def test_phase2_cta_threshold_sweep_cli_accepts_repeatable_thresholds():
+    parser = phase2_cta_threshold_sweep.build_parser()
+
+    args = parser.parse_args(
+        [
+            "--phase2-run-dir",
+            "outputs/runs/phase2",
+            "--output-root",
+            "outputs/runs",
+            "--run-id",
+            "sweep",
+            "--threshold",
+            "40",
+            "--threshold",
+            "80",
+        ]
+    )
+
+    assert args.phase2_run_dir == "outputs/runs/phase2"
+    assert args.output_root == "outputs/runs"
+    assert args.run_id == "sweep"
+    assert args.thresholds == [40.0, 80.0]
+
+
+def test_phase2_cta_threshold_sweep_cli_leaves_default_thresholds_to_runner():
+    parser = phase2_cta_threshold_sweep.build_parser()
+
+    args = parser.parse_args(["--phase2-run-dir", "outputs/runs/phase2"])
+
+    assert args.thresholds is None
 
 
 def test_phase2_6_cta_first_cleanup_cli_defaults_to_cta_first_contract():
