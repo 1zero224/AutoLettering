@@ -44,23 +44,32 @@ class GptImageEditClient:
 
 
 def gpt_image_edit_prompt(translated_text: str) -> str:
-    return "\n".join(
-        [
-            "Edit only the transparent masked text area.",
-            "Remove the original Japanese manga text and preserve the surrounding artwork.",
-            "Render the Chinese replacement text naturally inside the transparent masked area only.",
-            "The output text must exactly match the target string below, character for character.",
-            "Do not write text anywhere outside the transparent masked area.",
-            "Do not use speech bubbles, margins, or unmasked areas for the replacement text.",
-            "Do not create gray boxes, shaded rectangles, glow, blur, gradients, or dark overlays around the replacement text.",
-            "Keep the manga background tone inside the edited area consistent with nearby black-and-white line art.",
-            "Use clean black manga lettering unless the original local text is visibly light-on-dark.",
-            "Do not omit, add, reorder, paraphrase, translate, or keep any original Japanese characters.",
-            "Never generate Japanese kana or Japanese-only kanji variants. Use simplified Chinese punctuation and characters exactly as provided.",
-            "If the area is vertical, keep a natural vertical manga lettering layout.",
-            f"Target Chinese text: {translated_text}",
-        ]
-    )
+    lines = [
+        "Edit only the transparent masked text area.",
+        "Remove the original Japanese manga text and preserve the surrounding artwork.",
+        "Render the Chinese replacement text naturally inside the transparent masked area only.",
+        "The output text must exactly match the target string below, character for character.",
+        "Do not write text anywhere outside the transparent masked area.",
+        "Do not use speech bubbles, margins, or unmasked areas for the replacement text.",
+        "Do not create gray boxes, shaded rectangles, glow, blur, gradients, or dark overlays around the replacement text.",
+        "Keep the manga background tone inside the edited area consistent with nearby black-and-white line art.",
+        "Use clean black manga lettering unless the original local text is visibly light-on-dark.",
+        "For light-on-dark source text, render crisp light text on the dark background and match the local perspective, skew, scale, and angle.",
+        "Do not omit, add, reorder, paraphrase, translate, or keep any original Japanese characters.",
+        "Never generate Japanese kana or Japanese-only kanji variants. Use simplified Chinese punctuation and characters exactly as provided.",
+        "If the area is vertical, keep a natural vertical manga lettering layout.",
+        *_glyph_variant_warnings(translated_text),
+        f"Target Chinese text: {translated_text}",
+    ]
+    return "\n".join(lines)
+
+
+def _glyph_variant_warnings(translated_text: str) -> list[str]:
+    warnings: list[str] = []
+    if "暂" in translated_text:
+        warnings.append("The target contains Simplified Chinese `暂`; copy that exact glyph.")
+        warnings.append("Do not write `暫`, `仮`, or `哲` for `暂`.")
+    return warnings
 
 
 def normalize_openai_base_url(base_url: str) -> str:

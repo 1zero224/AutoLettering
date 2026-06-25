@@ -42,6 +42,7 @@ def run_phase6_nonbubble_cleanup(
     ]
     _write_jsonl(run_dir / "cleanup-results.jsonl", rows)
     _write_fallback_locator_grid(run_dir, rows)
+    _write_fallback_replacement_grid(run_dir, rows)
     _write_report(run_dir / "reports" / "phase6-nonbubble-report.md", detection_run_dir, rows)
     return run_dir
 
@@ -88,6 +89,11 @@ def _cleanup_one(
         cleanup.update(
             {
                 "route": "cta_mask_lama_large_512px",
+                "text_region_source": "ctd_refined_mask_component",
+                "ballonstranslator_detector_module": "ctd",
+                "requested_inpaint_method": method,
+                "ballonstranslator_inpainter": method,
+                "actual_inpaint_method": cleanup.get("method"),
                 "source_mask_path": _ctd_component_mask_path(detection),
                 "text_overlay_required": True,
             }
@@ -96,6 +102,7 @@ def _cleanup_one(
             "status": "not_applicable",
             "reason": "cta_mask_matched_inpaint_path",
             "inpaint_method": method,
+            "replacement_path": "not_used_for_ctd_matched_records",
         }
     else:
         prompt = gpt_image_edit_prompt(detection.get("translated_text", ""))
@@ -138,6 +145,7 @@ def _fallback_gpt_cleanup_one(
             "fallback_locator_validation": {"status": "not_called", "reason": "fallback_locator_failed"},
             "gpt_image2_edit": {"status": "not_called", "reason": "fallback_locator_failed"},
         }
+    locator = _refine_fallback_locator_bbox(locator, context["input_path"], context_bbox)
     validation = _validate_fallback_locator_semantics(run_dir, detection, locator, context["locator_path"], mimo_client)
     if validation.get("status") != "accepted":
         return {
@@ -340,7 +348,7 @@ def _write_fallback_context(run_dir: Path, detection: dict, context_bbox: tuple[
     with Image.open(detection["image_path"]) as image:
         crop = image.convert("RGB").crop(context_bbox)
     crop.save(input_path)
-    _write_locator_grid_image(crop, locator_path)
+    _write_locator_grid_image(crop, locator_path, _context_labelplus_point(detection))
     return {
         "input_path": input_path,
         "locator_path": locator_path,
@@ -390,6 +398,7 @@ def _locate_fallback_bbox(detection: dict, context_path: Path, context_bbox: tup
         [
             "Find the original Japanese text region corresponding to this Chinese translation inside the crop.",
             "The image includes a green coordinate grid and red pixel labels. The labels are guides only; do not include them in the target bbox.",
+            "The blue LabelPlus cross marks the approximate label point; choose the corresponding original text nearest to that cross, not unrelated nearby bubble text.",
             f"The crop dimensions are width={context_bbox[2] - context_bbox[0]} and height={context_bbox[3] - context_bbox[1]} pixels.",
             f"Chinese translation: {detection.get('translated_text', '')}",
             "Return one JSON object, not an array.",
@@ -433,6 +442,7 @@ def _retry_locate_fallback_bbox(
             f"Crop dimensions are width={width} and height={height} pixels.",
             f"Chinese translation: {detection.get('translated_text', '')}",
             "Re-locate the original Japanese text region in this same image.",
+            "Use the blue LabelPlus cross as the anchor for the intended text; reject nearby text columns that are farther from that cross.",
             "Return corrected crop-local pixel coordinates only: 0 <= x1 < x2 <= width and 0 <= y1 < y2 <= height.",
             "For vertical Japanese text, include the full visible top-to-bottom text column, not just the lower part.",
             "Return only JSON with bbox_xyxy, confidence, and reasoning_summary.",
@@ -630,7 +640,7 @@ def _should_retry_fallback_validation(validation: dict) -> bool:
     )
 
 
-def _write_locator_grid_image(crop: Image.Image, output_path: Path) -> Path:
+def _write_locator_grid_image(crop: Image.Image, output_path: Path, labelplus_point_xy: list[int] | None = None) -> Path:
     image = crop.convert("RGB").copy()
     draw = ImageDraw.Draw(image, "RGBA")
     font = _locator_font()
@@ -643,9 +653,29 @@ def _write_locator_grid_image(crop: Image.Image, output_path: Path) -> Path:
     for y in range(0, height, step):
         draw.line((0, y, width, y), fill=(0, 210, 90, 105), width=1)
         draw.text((2, y + 2), str(y), fill=(255, 0, 0, 255), font=font)
+    _draw_labelplus_cross(draw, labelplus_point_xy, width, height)
     draw.text((6, max(4, height - 18)), f"w={width} h={height}", fill=(255, 0, 0, 255), font=font)
     image.save(output_path)
     return output_path
+
+
+def _context_labelplus_point(detection: dict) -> list[int] | None:
+    point = (detection.get("fallback") or {}).get("context_labelplus_point_xy")
+    if not isinstance(point, list) or len(point) != 2:
+        return None
+    return [int(point[0]), int(point[1])]
+
+
+def _draw_labelplus_cross(draw: ImageDraw.ImageDraw, point: list[int] | None, width: int, height: int) -> None:
+    if point is None:
+        return
+    x, y = point
+    if not (0 <= x < width and 0 <= y < height):
+        return
+    color = (0, 90, 255, 235)
+    draw.line((max(0, x - 18), y, min(width - 1, x + 18), y), fill=color, width=4)
+    draw.line((x, max(0, y - 18), x, min(height - 1, y + 18)), fill=color, width=4)
+    draw.ellipse((x - 7, y - 7, x + 7, y + 7), outline=color, width=3)
 
 
 def _write_fallback_locator_grid(run_dir: Path, rows: list[dict]) -> Path | None:
@@ -668,6 +698,62 @@ def _write_fallback_locator_grid(run_dir: Path, rows: list[dict]) -> Path | None
         columns=near_square_columns(len(tiles)),
         tile_size=(330, 330),
     )
+
+
+def _write_fallback_replacement_grid(run_dir: Path, rows: list[dict]) -> Path | None:
+    tiles: list[tuple[str, Path]] = []
+    for row in rows:
+        cleanup = row.get("cleanup") or {}
+        if cleanup.get("method") != "gpt_image2_masked_edit":
+            continue
+        record_id = row["record_id"]
+        safe_id = _safe_name(record_id)
+        _append_existing_tile(tiles, f"{record_id}\nlocator bbox", run_dir / "debug" / "fallback_locator_overlays" / f"{safe_id}.png")
+        gpt_payload = row.get("gpt_image2_edit") or {}
+        request = gpt_payload.get("request") or {}
+        edit_context = gpt_payload.get("edit_context") or {}
+        _append_existing_tile(tiles, f"{record_id}\nedit input", edit_context.get("input_path") or request.get("image_path"))
+        mask_preview = _fallback_mask_preview(run_dir, record_id, edit_context.get("mask_path") or request.get("mask_path"))
+        _append_existing_tile(tiles, f"{record_id}\ntransparent mask", mask_preview)
+        _append_existing_tile(
+            tiles,
+            f"{record_id}\ngpt-image-2 output",
+            gpt_payload.get("normalized_output_path") or gpt_payload.get("output_path"),
+        )
+        _append_existing_tile(tiles, f"{record_id}\nfinal replacement", cleanup.get("replacement_crop_path"))
+    if not tiles:
+        return None
+    return write_grid(
+        run_dir / "visuals" / "fallback-replacement-grid.png",
+        tiles,
+        columns=near_square_columns(len(tiles)),
+        tile_size=(330, 330),
+    )
+
+
+def _append_existing_tile(tiles: list[tuple[str, Path]], label: str, path: str | Path | None) -> None:
+    if not path:
+        return
+    candidate = Path(path)
+    if candidate.exists():
+        tiles.append((label, candidate))
+
+
+def _fallback_mask_preview(run_dir: Path, record_id: str, mask_path: str | Path | None) -> Path | None:
+    if not mask_path:
+        return None
+    source = Path(mask_path)
+    if not source.exists():
+        return None
+    output = run_dir / "debug" / "fallback_replacement_mask_previews" / f"{_safe_name(record_id)}.png"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with Image.open(source) as image:
+        alpha = np.array(image.convert("RGBA").getchannel("A"), dtype=np.uint8)
+    preview = np.full((*alpha.shape, 3), 235, dtype=np.uint8)
+    preview[alpha == 0] = (255, 70, 70)
+    preview[alpha > 0] = (230, 230, 230)
+    Image.fromarray(preview, mode="RGB").save(output)
+    return output
 
 
 def _write_locator_validation_image(locator_path: Path, locator: dict, record_id: str, output_path: Path) -> Path:
@@ -805,6 +891,14 @@ def _compose_gpt_replacement_region(
     edited: Image.Image,
     local_bbox: tuple[int, int, int, int],
 ) -> Image.Image:
+    if _looks_light_text_on_dark(original, local_bbox):
+        light_alpha = _light_text_alpha(edited, local_bbox)
+        if light_alpha is not None:
+            cleaned = original.copy()
+            ImageDraw.Draw(cleaned).rectangle(local_bbox, fill=_local_dark_background_color(original, local_bbox))
+            cleaned.paste(edited, (0, 0), light_alpha)
+            return cleaned
+
     text_alpha = _dark_text_alpha(edited, local_bbox)
     if text_alpha is None:
         alpha = Image.new("L", original.size, 0)
@@ -817,6 +911,40 @@ def _compose_gpt_replacement_region(
     ImageDraw.Draw(cleaned).rectangle(local_bbox, fill=background)
     cleaned.paste(edited, (0, 0), text_alpha)
     return cleaned
+
+
+def _looks_light_text_on_dark(original: Image.Image, local_bbox: tuple[int, int, int, int]) -> bool:
+    gray = np.array(original.convert("L"), dtype=np.uint8)
+    x1, y1, x2, y2 = local_bbox
+    region = gray[y1:y2, x1:x2]
+    if region.size == 0:
+        return False
+    return float((region < 80).mean()) >= 0.35 and float((region > 180).mean()) >= 0.03
+
+
+def _light_text_alpha(edited: Image.Image, local_bbox: tuple[int, int, int, int]) -> Image.Image | None:
+    gray = np.array(edited.convert("L"), dtype=np.uint8)
+    x1, y1, x2, y2 = local_bbox
+    light = np.zeros_like(gray, dtype=np.uint8)
+    light_region = gray[y1:y2, x1:x2] > 205
+    if int(light_region.sum()) < 20:
+        return None
+    light[y1:y2, x1:x2] = light_region.astype(np.uint8) * 255
+    return Image.fromarray(light, mode="L")
+
+
+def _local_dark_background_color(original: Image.Image, local_bbox: tuple[int, int, int, int]) -> tuple[int, int, int]:
+    array = np.array(original.convert("RGB"), dtype=np.uint8)
+    x1, y1, x2, y2 = local_bbox
+    region = array[y1:y2, x1:x2]
+    if region.size == 0:
+        return (0, 0, 0)
+    luma = region.astype(np.float32).mean(axis=2)
+    samples = region[luma <= 80]
+    if len(samples) < 12:
+        return (0, 0, 0)
+    median = np.median(samples, axis=0)
+    return tuple(int(value) for value in median)
 
 
 def _dark_text_alpha(edited: Image.Image, local_bbox: tuple[int, int, int, int]) -> Image.Image | None:
@@ -889,6 +1017,67 @@ def _mimo_object_payload(raw_text: str) -> dict:
     if not isinstance(payload, dict):
         raise ValueError("mimo_bbox_payload_not_object")
     return payload
+
+
+def _refine_fallback_locator_bbox(locator: dict, context_path: str | Path, context_bbox: tuple[int, int, int, int]) -> dict:
+    local_bbox = locator.get("local_bbox_xyxy")
+    if locator.get("status") != "ok" or not isinstance(local_bbox, list) or len(local_bbox) != 4:
+        return locator
+    try:
+        with Image.open(context_path) as image:
+            refined = _trim_bbox_to_dark_background_support(image.convert("RGB"), tuple(int(value) for value in local_bbox))
+    except (FileNotFoundError, OSError, ValueError):
+        return locator
+    if refined == tuple(int(value) for value in local_bbox):
+        return locator
+    result = dict(locator)
+    result["local_bbox_xyxy"] = list(refined)
+    result["global_bbox_xyxy"] = list(_global_bbox(context_bbox, refined))
+    result["refinement"] = {
+        "method": "trim_to_dark_background_support",
+        "original_local_bbox_xyxy": [int(value) for value in local_bbox],
+        "refined_local_bbox_xyxy": list(refined),
+    }
+    return result
+
+
+def _trim_bbox_to_dark_background_support(image: Image.Image, bbox: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+    x1, y1, x2, y2 = bbox
+    if x2 - x1 < 80 or y2 - y1 < 16:
+        return bbox
+    gray = np.array(image.convert("L"), dtype=np.uint8)
+    crop = gray[y1:y2, x1:x2]
+    if crop.size == 0:
+        return bbox
+    dark_ratio = (crop < 90).mean(axis=0)
+    support = dark_ratio >= 0.25
+    runs = _true_runs(support, min_width=8)
+    if not runs:
+        return bbox
+    best = max(runs, key=lambda item: (item[1] - item[0], float(dark_ratio[item[0] : item[1]].mean())))
+    run_width = best[1] - best[0]
+    width = x2 - x1
+    if run_width >= width * 0.9:
+        return bbox
+    refined_x1 = max(x1, x1 + best[0] - 2)
+    refined_x2 = min(x2, x1 + best[1] + 2)
+    if refined_x2 - refined_x1 < max(24, int(width * 0.25)):
+        return bbox
+    return refined_x1, y1, refined_x2, y2
+
+
+def _true_runs(values: np.ndarray, min_width: int) -> list[tuple[int, int]]:
+    runs: list[tuple[int, int]] = []
+    start: int | None = None
+    for index, value in enumerate(values):
+        if bool(value) and start is None:
+            start = index
+        if (not bool(value) or index == len(values) - 1) and start is not None:
+            end = index + 1 if bool(value) and index == len(values) - 1 else index
+            if end - start >= min_width:
+                runs.append((start, end))
+            start = None
+    return runs
 
 
 def _mimo_bool(value: object) -> bool | None:
@@ -991,6 +1180,7 @@ def _write_report(output_path: Path, detection_run_dir: str | Path, rows: list[d
         "- `fallback_locator_validation_input/*.png`",
         "- `debug/fallback_locator_overlays/*.png`",
         "- `visuals/fallback-locator-grid.png`",
+        "- `visuals/fallback-replacement-grid.png`",
     ]
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")

@@ -15,7 +15,9 @@ from autolettering.models.mimo import MimoVisionClient, MimoVisionConfig
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run CTA-first Phase 2 detection and Phase 6 non-bubble cleanup.")
+    parser = argparse.ArgumentParser(
+        description="Run CTA-first Phase 2/6 cleanup. CTA-first uses BallonsTranslator CTD refined masks first."
+    )
     parser.add_argument("--labelplus-file", default="GBC06 (已翻 斗笠)/翻译_0.txt")
     parser.add_argument("--output-root", default="outputs/runs")
     parser.add_argument("--run-id", default=None)

@@ -12,6 +12,12 @@ def test_run_phase8_photoshop_export_writes_manifest_and_jsx(tmp_path: Path):
     manifest = json.loads((run_dir / "photoshop-manifest.json").read_text(encoding="utf-8"))
     layer = manifest["pages"][0]["layers"][0]
     assert manifest["schema_version"] == "autolettering.photoshop.v1"
+    assert manifest["source_contract"] == {
+        "project_manifest": "photoshop-manifest.json",
+        "import_script": "photoshop-import.jsx",
+        "does_not_read_labelplus_txt_directly": True,
+        "layer_order_top_to_bottom": ["嵌字图层*", "修复图像", "原图"],
+    }
     assert manifest["summary"] == {"record_count": 1, "page_count": 1}
     assert manifest["pages"][0]["layer_order"] == ["text_layers", "repaired_image", "original_image"]
     assert layer["record_id"] == "page.png#1"
@@ -43,6 +49,8 @@ def test_run_phase8_photoshop_export_writes_manifest_and_jsx(tmp_path: Path):
     assert main_name_original < main_add_repaired < main_add_text
     report = (run_dir / "reports" / "phase8-report.md").read_text(encoding="utf-8")
     assert "Missing cleanup layers: 0" in report
+    assert "`photoshop-import.jsx` reads project output `photoshop-manifest.json`, not the LabelPlus txt directly." in report
+    assert "PSD layer order is editable `嵌字图层*` layers above `修复图像`, above `原图`." in report
     assert "`bubble_fill=1`" in report
     assert "Places `cleanup.effective_crop_path` as a bitmap patch layer" in report
     assert "paragraph text layer" in report

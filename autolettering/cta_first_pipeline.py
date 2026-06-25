@@ -70,11 +70,15 @@ def _manifest(
         "labelplus_file": str(labelplus_file),
         "phase2_detection_run_dir": str(phase2_run),
         "phase6_cleanup_run_dir": str(phase6_run),
+        "text_detection_plan": _text_detection_plan(),
+        "cleanup_plan": _cleanup_plan(),
+        "photoshop_export_contract": _photoshop_export_contract(),
+        "review_image_contract": _review_image_contract(),
         "summary": _summary(detections, cleanups),
         "routes": [
             {
                 "name": "cta_mask_lama_large_512px",
-                "description": "CTA mask matched -> lama_large_512px cleanup -> editable lettering layer",
+                "description": "Matched CTD refined-mask component -> lama_large_512px cleanup -> editable lettering layer",
                 "record_ids": [
                     row["record_id"]
                     for row in detections
@@ -83,11 +87,59 @@ def _manifest(
             },
             {
                 "name": "mimo_locator_gpt_image2_masked_edit",
-                "description": "CTA unmatched -> MIMO locator -> gpt-image-2 masked replacement only when the real edit call succeeds",
+                "description": "Unmatched LabelPlus point -> near-square MIMO locator crop -> gpt-image-2 transparent masked replacement only when the real edit call succeeds",
                 "completion_condition": "cleanup.status=cleaned and gpt_image2_edit.status=ok and cleanup.replacement_crop_path exists",
                 "record_ids": [row["record_id"] for row in detections if row.get("status") == "fallback_required"],
             },
         ],
+    }
+
+
+def _text_detection_plan() -> dict:
+    return {
+        "user_requested_strategy": "cta",
+        "project_strategy": "cta_mask",
+        "ballonstranslator_detector_module": "ctd",
+        "ballonstranslator_detector_class": "ComicTextDetector",
+        "ballonstranslator_config_path": "BallonsTranslator/config/config.json",
+        "ballonstranslator_config_key": "module.textdetector_params.ctd",
+        "mask_artifact": "debug/ctd_masks/<page>/ctd-refined-mask.png",
+        "componentization": "connected_components_over_refined_mask",
+        "matching_metric": "labelplus_point_to_mask_edge",
+        "matching_cardinality": "unique_mask_component_claim",
+        "fallback_trigger": "no_unique_ctd_mask_match_within_threshold",
+    }
+
+
+def _cleanup_plan() -> dict:
+    return {
+        "matched_ctd_mask": {
+            "text_region_source": "ctd_refined_mask_component",
+            "inpaint_method": "lama_large_512px",
+            "lettering": "programmatic_editable_text_layer",
+        },
+        "unmatched_labelplus_point": {
+            "context_crop": "near_square_labelplus_context_crop",
+            "locator": "mimo_vision_model_returns_crop_local_bbox",
+            "replacement": "gpt-image-2_transparent_masked_edit",
+            "lettering": "gpt-image-2_direct_replacement_when_call_succeeds",
+        },
+    }
+
+
+def _photoshop_export_contract() -> dict:
+    return {
+        "project_manifest": "photoshop-manifest.json",
+        "import_script": "photoshop-import.jsx",
+        "layer_order_top_to_bottom": ["嵌字图层*", "修复图像", "原图"],
+    }
+
+
+def _review_image_contract() -> dict:
+    return {
+        "font_and_effect_grids": "use near_square_columns instead of long strips",
+        "fallback_locator_grid": "visuals/fallback-locator-grid.png",
+        "mimo_review_policy": "readable near-square contact sheets",
     }
 
 
@@ -97,6 +149,9 @@ def _summary(detections: list[dict], cleanups: list[dict]) -> dict:
         "cleanup_records": len(cleanups),
         "matched_cta_records": sum(
             1 for row in detections if row.get("status") == "ok" and (row.get("cta_match") or {}).get("status") == "matched"
+        ),
+        "matched_ctd_records": sum(
+            1 for row in detections if row.get("status") == "ok" and (row.get("ctd_match") or {}).get("status") == "matched"
         ),
         "fallback_required_records": sum(1 for row in detections if row.get("status") == "fallback_required"),
         "lama_large_cleanup_records": sum(
@@ -137,10 +192,26 @@ def _write_report(path: Path, manifest: dict) -> None:
         f"Phase 2 detection run: `{manifest['phase2_detection_run_dir']}`",
         f"Phase 6 cleanup run: `{manifest['phase6_cleanup_run_dir']}`",
         "",
+        "## Strategy Contract",
+        "",
+        "- BallonsTranslator detector: `ctd` / `ComicTextDetector`",
+        "- CTA-first means CTD refined-mask connected components first, then unique LabelPlus point-to-mask-edge matching.",
+        "- `cta_mask` is the project-facing strategy name; it is not a separate BallonsTranslator detector module.",
+        "",
         "## Routes",
         "",
-        "- CTA mask matched -> `lama_large_512px` cleanup -> editable lettering layer",
-        "- CTA unmatched -> MIMO locator -> `gpt-image-2` masked replacement when the real edit call succeeds; dry-runs and failures stay pending and still need a text layer",
+        "- Matched CTD mask -> `lama_large_512px` cleanup -> editable lettering layer",
+        "- Unmatched LabelPlus point -> near-square MIMO locator crop -> `gpt-image-2` transparent masked replacement when the real edit call succeeds; dry-runs and failures stay pending and still need a text layer",
+        "",
+        "## Photoshop Export Contract",
+        "",
+        "- `photoshop-import.jsx` reads `photoshop-manifest.json`, not the LabelPlus txt directly.",
+        "- PSD layer order is editable `嵌字图层*` layers above `修复图像`, above `原图`.",
+        "",
+        "## Review Image Contract",
+        "",
+        "- Font comparison and effect review sheets should use near-square grids instead of long strips.",
+        "- Fallback locator evidence is collected in `visuals/fallback-locator-grid.png`.",
         "",
         "## Summary",
         "",

@@ -16,6 +16,8 @@ from autolettering.models.gpt_image import (
     normalize_openai_base_url,
 )
 from autolettering.phase6_nonbubble import _local_background_color, run_phase6_nonbubble_cleanup
+from autolettering.phase6_nonbubble import _refine_fallback_locator_bbox
+from autolettering.phase6_nonbubble import _compose_gpt_replacement_region
 
 
 def test_build_text_mask_and_gpt_mask_use_expected_alpha_convention():
@@ -39,6 +41,16 @@ def test_gpt_image_prompt_requires_exact_target_text():
     assert "Do not omit" in prompt
     assert "Do not create gray boxes" in prompt
     assert "black-and-white line art" in prompt
+
+
+def test_gpt_image_prompt_rejects_known_simplified_traditional_glyph_substitutions():
+    prompt = gpt_image_edit_prompt("新川崎（暂）")
+
+    assert "Target Chinese text: 新川崎（暂）" in prompt
+    assert "The target contains Simplified Chinese `暂`" in prompt
+    assert "Do not write `暫`, `仮`, or `哲`" in prompt
+    assert "crisp light text on the dark background" in prompt
+    assert "match the local perspective" in prompt
 
 
 def test_build_text_mask_excludes_large_solid_icon_on_light_background():
@@ -513,11 +525,17 @@ def test_run_phase6_nonbubble_cleanup_ctd_match_uses_lama_large_and_ctd_mask(tmp
     assert calls["bbox"] == (20, 15, 90, 75)
     assert row["cleanup"]["method"] == "bt_lama_large_inpaint"
     assert row["cleanup"]["route"] == "cta_mask_lama_large_512px"
+    assert row["cleanup"]["text_region_source"] == "ctd_refined_mask_component"
+    assert row["cleanup"]["ballonstranslator_detector_module"] == "ctd"
+    assert row["cleanup"]["requested_inpaint_method"] == "lama_large_512px"
+    assert row["cleanup"]["ballonstranslator_inpainter"] == "lama_large_512px"
+    assert row["cleanup"]["actual_inpaint_method"] == "bt_lama_large_inpaint"
     assert row["cleanup"]["source_mask_path"] == str(mask_path)
     assert row["cleanup"]["text_overlay_required"] is True
     assert row["gpt_image2_edit"]["status"] == "not_applicable"
     assert row["gpt_image2_edit"]["reason"] == "cta_mask_matched_inpaint_path"
     assert row["gpt_image2_edit"]["inpaint_method"] == "lama_large_512px"
+    assert row["gpt_image2_edit"]["replacement_path"] == "not_used_for_ctd_matched_records"
 
 
 def test_run_phase6_nonbubble_cleanup_ctd_match_can_experimentally_override_method(tmp_path: Path, monkeypatch):
@@ -588,6 +606,10 @@ def test_run_phase6_nonbubble_cleanup_ctd_match_can_experimentally_override_meth
     assert calls["text_mask_path"] == str(mask_path)
     assert row["cleanup"]["method"] == "bt_patchmatch_inpaint"
     assert row["cleanup"]["route"] == "cta_mask_lama_large_512px"
+    assert row["cleanup"]["text_region_source"] == "ctd_refined_mask_component"
+    assert row["cleanup"]["requested_inpaint_method"] == "bt_patchmatch"
+    assert row["cleanup"]["ballonstranslator_inpainter"] == "bt_patchmatch"
+    assert row["cleanup"]["actual_inpaint_method"] == "bt_patchmatch_inpaint"
     assert row["cleanup"]["source_mask_path"] == str(mask_path)
     assert row["gpt_image2_edit"]["status"] == "not_applicable"
     assert row["gpt_image2_edit"]["reason"] == "cta_mask_matched_inpaint_path"
@@ -796,6 +818,30 @@ def test_run_phase6_nonbubble_cleanup_ctd_match_uses_full_component_bbox_not_tri
     assert calls["bbox"] == (10, 10, 68, 250)
 
 
+def test_refine_fallback_locator_bbox_trims_adjacent_white_bubble_from_dark_card(tmp_path: Path):
+    context_path = tmp_path / "context.png"
+    image = Image.new("RGB", (440, 440), "white")
+    draw = ImageDraw.Draw(image)
+    draw.polygon([(120, 92), (292, 116), (272, 338), (86, 308)], fill="black")
+    draw.rectangle((352, 90, 430, 270), fill="white")
+    draw.text((154, 190), "Shinkawasaki", fill="white")
+    draw.text((354, 120), "すって", fill="black")
+    image.save(context_path)
+    locator = {
+        "status": "ok",
+        "local_bbox_xyxy": [150, 186, 396, 245],
+        "global_bbox_xyxy": [1003, 238, 1249, 297],
+    }
+
+    refined = _refine_fallback_locator_bbox(locator, context_path, (853, 52, 1293, 492))
+
+    assert refined["local_bbox_xyxy"][0] == 150
+    assert refined["local_bbox_xyxy"][2] <= 302
+    assert refined["global_bbox_xyxy"][2] <= 1155
+    assert refined["refinement"]["method"] == "trim_to_dark_background_support"
+    assert refined["refinement"]["original_local_bbox_xyxy"] == [150, 186, 396, 245]
+
+
 def test_run_phase6_nonbubble_cleanup_fallback_uses_mimo_bbox_and_gpt_mask(tmp_path: Path, monkeypatch):
     image_path = _write_nonbubble_image(tmp_path / "page.png")
     detection_run = tmp_path / "phase2"
@@ -813,6 +859,8 @@ def test_run_phase6_nonbubble_cleanup_fallback_uses_mimo_bbox_and_gpt_mask(tmp_p
                 "fallback": {
                     "method": "mimo_crop_then_gpt_image2_masked_edit",
                     "context_bbox_xyxy": [10, 10, 100, 80],
+                    "labelplus_point_xy": [48, 38],
+                    "context_labelplus_point_xy": [38, 28],
                     "translated_text": "背景文字",
                 },
             }
@@ -832,6 +880,11 @@ def test_run_phase6_nonbubble_cleanup_fallback_uses_mimo_bbox_and_gpt_mask(tmp_p
 
     row = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]
     assert (run_dir / "visuals" / "fallback-locator-grid.png").exists()
+    replacement_grid = run_dir / "visuals" / "fallback-replacement-grid.png"
+    assert replacement_grid.exists()
+    with Image.open(replacement_grid) as grid:
+        ratio = grid.width / grid.height
+        assert 0.45 <= ratio <= 2.2
     assert row["status"] == "cleaned"
     assert row["cleanup"]["method"] == "gpt_image2_masked_edit"
     assert row["cleanup"]["bbox"] == [10, 10, 100, 80]
@@ -1210,6 +1263,22 @@ def test_local_background_color_preserves_dark_panel_background():
     assert max(color) <= 40
 
 
+def test_compose_gpt_replacement_region_extracts_light_text_without_gray_box():
+    original = Image.new("RGB", (120, 80), "white")
+    draw = ImageDraw.Draw(original)
+    draw.rectangle((20, 20, 92, 52), fill=(8, 8, 8))
+    draw.rectangle((36, 30, 70, 38), fill="white")
+    edited = original.copy()
+    edit_draw = ImageDraw.Draw(edited)
+    edit_draw.rectangle((30, 24, 86, 46), fill=(155, 155, 155))
+    edit_draw.rectangle((38, 30, 78, 36), fill="white")
+
+    result = _compose_gpt_replacement_region(original, edited, (30, 24, 86, 46))
+
+    assert max(result.getpixel((34, 28))) < 40
+    assert min(result.getpixel((50, 32))) > 235
+
+
 class _FakeGptClient:
     def edit_image(self, image_path: str, mask_path: str, prompt: str, output_path: str) -> dict:
         output = Path(output_path)
@@ -1229,6 +1298,7 @@ class _FakeMimoLocator:
         assert Path(image_path).parent.name == "fallback_locator_input"
         assert "背景文字" in prompt
         assert "coordinate grid" in prompt
+        assert "blue LabelPlus cross" in prompt
         assert "bbox_percent_xyxy" in prompt
         return {
             "raw_text": json.dumps(

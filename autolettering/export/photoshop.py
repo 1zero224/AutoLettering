@@ -25,11 +25,21 @@ def build_photoshop_manifest(
     pages = _group_layers_by_page(layers, repaired_pages or {}, detection_rows)
     return {
         "schema_version": SCHEMA_VERSION,
+        "source_contract": _source_contract(),
         "pages": pages,
         "summary": {
             "record_count": len(layers),
             "page_count": len(pages),
         },
+    }
+
+
+def _source_contract() -> dict:
+    return {
+        "project_manifest": "photoshop-manifest.json",
+        "import_script": "photoshop-import.jsx",
+        "does_not_read_labelplus_txt_directly": True,
+        "layer_order_top_to_bottom": ["嵌字图层*", "修复图像", "原图"],
     }
 
 

@@ -21,6 +21,7 @@ def test_run_cta_first_cleanup_pipeline_routes_matched_and_fallback_records(tmp_
                     "group_name": "框外",
                     "lettering_route": {"route": "cta_mask_lama_large_512px"},
                     "cta_match": {"status": "matched", "mask_path": "component-0001.png"},
+                    "ctd_match": {"status": "matched", "mask_path": "component-0001.png"},
                 },
                 {
                     "record_id": "page.png#2",
@@ -91,15 +92,55 @@ def test_run_cta_first_cleanup_pipeline_routes_matched_and_fallback_records(tmp_
     assert manifest["schema_version"] == "autolettering.cta_first_pipeline.v1"
     assert manifest["phase2_detection_run_dir"] == str(run_dir / "runs" / "phase2-cta-mask")
     assert manifest["phase6_cleanup_run_dir"] == str(run_dir / "runs" / "phase6-cta-first-cleanup")
+    assert manifest["text_detection_plan"] == {
+        "user_requested_strategy": "cta",
+        "project_strategy": "cta_mask",
+        "ballonstranslator_detector_module": "ctd",
+        "ballonstranslator_detector_class": "ComicTextDetector",
+        "ballonstranslator_config_path": "BallonsTranslator/config/config.json",
+        "ballonstranslator_config_key": "module.textdetector_params.ctd",
+        "mask_artifact": "debug/ctd_masks/<page>/ctd-refined-mask.png",
+        "componentization": "connected_components_over_refined_mask",
+        "matching_metric": "labelplus_point_to_mask_edge",
+        "matching_cardinality": "unique_mask_component_claim",
+        "fallback_trigger": "no_unique_ctd_mask_match_within_threshold",
+    }
+    assert manifest["cleanup_plan"]["matched_ctd_mask"] == {
+        "text_region_source": "ctd_refined_mask_component",
+        "inpaint_method": "lama_large_512px",
+        "lettering": "programmatic_editable_text_layer",
+    }
+    assert manifest["cleanup_plan"]["unmatched_labelplus_point"] == {
+        "context_crop": "near_square_labelplus_context_crop",
+        "locator": "mimo_vision_model_returns_crop_local_bbox",
+        "replacement": "gpt-image-2_transparent_masked_edit",
+        "lettering": "gpt-image-2_direct_replacement_when_call_succeeds",
+    }
+    assert manifest["photoshop_export_contract"]["project_manifest"] == "photoshop-manifest.json"
+    assert manifest["photoshop_export_contract"]["import_script"] == "photoshop-import.jsx"
+    assert manifest["photoshop_export_contract"]["layer_order_top_to_bottom"] == [
+        "嵌字图层*",
+        "修复图像",
+        "原图",
+    ]
+    assert manifest["review_image_contract"] == {
+        "font_and_effect_grids": "use near_square_columns instead of long strips",
+        "fallback_locator_grid": "visuals/fallback-locator-grid.png",
+        "mimo_review_policy": "readable near-square contact sheets",
+    }
     assert manifest["summary"]["matched_cta_records"] == 1
+    assert manifest["summary"]["matched_ctd_records"] == 1
     assert manifest["summary"]["fallback_required_records"] == 1
     assert manifest["summary"]["lama_large_cleanup_records"] == 1
     assert manifest["summary"]["gpt_image2_replacement_records"] == 0
     assert manifest["summary"]["gpt_image2_pending_or_failed_records"] == 1
     assert manifest["summary"]["text_overlay_required_records"] == 2
     report = (run_dir / "reports" / "cta-first-pipeline-report.md").read_text(encoding="utf-8")
-    assert "CTA mask matched -> `lama_large_512px` cleanup -> editable lettering layer" in report
-    assert "CTA unmatched -> MIMO locator -> `gpt-image-2` masked replacement" in report
+    assert "BallonsTranslator detector: `ctd` / `ComicTextDetector`" in report
+    assert "CTA-first means CTD refined-mask connected components first" in report
+    assert "Matched CTD mask -> `lama_large_512px` cleanup -> editable lettering layer" in report
+    assert "Unmatched LabelPlus point -> near-square MIMO locator crop -> `gpt-image-2` transparent masked replacement" in report
+    assert "`photoshop-import.jsx` reads `photoshop-manifest.json`, not the LabelPlus txt directly" in report
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:

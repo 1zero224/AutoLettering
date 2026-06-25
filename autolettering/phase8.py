@@ -189,6 +189,8 @@ def _write_report(
         "",
         f"- Pages exported: {manifest['summary']['page_count']}",
         f"- Text layers exported: {manifest['summary']['record_count']}",
+        "- `photoshop-import.jsx` reads project output `photoshop-manifest.json`, not the LabelPlus txt directly.",
+        "- PSD layer order is editable `嵌字图层*` layers above `修复图像`, above `原图`.",
         "",
         "## Cleanup Summary",
         "",

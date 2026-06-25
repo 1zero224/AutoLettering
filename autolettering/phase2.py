@@ -296,6 +296,8 @@ def _mimo_gpt_fallback_payload(
         "method": "mimo_crop_then_gpt_image2_masked_edit",
         "context_bbox_xyxy": list(context_bbox),
         "source_context_bbox_xyxy": list(source_bbox),
+        "labelplus_point_xy": [label.x_px, label.y_px],
+        "context_labelplus_point_xy": [label.x_px - context_bbox[0], label.y_px - context_bbox[1]],
         "context_shape": "near_square",
         "translated_text": label.translated_text,
         "trigger_reason": trigger_reason,
@@ -310,13 +312,15 @@ def _mimo_gpt_fallback_payload(
 def _text_region_payload(payload: dict, detection_strategy: str) -> dict:
     if _is_cta_mask_strategy(detection_strategy):
         match = payload.get("cta_match") or payload.get("ctd_match") or {}
+        common = _ctd_text_region_contract(detection_strategy)
         if payload.get("status") == "ok" and match.get("status") == "matched":
             return {
                 "text_region_kind": "cta_mask_matched",
-                "text_region_source": "cta_mask",
+                "text_region_source": "ctd_refined_mask_component",
                 "text_region_mask_path": match.get("mask_path"),
                 "text_region_mask_bbox_xyxy": match.get("bbox_xyxy"),
                 "match_status": "matched",
+                **common,
             }
         if payload.get("status") == "fallback_required":
             return {
@@ -325,6 +329,7 @@ def _text_region_payload(payload: dict, detection_strategy: str) -> dict:
                 "text_region_mask_path": None,
                 "text_region_mask_bbox_xyxy": None,
                 "match_status": "fallback_required",
+                **common,
             }
     if payload.get("status") == "ok":
         return {
@@ -340,6 +345,17 @@ def _text_region_payload(payload: dict, detection_strategy: str) -> dict:
         "text_region_mask_path": None,
         "text_region_mask_bbox_xyxy": None,
         "match_status": payload.get("status"),
+    }
+
+
+def _ctd_text_region_contract(detection_strategy: str) -> dict:
+    return {
+        "text_region_user_strategy": detection_strategy,
+        "upstream_text_region_source": "ctd_refined_mask_component",
+        "ballonstranslator_detector_module": "ctd",
+        "ballonstranslator_detector_class": "ComicTextDetector",
+        "mask_matching_metric": "labelplus_point_to_mask_edge",
+        "mask_matching_cardinality": "unique_component_claim",
     }
 
 
@@ -390,7 +406,9 @@ def _lettering_route_payload(payload: dict, detection_strategy: str) -> dict:
     if _is_cta_mask_strategy(detection_strategy) and payload.get("status") == "ok":
         return {
             "route": "cta_mask_lama_large_512px",
-            "text_region_source": "cta_mask",
+            "text_region_source": "ctd_refined_mask_component",
+            "text_region_user_strategy": detection_strategy,
+            "ballonstranslator_detector_module": "ctd",
             "repair_method": "lama_large_512px",
             "requires_mimo_locator": False,
             "requires_gpt_image2_replacement": False,
@@ -399,6 +417,8 @@ def _lettering_route_payload(payload: dict, detection_strategy: str) -> dict:
         return {
             "route": "mimo_locator_gpt_image2_masked_edit",
             "text_region_source": "mimo_vision_model",
+            "text_region_user_strategy": detection_strategy,
+            "upstream_text_region_source": "ctd_refined_mask_component" if _is_cta_mask_strategy(detection_strategy) else None,
             "repair_method": "gpt_image2_masked_edit",
             "requires_mimo_locator": True,
             "requires_gpt_image2_replacement": True,
@@ -491,7 +511,8 @@ def _write_phase2_report(
         f"- Failed records: {failed_count}",
         f"- Search radius: `{radius_x} x {radius_y}`",
         f"- Detection strategy: `{detection_strategy}`",
-        "- CTA strategy note: `cta_mask` is the user-facing BallonsTranslator ComicTextDetector route; `ctd_mask` remains a compatibility alias.",
+        "- CTA strategy note: `cta_mask` is the user-facing CTA-first route; the actual BallonsTranslator detector module is `ctd` / `ComicTextDetector`.",
+        "- CTD mask matching: split `ctd-refined-mask.png` into connected components, then uniquely match LabelPlus points by point-to-mask-edge distance.",
         "",
         "## Generated Artifacts",
         "",
