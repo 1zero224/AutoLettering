@@ -867,6 +867,39 @@ def test_run_phase4_renders_light_text_for_light_on_dark_detection(tmp_path: Pat
         assert preview.getpixel((x, y))[:3] == (255, 255, 255)
 
 
+def test_run_phase4_infers_light_text_for_tall_cta_mask_source(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+    source_crop_path = tmp_path / "source-crop.png"
+    Image.new("RGB", (142, 520), (184, 43, 56)).save(source_crop_path)
+    page_path = _write_tall_red_banner_page(tmp_path / "page.png")
+    phase2_run = tmp_path / "phase2-detection"
+    phase3_run = tmp_path / "phase3-selection"
+    phase2_run.mkdir()
+    phase3_run.mkdir()
+    _write_font_selection(
+        phase3_run / "font-selections.jsonl",
+        font_path,
+        source_crop_path,
+        translated_text="漫画第一卷\n2026年6月29日发售！！",
+    )
+    _write_tall_cta_mask_detection(phase2_run / "detections.jsonl", page_path)
+
+    run_dir = run_phase4(
+        selection_run_dir=phase3_run,
+        detection_run_dir=phase2_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase4-tall-cta-light-text",
+        sample_limit=1,
+    )
+
+    layout = _read_jsonl(run_dir / "layout-results.jsonl")[0]["layout"]
+    assert layout["target_bbox"] == [20, 20, 162, 1574]
+    assert layout["orientation"] == "vertical"
+    assert layout["vertical_align"] == "top"
+    assert layout["text_color"] == [255, 255, 255, 255]
+    assert layout["font_size"] < 72
+
+
 def test_run_phase4_filters_selected_fonts_by_record_id_before_sample_limit(tmp_path: Path):
     font_path = _copy_font(tmp_path)
     source_crop_path = tmp_path / "source-crop.png"
@@ -1185,6 +1218,40 @@ def _write_large_nonbubble_cta_title_detection(path: Path) -> None:
             "bbox_xyxy": [86, 815, 354, 1985],
             "component_id": "component-title",
             "mask_path": "component-title.png",
+        },
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _write_tall_red_banner_page(path: Path) -> Path:
+    image = Image.new("RGB", (220, 1620), (184, 43, 56))
+    draw = ImageDraw.Draw(image)
+    for y in (60, 145, 230, 405, 520, 640, 760, 880, 1000, 1120):
+        draw.rectangle((72, y, 116, y + 58), fill=(255, 255, 255))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(path)
+    return path
+
+
+def _write_tall_cta_mask_detection(path: Path, image_path: Path) -> None:
+    payload = {
+        "record_id": "page.png#1",
+        "status": "ok",
+        "image_name": "page.png",
+        "image_path": str(image_path),
+        "group_name": "框外",
+        "detection_method": "cta_mask",
+        "selected_text_box_xyxy": [20, 20, 162, 1574],
+        "selected_text_full_xyxy": [20, 20, 162, 1574],
+        "selected_text_body_xyxy": [20, 20, 162, 1574],
+        "candidate_boxes": [
+            {"xyxy": [20, 20, 162, 1574], "area": 220668, "score": 1.0, "polarity": "ctd_mask"},
+        ],
+        "cta_match": {
+            "status": "matched",
+            "bbox_xyxy": [20, 20, 162, 1574],
+            "component_id": "component-tall-banner",
+            "mask_path": "component-tall-banner.png",
         },
     }
     path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")

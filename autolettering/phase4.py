@@ -217,7 +217,7 @@ def _text_color_for_record(
     if detection is None:
         return (0, 0, 0, 255)
     bbox = tuple(target_bbox) if target_bbox else None
-    if selected_text_polarity(detection, bbox) == "light_on_dark":
+    if selected_text_polarity(detection, bbox) == "light_on_dark" or _infer_light_text_from_source(detection, bbox):
         return (255, 255, 255, 255)
     return (0, 0, 0, 255)
 
@@ -264,6 +264,8 @@ def _max_font_size(
 def _base_vertical_font_limit(detection: dict, target_bbox: list[int]) -> int:
     if _large_nonbubble_cta_title(detection, target_bbox):
         return max(72, min(132, int(round(_width(tuple(target_bbox)) * 0.38))))
+    if _tall_narrow_nonbubble_cta_strip(detection, target_bbox):
+        return max(28, min(60, int(round(_width(tuple(target_bbox)) * 0.38))))
     return 72
 
 
@@ -275,6 +277,42 @@ def _large_nonbubble_cta_title(detection: dict, target_bbox: list[int]) -> bool:
         and _width(bbox) >= 180
         and _height(bbox) >= _width(bbox) * 3
     )
+
+
+def _tall_narrow_nonbubble_cta_strip(detection: dict, target_bbox: list[int]) -> bool:
+    bbox = tuple(target_bbox)
+    return (
+        detection.get("group_name") != "框内"
+        and _is_cta_or_ctd_detection(detection)
+        and _width(bbox) < 180
+        and _height(bbox) >= _width(bbox) * 8
+    )
+
+
+def _infer_light_text_from_source(detection: dict, target_bbox: tuple[int, int, int, int] | None) -> bool:
+    if target_bbox is None or detection.get("group_name") == "框内" or not _is_cta_or_ctd_detection(detection):
+        return False
+    image_path = detection.get("image_path")
+    if not image_path or not Path(image_path).exists():
+        return False
+    try:
+        with Image.open(image_path) as image:
+            gray = image.convert("L").crop(target_bbox)
+    except OSError:
+        return False
+    return _looks_like_light_text_on_dark_background(gray)
+
+
+def _looks_like_light_text_on_dark_background(gray: Image.Image) -> bool:
+    total = max(1, gray.width * gray.height)
+    histogram = gray.histogram()
+    bright_ratio = sum(histogram[210:]) / total
+    dark_background_ratio = sum(histogram[:180]) / total
+    return 0.005 <= bright_ratio <= 0.45 and dark_background_ratio >= 0.25
+
+
+def _is_cta_or_ctd_detection(detection: dict) -> bool:
+    return detection.get("detection_method") in {"cta_mask", "ctd_mask"} or (detection.get("cta_match") or {}).get("status") == "matched"
 
 
 def _decorated_title_font_limit(

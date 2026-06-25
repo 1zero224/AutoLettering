@@ -3,6 +3,7 @@ from experiments import (
     phase2_6_cta_first_cleanup,
     phase6_cleanup_quality,
     phase6_cleanup_gate,
+    phase6_cleanup_escalation_gpt_background_repair,
     phase6_cleanup_escalation_gpt_replace,
     phase6_replacement_quality,
     phase6_cleanup_retry,
@@ -149,6 +150,17 @@ def test_phase6_cleanup_escalation_gpt_cli_defaults_to_tight_segment_contract():
     assert args.max_segment_height == 640
     assert args.call_gpt_image is False
     assert args.single_segment is False
+
+
+def test_phase6_cleanup_escalation_gpt_background_cli_defaults_to_background_repair_contract():
+    parser = phase6_cleanup_escalation_gpt_background_repair.build_parser()
+
+    args = parser.parse_args(["--gate-run-dir", "outputs/runs/gate"])
+
+    assert args.gate_run_dir == "outputs/runs/gate"
+    assert args.sample_limit == 5
+    assert args.mask_dilation_px == 6
+    assert args.call_gpt_image is False
 
 
 def test_phase6_segmented_gpt_cli_defaults_to_readable_tight_context():
