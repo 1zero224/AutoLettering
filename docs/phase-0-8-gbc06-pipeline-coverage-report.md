@@ -165,6 +165,14 @@ Phase 2-only to complete Phase 1-8 coverage:
 --run-id phase0-8-gbc06-pipeline-coverage-v19-gbc06-29-complete --next-limit 12
 ```
 
+Current v20 moves the long accumulated command into a strict registry entry,
+adds the `GBC06_33.png#1` context-font validation chain, and fails early if any
+listed run directory is missing its stage artifact:
+
+```powershell
+python experiments/pipeline_coverage_report.py --registry-file docs/pipeline-runs.gbc06.json --registry-entry phase0-8-gbc06-v20-gbc06-33-complete --output-root outputs/runs
+```
+
 ## Generated Artifacts
 
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage/pipeline-coverage.json`
@@ -203,6 +211,8 @@ Phase 2-only to complete Phase 1-8 coverage:
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v18-gbc06-17-complete/reports/pipeline-coverage-report.md`
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v19-gbc06-29-complete/pipeline-coverage.json`
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v19-gbc06-29-complete/reports/pipeline-coverage-report.md`
+- `outputs/runs/phase0-8-gbc06-pipeline-coverage-v20-gbc06-33-complete/pipeline-coverage.json`
+- `outputs/runs/phase0-8-gbc06-pipeline-coverage-v20-gbc06-33-complete/reports/pipeline-coverage-report.md`
 
 `outputs/` remains ignored by Git. The source-backed summary below records the key numbers so the experiment is traceable in the repository.
 
@@ -212,8 +222,8 @@ Base stage: `phase2_detection`
 
 ```text
 base_record_count=35
-complete_record_count=34
-incomplete_record_count=1
+complete_record_count=35
+incomplete_record_count=0
 ```
 
 Stage counts:
@@ -221,26 +231,26 @@ Stage counts:
 ```text
 phase1_labelplus       covered=35 missing=0
 phase2_detection       covered=35 missing=0
-phase3_font_selection  covered=34 missing=1
-phase4_layout          covered=34 missing=1
-phase5_angle           covered=34 missing=1
-phase6_cleanup         covered=34 missing=1
-phase7_preview         covered=34 missing=1
-phase8_export          covered=34 missing=1
+phase3_font_selection  covered=35 missing=0
+phase4_layout          covered=35 missing=0
+phase5_angle           covered=35 missing=0
+phase6_cleanup         covered=35 missing=0
+phase7_preview         covered=35 missing=0
+phase8_export          covered=35 missing=0
 ```
 
 Quality audits:
 
 ```text
-phase7_preview evaluations=14 evaluated=14 usable=14/14 failed=0 low_score=0 records=34 record_issues=0
-phase8_export audits=5 passed=5/5 records=8 vertical_top_layers=7 missing_anchor=0 unexpected_anchor=0 record_issues=0 missing_jsx_anchor_logic=0
+phase7_preview evaluations=15 evaluated=15 usable=15/15 failed=0 low_score=0 records=35 record_issues=0
+phase8_export audits=6 passed=6/6 records=9 vertical_top_layers=8 missing_anchor=0 unexpected_anchor=0 record_issues=0 missing_jsx_anchor_logic=0
 ```
 
 Group coverage:
 
 ```text
 框内: base=30 complete=30
-框外: base=5  complete=4
+框外: base=5  complete=5
 ```
 
 ## Next Records
@@ -280,16 +290,17 @@ GBC06_02.png#12
 GBC06_02.png#13
 ```
 
-The v19 report promotes the five diverse expansion records into the coverage
-base. `GBC06_18.png#3`, `GBC06_06.png#3`, `GBC06_17.png#3`, and
-`GBC06_29.png#2` are complete across Phase 1-8 and all attached quality gates.
-The remaining diverse record is now visible as next work:
+The v20 registry report promotes all five diverse expansion records into the
+coverage base. `GBC06_18.png#3`, `GBC06_06.png#3`, `GBC06_17.png#3`,
+`GBC06_29.png#2`, and `GBC06_33.png#1` are complete across Phase 1-8 and all
+attached quality gates. There are no remaining next records inside the current
+35-record detection base.
 
 ```text
-GBC06_33.png#1   框外  first_missing_stage=phase3_font_selection
+next_records=[]
 ```
 
-The v17 report also keeps the remaining parsed-but-undetected Phase 1 scope
+The v20 report also keeps the remaining parsed-but-undetected Phase 1 scope
 explicit:
 
 ```text
@@ -313,10 +324,10 @@ GBC06_03.png#10  框内  GBC06_03.png
 GBC06_03.png#11  框内  GBC06_03.png
 ```
 
-For quality and diversity, the next expansion should continue covering mixed
-layout types. `GBC06_18.png#3`, `GBC06_06.png#3`, `GBC06_17.png#3`, and
-`GBC06_29.png#2` have now moved from candidate to complete. The remaining
-diverse base record is:
+For quality and diversity, the five selected diverse records now cover mixed
+layout types: speech-bubble text-mask cleanup, diamond announcer text, dark-card
+horizontal text, large vertical title text, and color promotional side text. The
+last promoted diverse record is:
 
 ```text
 GBC06_33.png#1   框外  漫画第一卷 / 2026年6月29日发售！！          color promotional side text with numbers
@@ -328,10 +339,11 @@ The two current authoritative artifacts used for that selection, `phase1-gbc06-s
 
 The current detection prototype has produced 35 candidate records across the
 core `GBC06_01.png`/`GBC06_02.png` batches plus the diverse expansion records.
-The v19 coverage report can merge multiple detection run directories, counts 34
-records as complete across Phase 1 through Phase 8, and additionally treats
-Phase 7 MIMO preview evaluation failures plus Phase 8 export audit failures as
-quality issues that make affected records incomplete.
+The v20 coverage report is generated from `docs/pipeline-runs.gbc06.json`, can
+merge multiple detection run directories, counts all 35 records as complete
+across Phase 1 through Phase 8, and additionally treats Phase 7 MIMO preview
+evaluation failures plus Phase 8 export audit failures as quality issues that
+make affected records incomplete.
 
 The `GBC06_02.png#1-#3` expansion required two fixes: tighter adjacent-column text bbox selection and mask-aware page cleanup composition. The best MIMO-backed integrated run is `phase7-8-gbc06-02-batch-1-3-preview-v3`, with score `7` and `usable=true`; `#2` and `#3` each received per-record MIMO score `10`. A follow-up top-aligned vertical-column rendering experiment (`preview-v4`) dropped to score `5`, so it was not kept.
 
@@ -411,6 +423,23 @@ top-aligned, `font_size=102`, `angle_degrees=0.0`, and uses
 issues; Phase 8 export audit passed with one vertical top anchor and
 page-level repaired-image layer.
 
+The `GBC06_33.png#1` diverse run validates the color promotional side-text path.
+The retained chain uses `phase2-gbc06-33-1-cta-contract-v1`,
+`phase3-gbc06-33-1-context-font-mimo-v1`,
+`phase4-gbc06-33-1-context-font-layout-v1`,
+`phase5-gbc06-29-33-angle-v1`,
+`phase6-gbc06-33-1-gpt-background-real-v1`,
+`phase7-gbc06-33-1-context-font-preview-v1`, and
+`phase8-gbc06-33-1-context-font-export-v1`. MIMO selected
+`[toolbox]与墨体-简体-Medium(v2.4).ttf` with confidence `0.95`. The final
+layout is vertical, top-aligned, `font_size=54`, `line_spacing=20`, and
+`angle_degrees=0.0`; the Phase 5 visual candidates estimated a small `4.1`
+degree source tilt, but the retained lettering correctly keeps the vertical
+text unrotated. Phase 6 uses `gpt-image-2` as background-repair-only cleanup,
+leaving text rendering to the normal overlay path. Phase 7 MIMO scored the
+preview `10`, `usable=true`; Phase 8 export audit passed with one vertical top
+anchor and no record issues.
+
 Two negative controls are preserved. `bt_patchmatch` was run through
 `phase6-gbc06-29-2-cta-patchmatch-v1` with the experimental CTA method override
 and scored `4` in the integrated preview; it left more visible repair artifacts
@@ -423,17 +452,32 @@ only as transport success, not quality success.
 
 ## Verification
 
-Fresh targeted verification for the latest Phase 4 large-title cap, Phase 6 CTA
-method override, experiment CLIs, Phase 7 preview, and Phase 8 export audit:
+Fresh v20 registry coverage generation:
 
 ```powershell
-python -m pytest tests/test_phase4_layout.py tests/test_phase6_nonbubble_cleanup.py tests/test_experiment_clis.py tests/test_phase7_preview.py tests/test_phase8_export_quality_audit.py -q
+python experiments/pipeline_coverage_report.py --registry-file docs/pipeline-runs.gbc06.json --registry-entry phase0-8-gbc06-v20-gbc06-33-complete --output-root outputs/runs
 ```
 
 Observed result:
 
 ```text
-100 passed in 6.33s
+outputs\runs\phase0-8-gbc06-pipeline-coverage-v20-gbc06-33-complete
+base_record_count=35 complete_record_count=35 incomplete_record_count=0
+phase7_preview evaluations=15 records=35 record_issues=0
+phase8_export audits=6 records=9 record_issues=0
+```
+
+Fresh targeted verification for pipeline coverage, Phase 6/7/8 quality
+aggregation, and registry CLI behavior:
+
+```powershell
+python -m pytest tests/test_pipeline_coverage.py tests/test_pipeline_quality_coverage.py tests/test_pipeline_quality_phase7.py -q
+```
+
+Observed result:
+
+```text
+22 passed in 0.89s
 ```
 
 Full regression:
@@ -445,7 +489,7 @@ python -m pytest -q
 Observed result:
 
 ```text
-254 passed in 21.07s
+332 passed in 51.86s
 ```
 
 Diff hygiene:

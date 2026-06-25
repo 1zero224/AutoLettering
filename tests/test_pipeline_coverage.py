@@ -1,8 +1,11 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from experiments import pipeline_coverage_report
 from autolettering.pipeline_coverage import build_pipeline_coverage, write_pipeline_coverage_report
+from autolettering.pipeline_registry import PipelineRegistryValidationError, load_pipeline_registry_entry
 
 
 def test_build_pipeline_coverage_reports_stage_gaps_and_next_records(tmp_path: Path):
@@ -254,6 +257,116 @@ def test_pipeline_coverage_cli_accepts_phase6_cleanup_quality_run(tmp_path: Path
     payload = json.loads((output_root / "cli-cleanup-quality" / "pipeline-coverage.json").read_text(encoding="utf-8"))
     assert payload["quality"]["phase6_cleanup"]["evaluation_count"] == 1
     assert payload["records"]["r1"]["quality_issues"] == ["phase6_cleanup_original_text_visible"]
+
+
+def test_load_pipeline_registry_entry_normalizes_paths(tmp_path: Path):
+    registry = tmp_path / "registry.json"
+    registry.write_text(
+        json.dumps(
+            {
+                "schema_version": "autolettering.pipeline_registry.v1",
+                "base_dir": ".",
+                "entries": {
+                    "smoke": {
+                        "run_id": "coverage-smoke",
+                        "phase1_run_dir": "phase1",
+                        "detection_run_dir": ["phase2a", "phase2b"],
+                        "cleanup_run_dirs": ["phase6"],
+                        "next_limit": 4,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    entry = load_pipeline_registry_entry(registry, "smoke")
+
+    assert entry["run_id"] == "coverage-smoke"
+    assert entry["phase1_run_dir"] == tmp_path / "phase1"
+    assert entry["detection_run_dir"] == [tmp_path / "phase2a", tmp_path / "phase2b"]
+    assert entry["cleanup_run_dirs"] == [tmp_path / "phase6"]
+    assert entry["next_limit"] == 4
+
+
+def test_load_pipeline_registry_entry_validates_required_artifacts(tmp_path: Path):
+    phase1 = tmp_path / "phase1"
+    phase2 = tmp_path / "phase2"
+    registry = tmp_path / "registry.json"
+    _write_phase1_manifest(phase1 / "manifest.json")
+    phase2.mkdir()
+    registry.write_text(
+        json.dumps(
+            {
+                "schema_version": "autolettering.pipeline_registry.v1",
+                "base_dir": ".",
+                "entries": {
+                    "smoke": {
+                        "run_id": "registry-coverage",
+                        "phase1_run_dir": "phase1",
+                        "detection_run_dir": ["phase2"],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PipelineRegistryValidationError) as exc:
+        load_pipeline_registry_entry(registry, "smoke", validate=True)
+
+    assert "pipeline_registry_missing_artifacts" in str(exc.value)
+    assert "detection_run_dir" in str(exc.value)
+    assert "detections.jsonl" in str(exc.value)
+
+
+def test_pipeline_coverage_cli_accepts_registry_entry(tmp_path: Path, monkeypatch, capsys):
+    phase1 = tmp_path / "phase1"
+    phase2 = tmp_path / "phase2"
+    phase3 = tmp_path / "phase3"
+    output_root = tmp_path / "outputs"
+    registry = tmp_path / "registry.json"
+    _write_phase1_manifest(phase1 / "manifest.json")
+    _write_jsonl(phase2 / "detections.jsonl", [_row("r1", "ok")])
+    _write_jsonl(phase3 / "font-selections.jsonl", [_row("r1", "selected")])
+    registry.write_text(
+        json.dumps(
+            {
+                "schema_version": "autolettering.pipeline_registry.v1",
+                "base_dir": ".",
+                "entries": {
+                    "smoke": {
+                        "run_id": "registry-coverage",
+                        "phase1_run_dir": "phase1",
+                        "detection_run_dir": ["phase2"],
+                        "font_selection_run_dir": ["phase3"],
+                        "next_limit": 2,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "pipeline_coverage_report.py",
+            "--registry-file",
+            str(registry),
+            "--registry-entry",
+            "smoke",
+            "--output-root",
+            str(output_root),
+        ],
+    )
+
+    pipeline_coverage_report.main()
+
+    captured = capsys.readouterr()
+    assert "registry-coverage" in captured.out
+    payload = json.loads((output_root / "registry-coverage" / "pipeline-coverage.json").read_text(encoding="utf-8"))
+    assert payload["summary"]["base_record_count"] == 1
+    assert payload["stages"]["phase3_font_selection"]["covered_record_ids"] == ["r1"]
 
 
 def _row(record_id: str, status: str) -> dict:
