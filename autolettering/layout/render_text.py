@@ -5,6 +5,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 from .models import LayoutResult
+from .vertical_text import vertical_digit_group_scale, vertical_text_tokens
 
 
 def render_layout_preview(
@@ -144,7 +145,7 @@ def _draw_vertical(
     vertical_column_order: str,
     vertical_align: str,
 ) -> None:
-    columns = [[char for char in column if char.strip()] for column in layout.line_breaks.splitlines()]
+    columns = [vertical_text_tokens(column) for column in layout.line_breaks.splitlines()]
     columns = [column for column in columns if column]
     column_metrics = [_vertical_column_metrics(draw, column, font, layout.line_spacing) for column in columns]
     total_width = sum(item["width"] for item in column_metrics) + layout.line_spacing * max(0, len(column_metrics) - 1)
@@ -169,10 +170,12 @@ def _vertical_column_metrics(
     font: ImageFont.FreeTypeFont,
     line_spacing: int,
 ) -> dict:
-    boxes = [draw.textbbox((0, 0), char, font=font) for char in chars]
+    fonts = [_vertical_token_font(font, char) for char in chars]
+    boxes = [draw.textbbox((0, 0), char, font=token_font) for char, token_font in zip(chars, fonts)]
     widths = [box[2] - box[0] for box in boxes]
     heights = [box[3] - box[1] for box in boxes]
     return {
+        "fonts": fonts,
         "boxes": boxes,
         "widths": widths,
         "heights": heights,
@@ -194,7 +197,20 @@ def _draw_vertical_column(
 ) -> None:
     y = 0 if vertical_align == "top" else max(0, (canvas_height - metrics["height"]) // 2)
     center_x = x_left + metrics["width"] // 2
-    for char, box, width, height in zip(chars, metrics["boxes"], metrics["widths"], metrics["heights"]):
+    for char, token_font, box, width, height in zip(
+        chars,
+        metrics["fonts"],
+        metrics["boxes"],
+        metrics["widths"],
+        metrics["heights"],
+    ):
         x = max(0, center_x - width // 2 - box[0])
-        draw.text((x, y - box[1]), char, fill=text_color, font=font)
+        draw.text((x, y - box[1]), char, fill=text_color, font=token_font)
         y += height + line_spacing
+
+
+def _vertical_token_font(font: ImageFont.FreeTypeFont, token: str) -> ImageFont.FreeTypeFont:
+    scale = vertical_digit_group_scale(token)
+    if scale >= 1.0:
+        return font
+    return font.font_variant(size=max(1, round(font.size * scale)))

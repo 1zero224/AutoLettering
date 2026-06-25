@@ -8,6 +8,7 @@ from PIL import Image, ImageChops, ImageDraw
 from autolettering.layout.candidates import generate_line_break_candidates
 from autolettering.layout.measure import measure_text_layout, search_fitting_layout
 from autolettering.layout.render_text import measure_preview_alignment, render_layout_preview
+from autolettering.layout.vertical_text import vertical_digit_group_scale, vertical_text_tokens
 from autolettering.phase4 import run_phase4
 
 
@@ -290,6 +291,37 @@ def test_render_layout_preview_defaults_vertical_text_to_top_align(tmp_path: Pat
     assert alignment["ink_bbox"] is not None
     assert alignment["ink_bbox"][1] <= 2
     assert alignment["vertical_center_offset_px"] < -20
+
+
+def test_render_layout_preview_groups_multidigit_numbers_in_vertical_text(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+    grouped_path = tmp_path / "grouped-digits.png"
+    split_path = tmp_path / "split-digits.png"
+    grouped = search_fitting_layout(
+        "漫画第一卷2026年6月29日发售！！",
+        font_path,
+        (142, 1554),
+        min_font_size=54,
+        max_font_size=54,
+        orientation="vertical",
+    )
+    plain_char_height = measure_text_layout("漫画第一卷二零二六年六月二九日发售！！", font_path, 54, orientation="vertical")
+
+    render_layout_preview(grouped, font_path, grouped_path, canvas_size=(142, 1554), text_color=(255, 255, 255, 255))
+    render_layout_preview(
+        replace(grouped, line_breaks="漫画第一卷二零二六年六月二九日发售！！"),
+        font_path,
+        split_path,
+        canvas_size=(142, 1554),
+        text_color=(255, 255, 255, 255),
+    )
+
+    assert vertical_text_tokens(grouped.line_breaks) == ["漫", "画", "第", "一", "卷", "2026", "年", "6", "月", "29", "日", "发", "售", "！", "！"]
+    assert vertical_digit_group_scale("2026") < vertical_digit_group_scale("29")
+    assert grouped.measured_width > 54
+    assert grouped.measured_height < plain_char_height.height
+    with Image.open(grouped_path) as grouped_image, Image.open(split_path) as split_image:
+        assert ImageChops.difference(grouped_image, split_image).getbbox() is not None
 
 
 def test_render_layout_preview_supports_vertical_text_columns(tmp_path: Path):
@@ -898,6 +930,8 @@ def test_run_phase4_infers_light_text_for_tall_cta_mask_source(tmp_path: Path):
     assert layout["vertical_align"] == "top"
     assert layout["text_color"] == [255, 255, 255, 255]
     assert layout["font_size"] < 72
+    assert layout["line_spacing"] > 4
+    assert layout["line_spacing"] <= 20
 
 
 def test_run_phase4_filters_selected_fonts_by_record_id_before_sample_limit(tmp_path: Path):

@@ -135,6 +135,7 @@ def _search_layout(
     orientation = _selected_orientation(target_size, angle)
     angle_degrees = _selected_angle_degrees(orientation, angle)
     max_font_size = _max_font_size(orientation, detection, target_bbox, row.get("translated_text", ""))
+    line_spacing_values = _line_spacing_values_for_record(orientation, detection, target_bbox)
     return search_fitting_layout(
         row.get("translated_text", ""),
         font_path,
@@ -142,6 +143,7 @@ def _search_layout(
         orientation=orientation,
         angle_degrees=angle_degrees,
         max_font_size=max_font_size,
+        line_spacing_values=line_spacing_values,
     )
 
 
@@ -267,6 +269,18 @@ def _base_vertical_font_limit(detection: dict, target_bbox: list[int]) -> int:
     if _tall_narrow_nonbubble_cta_strip(detection, target_bbox):
         return max(28, min(60, int(round(_width(tuple(target_bbox)) * 0.38))))
     return 72
+
+
+def _line_spacing_values_for_record(
+    orientation: str,
+    detection: dict | None,
+    target_bbox: list[int] | None,
+) -> list[int] | None:
+    if orientation != "vertical" or detection is None or target_bbox is None:
+        return None
+    if _tall_narrow_nonbubble_cta_strip(detection, target_bbox):
+        return [4, 8, 12, 16, 20]
+    return None
 
 
 def _large_nonbubble_cta_title(detection: dict, target_bbox: list[int]) -> bool:

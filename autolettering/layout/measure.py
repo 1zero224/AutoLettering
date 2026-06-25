@@ -7,6 +7,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from .candidates import generate_line_break_candidates
 from .models import LayoutResult, TextMeasurement
+from .vertical_text import vertical_digit_group_scale, vertical_text_tokens
 
 
 def measure_text_layout(
@@ -36,6 +37,7 @@ def search_fitting_layout(
     max_lines: int = 3,
     orientation: str | None = None,
     angle_degrees: float = 0.0,
+    line_spacing_values: list[int] | None = None,
 ) -> LayoutResult:
     target_width, target_height = target_size
     selected_orientation = orientation or _choose_orientation(target_width, target_height)
@@ -51,6 +53,7 @@ def search_fitting_layout(
         angle_degrees,
         0.0,
         max_lines,
+        line_spacing_values,
     )
     if best is None and allow_overflow_ratio > 0.0:
         best = _search_best_candidate(
@@ -64,6 +67,7 @@ def search_fitting_layout(
             angle_degrees,
             allow_overflow_ratio,
             max_lines,
+            line_spacing_values,
         )
     if best is None:
         return _fallback_layout(
@@ -103,10 +107,11 @@ def _search_best_candidate(
     angle_degrees: float,
     allow_overflow_ratio: float,
     max_lines: int,
+    line_spacing_values: list[int] | None,
 ) -> tuple[str, int, TextMeasurement, int] | None:
     fitting: list[tuple[str, int, TextMeasurement, int]] = []
     for line_breaks in candidates:
-        for line_spacing in _line_spacing_candidates(orientation, max_lines):
+        for line_spacing in line_spacing_values or _line_spacing_candidates(orientation, max_lines):
             for font_size in range(max_font_size, min_font_size - 1, -1):
                 measured = measure_text_layout(
                     line_breaks,
@@ -280,7 +285,7 @@ def _candidate_texts(text: str, max_lines: int, orientation: str) -> list[str]:
 
 
 def _measure_vertical_text(text: str, font: ImageFont.FreeTypeFont, line_spacing: int) -> TextMeasurement:
-    columns = [[char for char in column if char.strip()] for column in text.splitlines()]
+    columns = [vertical_text_tokens(column) for column in text.splitlines()]
     columns = [column for column in columns if column]
     if not columns:
         return TextMeasurement(width=0, height=0)
@@ -299,7 +304,14 @@ def _measure_vertical_column(
     font: ImageFont.FreeTypeFont,
     line_spacing: int,
 ) -> TextMeasurement:
-    boxes = [draw.textbbox((0, 0), char, font=font) for char in chars]
+    boxes = [draw.textbbox((0, 0), char, font=_vertical_token_font(font, char)) for char in chars]
     width = max(box[2] - box[0] for box in boxes)
     height = sum(box[3] - box[1] for box in boxes) + line_spacing * max(0, len(chars) - 1)
     return TextMeasurement(width=width, height=height)
+
+
+def _vertical_token_font(font: ImageFont.FreeTypeFont, token: str) -> ImageFont.FreeTypeFont:
+    scale = vertical_digit_group_scale(token)
+    if scale >= 1.0:
+        return font
+    return font.font_variant(size=max(1, round(font.size * scale)))
