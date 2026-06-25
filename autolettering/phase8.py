@@ -220,11 +220,16 @@ def _load_repaired_pages(path: str | Path | None) -> dict[str, dict]:
     rows = _load_jsonl(preview_results_path, "page_preview_generated")
     for row in rows:
         cleaned = row.get("preview", {}).get("cleaned_page_path")
-        if row.get("image_name") and cleaned:
-            repaired[row["image_name"]] = {
-                "image_path": row.get("preview", {}).get("original_page_path"),
-                "repaired_image_path": cleaned,
-            }
+        image_name = row.get("image_name")
+        if not image_name or not cleaned:
+            continue
+        existing = repaired.get(image_name, {})
+        repaired[image_name] = {
+            **existing,
+            "image_path": row.get("preview", {}).get("original_page_path") or existing.get("image_path"),
+            "repaired_image_path": cleaned,
+            "repair_sources": existing.get("repair_sources") or _preview_repair_sources(row),
+        }
     return repaired
 
 
@@ -255,7 +260,9 @@ def _preview_repair_sources(page: dict) -> list[dict]:
                 "cleanup_method": record.get("cleanup_method"),
                 "replacement_method": record.get("replacement_method"),
                 "effective_method": record.get("replacement_method") or record.get("cleanup_method"),
-                "effective_crop_path": record.get("effective_crop_path") or record.get("cleaned_crop_path"),
+                "effective_crop_path": record.get("effective_crop_path")
+                or record.get("cleaned_crop_path")
+                or record.get("cleanup_crop_path"),
                 "route": record.get("route"),
                 "text_region_source": record.get("text_region_source"),
                 "source_mask_path": record.get("source_mask_path"),

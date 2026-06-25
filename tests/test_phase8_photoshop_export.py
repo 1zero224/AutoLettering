@@ -204,6 +204,90 @@ def test_run_phase8_photoshop_export_uses_phase7_cleaned_page_as_repaired_image_
     assert "Expected cleanup patch layers: 0" in checklist
 
 
+def test_run_phase8_photoshop_export_preserves_phase7_repair_sources_when_preview_results_exist(tmp_path: Path):
+    image_path = tmp_path / "page.png"
+    Image.new("RGB", (120, 160), "white").save(image_path)
+    repaired_page = tmp_path / "cleaned-page.png"
+    cleaned_crop = tmp_path / "cleaned-crop.png"
+    Image.new("RGB", (120, 160), "gray").save(repaired_page)
+    Image.new("RGB", (70, 70), "gray").save(cleaned_crop)
+    detection_run = _mkdir(tmp_path / "phase2")
+    font_run = _mkdir(tmp_path / "phase3")
+    layout_run = _mkdir(tmp_path / "phase4")
+    cleanup_run = _mkdir(tmp_path / "phase6")
+    preview_run = _mkdir(tmp_path / "phase7")
+    _write_jsonl(detection_run / "detections.jsonl", [_detection_payload(image_path)])
+    _write_jsonl(font_run / "font-selections.jsonl", [_font_payload(tmp_path / "font.ttf")])
+    _write_jsonl(layout_run / "layout-results.jsonl", [_layout_payload()])
+    _write_jsonl(cleanup_run / "cleanup-results.jsonl", [_cleanup_payload(cleaned_crop)])
+    phase7_page = {
+        "image_name": "page.png",
+        "original_page_path": str(image_path),
+        "cleaned_page_path": str(repaired_page),
+        "records": [
+            {
+                "record_id": "page.png#1",
+                "bbox": [10, 20, 80, 90],
+                "cleanup_method": "gpt_image2_background_repair",
+                "cleanup_crop_path": str(cleaned_crop),
+                "text_overlay_required": True,
+            }
+        ],
+    }
+    (preview_run / "manifest.json").write_text(
+        json.dumps({"schema_version": "autolettering.phase7.preview.v1", "pages": [phase7_page]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    _write_jsonl(
+        preview_run / "preview-results.jsonl",
+        [
+            {
+                "image_name": "page.png",
+                "status": "page_preview_generated",
+                "records": phase7_page["records"],
+                "preview": {
+                    "original_page_path": str(image_path),
+                    "cleaned_page_path": str(repaired_page),
+                },
+            }
+        ],
+    )
+
+    run_dir = run_phase8_photoshop_export(
+        detection_run,
+        font_run,
+        layout_run,
+        cleanup_run,
+        tmp_path / "outputs",
+        sample_limit=1,
+        preview_run_dir=preview_run,
+    )
+
+    manifest = json.loads((run_dir / "photoshop-manifest.json").read_text(encoding="utf-8"))
+    page = manifest["pages"][0]
+    assert page["repaired_image_path"] == str(repaired_page)
+    assert page["repair_sources"] == [
+        {
+            "record_id": "page.png#1",
+            "bbox_xyxy": [10, 20, 80, 90],
+            "cleanup_method": "gpt_image2_background_repair",
+            "replacement_method": None,
+            "effective_method": "gpt_image2_background_repair",
+            "effective_crop_path": str(cleaned_crop),
+            "route": None,
+            "text_region_source": None,
+            "source_mask_path": None,
+            "fallback_locator": None,
+            "fallback_locator_validation": None,
+            "gpt_image2_edit_status": None,
+            "text_overlay_required": True,
+        }
+    ]
+    report = (run_dir / "reports" / "phase8-report.md").read_text(encoding="utf-8")
+    assert "`gpt_image2_background_repair=1`" in report
+    assert "Page-level repaired image sources: 1" in report
+
+
 def test_run_phase8_photoshop_export_synthesizes_repaired_page_from_cleanup_rows(tmp_path: Path):
     image_path = tmp_path / "page.png"
     Image.new("RGB", (120, 160), "white").save(image_path)
