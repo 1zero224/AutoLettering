@@ -862,6 +862,39 @@ def test_refine_fallback_locator_bbox_trims_adjacent_white_bubble_from_dark_card
     assert refined["refinement"]["original_local_bbox_xyxy"] == [150, 186, 396, 245]
 
 
+def test_refine_fallback_locator_bbox_trims_light_background_sound_effect_band(tmp_path: Path):
+    context_path = tmp_path / "context.png"
+    image = Image.new("RGB", (660, 660), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 0, 659, 659), outline=(20, 20, 20), width=4)
+    for left in (60, 170, 280, 390, 500):
+        draw.polygon(
+            [(left, 72), (left + 86, 56), (left + 98, 88), (left + 16, 104)],
+            fill=(22, 22, 22),
+        )
+        draw.rectangle((left + 18, 102, left + 88, 136), fill=(25, 25, 25))
+        draw.rectangle((left + 36, 86, left + 108, 116), fill=(24, 24, 24))
+        draw.rectangle((left + 32, 93, left + 84, 110), fill="white")
+    for x in range(90, 620, 34):
+        draw.line((x, 328, x - 42, 600), fill=(92, 92, 92), width=2)
+    draw.arc((118, 290, 552, 820), start=192, end=346, fill=(36, 36, 36), width=3)
+    image.save(context_path)
+    locator = {
+        "status": "ok",
+        "local_bbox_xyxy": [35, 45, 615, 585],
+        "global_bbox_xyxy": [353, 1046, 933, 1586],
+    }
+
+    refined = _refine_fallback_locator_bbox(locator, context_path, (318, 1001, 970, 1653))
+
+    assert refined["local_bbox_xyxy"][1] <= 64
+    assert refined["local_bbox_xyxy"][3] <= 156
+    assert refined["local_bbox_xyxy"][2] >= 580
+    assert refined["global_bbox_xyxy"][3] <= 1157
+    assert refined["refinement"]["method"] == "trim_to_light_text_ink_support"
+    assert refined["refinement"]["original_local_bbox_xyxy"] == [35, 45, 615, 585]
+
+
 def test_run_phase6_nonbubble_cleanup_fallback_uses_mimo_bbox_and_gpt_mask(tmp_path: Path, monkeypatch):
     image_path = _write_nonbubble_image(tmp_path / "page.png")
     detection_run = tmp_path / "phase2"
@@ -1419,6 +1452,146 @@ def test_run_phase6_nonbubble_cleanup_fallback_does_not_call_gpt_when_semantic_v
     assert row["gpt_image2_edit"]["reason"] == "fallback_locator_semantic_rejected"
 
 
+def test_run_phase6_nonbubble_cleanup_fallback_recovers_light_text_band_above_anchor(tmp_path: Path):
+    image_path = _write_light_sound_effect_panel(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(
+        detection_run / "detections.jsonl",
+        image_path,
+        rows=[
+            {
+                "record_id": "page.png#2",
+                "status": "fallback_required",
+                "group_name": "框外",
+                "selected_text_box_xyxy": None,
+                "failure_reason": "no_ctd_mask_within_threshold",
+                "fallback": {
+                    "method": "mimo_crop_then_gpt_image2_masked_edit",
+                    "context_bbox_xyxy": [0, 0, 660, 660],
+                    "context_labelplus_point_xy": [410, 472],
+                    "translated_text": "啪嗒啪嗒啪嗒",
+                },
+            }
+        ],
+    )
+    mimo = _FakeMimoLocatorLowRejectedThenAnchorRecovered()
+
+    run_dir = run_phase6_nonbubble_cleanup(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-fallback-anchor-band-recovery",
+        sample_limit=1,
+        mimo_client=mimo,
+    )
+
+    row = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]
+    assert mimo.kinds == [
+        "phase6_fallback_text_locator",
+        "phase6_fallback_text_locator_validation",
+        "phase6_fallback_text_locator_validation",
+    ]
+    assert row["fallback_locator"]["anchor_recovery_of_validation"] == "fallback_locator_semantic_rejected"
+    assert row["fallback_locator"]["local_bbox_xyxy"][1] < 450
+    assert row["fallback_locator"]["local_bbox_xyxy"][3] <= 545
+    assert row["fallback_locator"]["refinement"]["method"] == "recover_light_text_ink_band_near_labelplus_anchor"
+    assert row["fallback_locator_validation"]["status"] == "accepted"
+    assert row["fallback_locator_validation"]["tight_enough"] is True
+    assert row["gpt_image2_edit"]["status"] == "dry_run"
+
+
+def test_run_phase6_nonbubble_cleanup_fallback_recovers_anchor_band_after_invalid_locator(tmp_path: Path):
+    image_path = _write_light_sound_effect_panel(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(
+        detection_run / "detections.jsonl",
+        image_path,
+        rows=[
+            {
+                "record_id": "page.png#2",
+                "status": "fallback_required",
+                "group_name": "框外",
+                "selected_text_box_xyxy": None,
+                "failure_reason": "no_ctd_mask_within_threshold",
+                "fallback": {
+                    "method": "mimo_crop_then_gpt_image2_masked_edit",
+                    "context_bbox_xyxy": [0, 0, 660, 660],
+                    "context_labelplus_point_xy": [410, 472],
+                    "translated_text": "啪嗒啪嗒啪嗒",
+                },
+            }
+        ],
+    )
+    mimo = _FakeMimoLocatorInvalidLowThenAnchorRecovered()
+
+    run_dir = run_phase6_nonbubble_cleanup(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-fallback-invalid-anchor-band-recovery",
+        sample_limit=1,
+        mimo_client=mimo,
+    )
+
+    row = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]
+    assert mimo.kinds == [
+        "phase6_fallback_text_locator",
+        "phase6_fallback_text_locator_retry",
+        "phase6_fallback_text_locator_validation",
+    ]
+    assert row["fallback_locator"]["anchor_recovery_of_validation"] == "fallback_locator_semantic_rejected"
+    assert row["fallback_locator"]["local_bbox_xyxy"][1] < 450
+    assert row["fallback_locator"]["refinement"]["method"] == "recover_light_text_ink_band_near_labelplus_anchor"
+    assert row["fallback_locator_validation"]["status"] == "accepted"
+    assert row["gpt_image2_edit"]["status"] == "dry_run"
+
+
+def test_run_phase6_nonbubble_cleanup_fallback_recovers_after_retry_validation_rejects(tmp_path: Path):
+    image_path = _write_light_sound_effect_panel(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(
+        detection_run / "detections.jsonl",
+        image_path,
+        rows=[
+            {
+                "record_id": "page.png#2",
+                "status": "fallback_required",
+                "group_name": "框外",
+                "selected_text_box_xyxy": None,
+                "failure_reason": "no_ctd_mask_within_threshold",
+                "fallback": {
+                    "method": "mimo_crop_then_gpt_image2_masked_edit",
+                    "context_bbox_xyxy": [0, 0, 660, 660],
+                    "context_labelplus_point_xy": [410, 472],
+                    "translated_text": "啪嗒啪嗒啪嗒",
+                },
+            }
+        ],
+    )
+    mimo = _FakeMimoLocatorRetryLowRejectedThenAnchorRecovered()
+
+    run_dir = run_phase6_nonbubble_cleanup(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-fallback-retry-reject-anchor-recovery",
+        sample_limit=1,
+        mimo_client=mimo,
+    )
+
+    row = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]
+    assert mimo.kinds == [
+        "phase6_fallback_text_locator",
+        "phase6_fallback_text_locator_retry",
+        "phase6_fallback_text_locator_validation",
+        "phase6_fallback_text_locator_validation",
+    ]
+    assert row["fallback_locator"]["anchor_recovery_of_validation"] == "fallback_locator_semantic_rejected"
+    assert row["fallback_locator"]["local_bbox_xyxy"][1] < 450
+    assert row["fallback_locator_validation"]["status"] == "accepted"
+    assert row["gpt_image2_edit"]["status"] == "dry_run"
+
+
 def test_run_phase6_nonbubble_cleanup_fallback_does_not_call_gpt_when_mimo_bbox_is_invalid(tmp_path: Path, monkeypatch):
     image_path = _write_nonbubble_image(tmp_path / "page.png")
     detection_run = tmp_path / "phase2"
@@ -1931,6 +2104,138 @@ class _FakeMimoLocatorSemanticReject:
         }
 
 
+class _FakeMimoLocatorLowRejectedThenAnchorRecovered:
+    def __init__(self):
+        self.kinds = []
+
+    def analyze_image(self, image_path: str, prompt: str, kind: str = "image_analysis", max_completion_tokens: int | None = None):
+        self.kinds.append(kind)
+        if kind == "phase6_fallback_text_locator":
+            return {
+                "raw_text": json.dumps(
+                    {
+                        "bbox_xyxy": [25, 542, 585, 650],
+                        "confidence": 1.0,
+                        "reasoning_summary": "the bbox is below the sound effect and over character hair",
+                    },
+                    ensure_ascii=False,
+                ),
+                "request": {"kind": kind, "image_path": str(image_path)},
+                "response": {"status": "ok"},
+            }
+        if kind == "phase6_fallback_text_locator_validation":
+            if self.kinds.count("phase6_fallback_text_locator_validation") == 1:
+                return {
+                    "raw_text": json.dumps(
+                        {
+                            "semantic_correct": False,
+                            "tight_enough": False,
+                            "bbox_on_blank_area": True,
+                            "bbox_targets_unrelated_text": False,
+                            "visible_original_text": "",
+                            "recommendation": "reject",
+                            "reasoning_summary": "The yellow bbox is below the intended sound effect and covers hair.",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    "request": {"kind": kind, "image_path": str(image_path)},
+                    "response": {"status": "ok"},
+                }
+            return _mimo_validation_response(kind, image_path, accepted=True)
+        raise AssertionError(f"unexpected kind {kind}")
+
+
+class _FakeMimoLocatorInvalidLowThenAnchorRecovered:
+    def __init__(self):
+        self.kinds = []
+
+    def analyze_image(self, image_path: str, prompt: str, kind: str = "image_analysis", max_completion_tokens: int | None = None):
+        self.kinds.append(kind)
+        if kind == "phase6_fallback_text_locator":
+            return {
+                "raw_text": json.dumps(
+                    {
+                        "bbox_xyxy": [38, 584, 595, 734],
+                        "confidence": 0.95,
+                        "reasoning_summary": "bbox extends below the crop",
+                    },
+                    ensure_ascii=False,
+                ),
+                "request": {"kind": kind, "image_path": str(image_path)},
+                "response": {"status": "ok"},
+            }
+        if kind == "phase6_fallback_text_locator_retry":
+            return {
+                "raw_text": json.dumps(
+                    {
+                        "bbox_xyxy": [38, 545, 605, 668],
+                        "confidence": 0.95,
+                        "reasoning_summary": "bbox still extends below the crop",
+                    },
+                    ensure_ascii=False,
+                ),
+                "request": {"kind": kind, "image_path": str(image_path)},
+                "response": {"status": "ok"},
+            }
+        if kind == "phase6_fallback_text_locator_validation":
+            return _mimo_validation_response(kind, image_path, accepted=True)
+        raise AssertionError(f"unexpected kind {kind}")
+
+
+class _FakeMimoLocatorRetryLowRejectedThenAnchorRecovered:
+    def __init__(self):
+        self.kinds = []
+
+    def analyze_image(self, image_path: str, prompt: str, kind: str = "image_analysis", max_completion_tokens: int | None = None):
+        self.kinds.append(kind)
+        if kind == "phase6_fallback_text_locator":
+            return {
+                "raw_text": json.dumps(
+                    {
+                        "bbox_xyxy": [31, 531, 599, 671],
+                        "confidence": 0.99,
+                        "reasoning_summary": "bbox extends below the crop",
+                    },
+                    ensure_ascii=False,
+                ),
+                "request": {"kind": kind, "image_path": str(image_path)},
+                "response": {"status": "ok"},
+            }
+        if kind == "phase6_fallback_text_locator_retry":
+            return {
+                "raw_text": json.dumps(
+                    {
+                        "bbox_xyxy": [31, 531, 560, 645],
+                        "confidence": 0.99,
+                        "reasoning_summary": "bbox is valid but below the intended sound effect",
+                    },
+                    ensure_ascii=False,
+                ),
+                "request": {"kind": kind, "image_path": str(image_path)},
+                "response": {"status": "ok"},
+            }
+        if kind == "phase6_fallback_text_locator_validation":
+            if self.kinds.count("phase6_fallback_text_locator_validation") == 1:
+                return {
+                    "raw_text": json.dumps(
+                        {
+                            "semantic_correct": False,
+                            "tight_enough": False,
+                            "bbox_on_blank_area": False,
+                            "bbox_targets_unrelated_text": True,
+                            "visible_original_text": "スッ スッ スッ スッ",
+                            "recommendation": "reject",
+                            "reasoning_summary": "The bbox is directly below the target text and covers hair.",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    "request": {"kind": kind, "image_path": str(image_path)},
+                    "response": {"status": "ok"},
+                }
+            return _mimo_validation_response(kind, image_path, accepted=True)
+        raise AssertionError(f"unexpected kind {kind}")
+
+
 def _mimo_validation_response(kind: str, image_path: str | Path, accepted: bool) -> dict:
     payload = {
         "semantic_correct": accepted,
@@ -1983,6 +2288,25 @@ def _write_decorated_nonbubble_caption(path: Path) -> Path:
     for y in (80, 126, 172, 218):
         draw.rectangle((24, y, 54, y + 6), fill="black")
         draw.rectangle((36, y, 42, y + 30), fill="black")
+    image.save(path)
+    return path
+
+
+def _write_light_sound_effect_panel(path: Path) -> Path:
+    image = Image.new("RGB", (660, 660), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 0, 659, 659), outline=(20, 20, 20), width=4)
+    for left in (60, 170, 280, 390, 500):
+        draw.polygon(
+            [(left, 415), (left + 86, 399), (left + 98, 431), (left + 16, 447)],
+            fill=(22, 22, 22),
+        )
+        draw.rectangle((left + 18, 445, left + 88, 479), fill=(25, 25, 25))
+        draw.rectangle((left + 36, 429, left + 108, 459), fill=(24, 24, 24))
+        draw.rectangle((left + 32, 436, left + 84, 453), fill="white")
+    for x in range(90, 620, 34):
+        draw.line((x, 542, x - 42, 655), fill=(92, 92, 92), width=2)
+    draw.arc((118, 520, 552, 1040), start=192, end=346, fill=(36, 36, 36), width=3)
     image.save(path)
     return path
 

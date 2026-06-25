@@ -130,32 +130,50 @@ def _fallback_gpt_cleanup_one(
     context = _write_fallback_context(run_dir, detection, context_bbox)
     locator = _locate_fallback_bbox(detection, context["locator_path"], context_bbox, mimo_client)
     if locator.get("status") != "ok":
-        return {
-            "record_id": detection["record_id"],
-            "image_name": detection.get("image_name"),
-            "translated_text": detection.get("translated_text", ""),
-            "status": "failed",
-            "cleanup": {
-                "method": "gpt_image2_masked_edit",
-                "bbox": list(context_bbox),
-                "failure_reason": locator.get("failure_reason", "fallback_locator_failed"),
-                "cleaned_crop_path": str(context["input_path"]),
-            },
-            "fallback_locator": locator,
-            "fallback_locator_validation": {"status": "not_called", "reason": "fallback_locator_failed"},
-            "gpt_image2_edit": {"status": "not_called", "reason": "fallback_locator_failed"},
-        }
+        recovered_locator = _recover_locator_from_labelplus_anchor(
+            detection,
+            context["input_path"],
+            context_bbox,
+            locator,
+            {"status": "rejected", "failure_reason": "fallback_locator_semantic_rejected"},
+        )
+        if recovered_locator.get("status") == "ok":
+            locator = recovered_locator
+        else:
+            return {
+                "record_id": detection["record_id"],
+                "image_name": detection.get("image_name"),
+                "translated_text": detection.get("translated_text", ""),
+                "status": "failed",
+                "cleanup": {
+                    "method": "gpt_image2_masked_edit",
+                    "bbox": list(context_bbox),
+                    "failure_reason": locator.get("failure_reason", "fallback_locator_failed"),
+                    "cleaned_crop_path": str(context["input_path"]),
+                },
+                "fallback_locator": locator,
+                "fallback_locator_validation": {"status": "not_called", "reason": "fallback_locator_failed"},
+                "gpt_image2_edit": {"status": "not_called", "reason": "fallback_locator_failed"},
+            }
     locator = _refine_fallback_locator_bbox(locator, context["input_path"], context_bbox)
     validation = _validate_fallback_locator_semantics(run_dir, detection, locator, context["locator_path"], mimo_client)
     if validation.get("status") != "accepted":
-        retry_locator = _relocate_after_semantic_rejection(
+        retry_locator = _recover_locator_from_labelplus_anchor(
             detection,
-            context["locator_path"],
+            context["input_path"],
             context_bbox,
             locator,
             validation,
-            mimo_client,
         )
+        if retry_locator.get("status") != "ok":
+            retry_locator = _relocate_after_semantic_rejection(
+                detection,
+                context["locator_path"],
+                context_bbox,
+                locator,
+                validation,
+                mimo_client,
+            )
         if retry_locator.get("status") == "ok":
             retry_locator = _refine_fallback_locator_bbox(retry_locator, context["input_path"], context_bbox)
             retry_validation = _validate_fallback_locator_semantics(
@@ -168,6 +186,26 @@ def _fallback_gpt_cleanup_one(
             if retry_validation.get("status") == "accepted":
                 locator = retry_locator
                 validation = retry_validation
+            else:
+                anchor_locator = _recover_locator_from_labelplus_anchor(
+                    detection,
+                    context["input_path"],
+                    context_bbox,
+                    retry_locator,
+                    retry_validation,
+                )
+                if anchor_locator.get("status") == "ok":
+                    anchor_locator = _refine_fallback_locator_bbox(anchor_locator, context["input_path"], context_bbox)
+                    anchor_validation = _validate_fallback_locator_semantics(
+                        run_dir,
+                        detection,
+                        anchor_locator,
+                        context["locator_path"],
+                        mimo_client,
+                    )
+                    if anchor_validation.get("status") == "accepted":
+                        locator = anchor_locator
+                        validation = anchor_validation
     if validation.get("status") != "accepted":
         return {
             "record_id": detection["record_id"],
@@ -185,14 +223,22 @@ def _fallback_gpt_cleanup_one(
             "gpt_image2_edit": {"status": "not_called", "reason": "fallback_locator_semantic_rejected"},
         }
     if validation.get("tight_enough") is not True:
-        tight_locator = _tighten_accepted_locator_bbox(
+        tight_locator = _recover_locator_from_labelplus_anchor(
             detection,
-            context["locator_path"],
+            context["input_path"],
             context_bbox,
             locator,
             validation,
-            mimo_client,
         )
+        if tight_locator.get("status") != "ok":
+            tight_locator = _tighten_accepted_locator_bbox(
+                detection,
+                context["locator_path"],
+                context_bbox,
+                locator,
+                validation,
+                mimo_client,
+            )
         if tight_locator.get("status") == "ok":
             tight_locator = _refine_fallback_locator_bbox(tight_locator, context["input_path"], context_bbox)
             tight_validation = _validate_fallback_locator_semantics(
@@ -551,6 +597,143 @@ def _retry_locate_fallback_bbox(
         first_response=first_response,
         retry_of_error=type(first_error).__name__,
     )
+
+
+def _recover_locator_from_labelplus_anchor(
+    detection: dict,
+    context_path: Path,
+    context_bbox: tuple[int, int, int, int],
+    locator: dict,
+    validation: dict,
+) -> dict:
+    anchor = _context_labelplus_point(detection)
+    context_size = (context_bbox[2] - context_bbox[0], context_bbox[3] - context_bbox[1])
+    local_bbox = _locator_bbox_for_anchor_recovery(locator, context_size)
+    if (
+        not _can_try_anchor_recovery(validation)
+        or anchor is None
+        or local_bbox is None
+    ):
+        return {"status": "failed", "failure_reason": "anchor_recovery_not_applicable"}
+    ax, ay = anchor
+    bx1, by1, bx2, by2 = [int(value) for value in local_bbox]
+    min_below_anchor = ay - 16 if validation.get("status") == "accepted" else ay + 18
+    if by1 < min_below_anchor or bx2 <= ax - 40 or bx1 >= ax + 40:
+        return {"status": "failed", "failure_reason": "anchor_recovery_locator_not_below_anchor"}
+    try:
+        with Image.open(context_path) as image:
+            recovered = _recover_light_text_ink_band_near_anchor(image.convert("RGB"), anchor, tuple(local_bbox))
+    except (FileNotFoundError, OSError, ValueError):
+        return {"status": "failed", "failure_reason": "anchor_recovery_image_unavailable"}
+    if recovered is None:
+        return {"status": "failed", "failure_reason": "anchor_recovery_no_light_text_band"}
+    result = dict(locator)
+    result["status"] = "ok"
+    result.pop("failure_reason", None)
+    result.pop("retry_failure_reason", None)
+    result["local_bbox_xyxy"] = list(recovered)
+    result["global_bbox_xyxy"] = list(_global_bbox(context_bbox, recovered))
+    result["anchor_recovery_of_validation"] = validation.get("failure_reason") or "accepted_bbox_not_tight"
+    result["refinement"] = {
+        "method": "recover_light_text_ink_band_near_labelplus_anchor",
+        "original_local_bbox_xyxy": [int(value) for value in local_bbox],
+        "refined_local_bbox_xyxy": list(recovered),
+        "labelplus_anchor_xy": anchor,
+    }
+    return result
+
+
+def _locator_bbox_for_anchor_recovery(locator: dict, context_size: tuple[int, int]) -> list[int] | None:
+    local_bbox = locator.get("local_bbox_xyxy")
+    if isinstance(local_bbox, list) and len(local_bbox) == 4:
+        return [int(value) for value in local_bbox]
+    for key in ("retry_raw_text", "raw_text"):
+        raw_text = locator.get(key)
+        if not raw_text:
+            continue
+        try:
+            payload = _mimo_object_payload(str(raw_text))
+            values = _number_list(payload.get("bbox_xyxy") or payload.get("bbox"), "bbox_xyxy")
+        except Exception:
+            continue
+        return _clamped_bbox_for_anchor_recovery(values, context_size)
+    return None
+
+
+def _clamped_bbox_for_anchor_recovery(values: list[float], context_size: tuple[int, int]) -> list[int] | None:
+    width, height = context_size
+    if len(values) != 4:
+        return None
+    x1, y1, x2, y2 = [int(round(value)) for value in values]
+    x1, y1 = max(0, min(width - 1, x1)), max(0, min(height - 1, y1))
+    x2, y2 = max(1, min(width, x2)), max(1, min(height, y2))
+    if x2 <= x1 or y2 <= y1:
+        return None
+    return [x1, y1, x2, y2]
+
+
+def _can_try_anchor_recovery(validation: dict) -> bool:
+    return validation.get("failure_reason") == "fallback_locator_semantic_rejected" or (
+        validation.get("status") == "accepted" and validation.get("tight_enough") is not True
+    )
+
+
+def _recover_light_text_ink_band_near_anchor(
+    image: Image.Image,
+    anchor_xy: list[int],
+    rejected_bbox: tuple[int, int, int, int],
+) -> tuple[int, int, int, int] | None:
+    width, height = image.size
+    ax, ay = anchor_xy
+    bx1, by1, bx2, _ = rejected_bbox
+    window_x1 = max(0, min(bx1 - 60, ax - 420))
+    window_x2 = min(width, max(bx2 + 60, ax + 260))
+    window_y1 = max(0, ay - 120)
+    window_y2 = min(height, by1 + 8)
+    if window_x2 - window_x1 < 120 or window_y2 - window_y1 < 80:
+        return None
+    candidate = _trim_bbox_to_light_text_ink_support(image, (window_x1, window_y1, window_x2, window_y2))
+    if candidate == (window_x1, window_y1, window_x2, window_y2):
+        return None
+    cx1, cy1, cx2, cy2 = candidate
+    if cy1 > ay + 8 or cy2 <= ay - 96:
+        return None
+    if not (cx1 <= ax <= cx2 or abs(_bbox_center_x(candidate) - ax) <= max(80, (cx2 - cx1) * 0.45)):
+        return None
+    candidate = _cap_recovered_anchor_band_height(image, candidate, ay)
+    return candidate
+
+
+def _bbox_center_x(bbox: tuple[int, int, int, int]) -> float:
+    return (bbox[0] + bbox[2]) / 2
+
+
+def _cap_recovered_anchor_band_height(
+    image: Image.Image,
+    bbox: tuple[int, int, int, int],
+    anchor_y: int,
+) -> tuple[int, int, int, int]:
+    x1, y1, x2, y2 = bbox
+    if y2 - y1 < 110:
+        return bbox
+    gray = np.array(image.convert("L"), dtype=np.uint8)
+    crop = gray[y1:y2, x1:x2]
+    if crop.size == 0:
+        return bbox
+    row_density = (crop < 105).mean(axis=1)
+    peak = float(row_density.max())
+    if peak < 0.12:
+        return bbox
+    tail_threshold = max(0.06, peak * 0.32)
+    active = np.flatnonzero(row_density >= tail_threshold)
+    if len(active) == 0:
+        return bbox
+    capped_y2 = min(y2, y1 + int(active.max()) + 12)
+    if capped_y2 < anchor_y + 16:
+        capped_y2 = min(y2, anchor_y + 16)
+    if capped_y2 <= y1 + 48 or y2 - capped_y2 < 18:
+        return bbox
+    return x1, y1, x2, capped_y2
 
 
 def _relocate_after_semantic_rejection(
@@ -1213,7 +1396,18 @@ def _refine_fallback_locator_bbox(locator: dict, context_path: str | Path, conte
         return locator
     try:
         with Image.open(context_path) as image:
-            refined = _trim_bbox_to_dark_background_support(image.convert("RGB"), tuple(int(value) for value in local_bbox))
+            rgb = image.convert("RGB")
+            original = tuple(int(value) for value in local_bbox)
+            for method, trimmer in (
+                ("trim_to_dark_background_support", _trim_bbox_to_dark_background_support),
+                ("trim_to_light_text_ink_support", _trim_bbox_to_light_text_ink_support),
+            ):
+                refined = trimmer(rgb, original)
+                if refined != original:
+                    break
+            else:
+                refined = original
+                method = ""
     except (FileNotFoundError, OSError, ValueError):
         return locator
     if refined == tuple(int(value) for value in local_bbox):
@@ -1222,7 +1416,7 @@ def _refine_fallback_locator_bbox(locator: dict, context_path: str | Path, conte
     result["local_bbox_xyxy"] = list(refined)
     result["global_bbox_xyxy"] = list(_global_bbox(context_bbox, refined))
     result["refinement"] = {
-        "method": "trim_to_dark_background_support",
+        "method": method,
         "original_local_bbox_xyxy": [int(value) for value in local_bbox],
         "refined_local_bbox_xyxy": list(refined),
     }
@@ -1252,6 +1446,73 @@ def _trim_bbox_to_dark_background_support(image: Image.Image, bbox: tuple[int, i
     if refined_x2 - refined_x1 < max(24, int(width * 0.25)):
         return bbox
     return refined_x1, y1, refined_x2, y2
+
+
+def _trim_bbox_to_light_text_ink_support(image: Image.Image, bbox: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+    x1, y1, x2, y2 = bbox
+    width, height = x2 - x1, y2 - y1
+    if width < 120 or height < 80:
+        return bbox
+    gray = np.array(image.convert("L"), dtype=np.uint8)
+    crop = gray[y1:y2, x1:x2]
+    if crop.size == 0:
+        return bbox
+    dark_ratio = float((crop < 105).mean())
+    if float((crop > 168).mean()) < 0.35 or dark_ratio < 0.01 or dark_ratio > 0.35:
+        return bbox
+    dark = crop < 105
+    row_density = dark.mean(axis=1)
+    if float(row_density.max()) < 0.045:
+        return bbox
+    window = min(15, max(5, (height // 36) * 2 + 1))
+    smoothed = np.convolve(row_density, np.ones(window) / window, mode="same")
+    threshold = max(0.035, min(0.12, float(np.percentile(smoothed, 92)) * 0.55))
+    min_height = max(8, min(22, height // 14))
+    candidates = _light_text_ink_band_candidates(dark, smoothed, threshold, width, height, min_height)
+    if not candidates:
+        return bbox
+    _, start, end, left, right = max(candidates, key=lambda item: item[0])
+    loose_threshold = max(0.012, threshold * 0.35)
+    while start > 0 and row_density[start - 1] >= loose_threshold:
+        start -= 1
+    while end < height and row_density[end] >= loose_threshold:
+        end += 1
+    y_pad = min(12, max(5, height // 50))
+    x_pad = min(14, max(6, width // 80))
+    refined = (max(x1, x1 + left - x_pad), max(y1, y1 + start - y_pad), min(x2, x1 + right + x_pad), min(y2, y1 + end + y_pad))
+    if (refined[2] - refined[0]) * (refined[3] - refined[1]) > width * height * 0.85:
+        return bbox
+    if refined[3] - refined[1] < max(18, int(height * 0.08)):
+        return bbox
+    return refined
+
+
+def _light_text_ink_band_candidates(
+    dark: np.ndarray,
+    smoothed: np.ndarray,
+    threshold: float,
+    width: int,
+    height: int,
+    min_height: int,
+) -> list[tuple[float, int, int, int, int]]:
+    candidates: list[tuple[float, int, int, int, int]] = []
+    for start, end in _true_runs(smoothed >= threshold, min_width=min_height):
+        band = dark[start:end, :]
+        if int(band.sum()) < max(80, int(width * (end - start) * 0.025)):
+            continue
+        col_density = band.mean(axis=0)
+        col_threshold = max(0.012, min(0.08, float(col_density.max()) * 0.18))
+        columns = np.flatnonzero(col_density >= col_threshold)
+        if len(columns) == 0:
+            continue
+        left, right = int(columns.min()), int(columns.max()) + 1
+        span_ratio = (right - left) / width
+        if span_ratio < 0.18:
+            continue
+        center = ((start + end) / 2) / height
+        score = float(smoothed[start:end].mean()) * (end - start) * span_ratio * (1.0 - center * 0.2)
+        candidates.append((score, start, end, left, right))
+    return candidates
 
 
 def _true_runs(values: np.ndarray, min_width: int) -> list[tuple[int, int]]:

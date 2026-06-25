@@ -505,6 +505,36 @@ Current conclusion:
 - One tightness retry is attempted for semantically accepted but loose bboxes, but the retry is only adopted when the second validation is also accepted and `tight_enough=true`; otherwise the original accepted bbox is retained and the failed tightening attempt is recorded.
 - The conservative safety behavior is preserved: rejected or loose locator attempts block GPT rather than risking a broad masked edit over hair/background.
 
+## 2026-06-26 Update: Light-background Ink Trim And Anchor Recovery
+
+`GBC06_02.png#14` exposed an additional locator failure mode after v7: the target is a large black sound effect on a light manga background, while the LabelPlus point sits below the text. The previous `_refine_fallback_locator_bbox` only handled a dark-background support case and only trimmed horizontally, so it did not help when MIMO returned a box shifted down over hair and blank space.
+
+Two deterministic refinements were added before any real GPT edit is allowed:
+
+- `trim_to_light_text_ink_support`: for large loose bboxes on mostly light backgrounds, find the dense dark-ink row band and shrink around it. This is conservative and returns the original bbox if no clear band is found.
+- `recover_light_text_ink_band_near_labelplus_anchor`: when a MIMO locator bbox is rejected or accepted-but-loose and is clearly below the LabelPlus anchor, search near the anchor for a light-background dark-ink band, then validate that candidate with MIMO.
+
+Real dry-runs for `GBC06_02.png#14` after this change:
+
+| Run | Final locator bbox | Validation | GPT status | Result |
+| --- | --- | --- | --- | --- |
+| `phase6-gbc06-02-14-fallback-context-mimo-v8-ink-trim` | `[23, 542, 585, 650]` | `rejected` | `not_called` | Initial MIMO bbox landed on hair/blank; shrink-only trim correctly did not pretend to fix it. |
+| `phase6-gbc06-02-14-fallback-context-mimo-v10-anchor-tight-recovery` | `[0, 302, 652, 381]` | `accepted`, `tight_enough=true` | `dry_run` | Anchor recovery was too broad and jumped to the panel above; this proved MIMO can falsely accept a wrong tight bbox. |
+| `phase6-gbc06-02-14-fallback-context-mimo-v12-invalid-anchor-recovery` | `[38, 397, 652, 555]` | `accepted`, `tight_enough=true` | `dry_run` | Invalid MIMO bbox was recovered to the correct sound-effect band, but still included too much lower artwork. |
+| `phase6-gbc06-02-14-fallback-context-mimo-v14-accepted-loose-anchor` | `[39, 398, 649, 487]` | `accepted`, `tight_enough=true` | `dry_run` | Best current candidate: bbox visually targets the full sound effect and excludes most hair/blank area. |
+| `phase6-gbc06-02-14-fallback-context-mimo-v15-current-anchor` | `[31, 531, 560, 645]` | `rejected` | `not_called` | MIMO retry returned a valid but too-low bbox; this revealed a missing second anchor-recovery chance after retry validation rejection. |
+| `phase6-gbc06-02-14-fallback-context-mimo-v16-retry-reject-anchor` | `[30, 508, 628, 648]` | `rejected` | `not_called` | Current guard still blocks GPT when the final validated bbox stays on hair/blank. |
+
+Comparison grid:
+
+- `outputs/runs/phase6-gbc06-02-14-anchor-recovery-comparison.png`
+
+Important behavior:
+
+- `gpt-image-2` was not called for this sample unless the current run reached a validated tight bbox. A run attempted with `--call-gpt-image` (`phase6-gbc06-02-14-fallback-context-gpt-v2-anchor-tight`) did not actually call GPT because the MIMO locator was loose/rejected in that run, and Phase 6 returned `gpt_image2_edit.status=not_called`.
+- The best current evidence is a usable locator candidate, not a successful GPT replacement. The remaining blocker is locator stability under repeated MIMO calls, especially when MIMO returns a valid but too-low retry bbox.
+- MIMO validation is helpful but not sufficient as the sole gate: v10 visually targeted the wrong upper panel while MIMO marked it tight. Programmatic anchor/window guards are required before trusting `accepted + tight_enough=true`.
+
 ## Current Recommendation
 
 Use the CTD matched path with `lama_large_512px` for non-bubble text when CTD detects the original text. This is the currently usable route.
