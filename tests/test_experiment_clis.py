@@ -1,6 +1,7 @@
 from experiments import (
     phase2_detect_text_regions,
     phase2_6_cta_first_cleanup,
+    phase3_context_font_selection,
     phase6_cleanup_quality,
     phase6_cleanup_gate,
     phase6_cleanup_escalation_gpt_background_repair,
@@ -54,6 +55,28 @@ def test_phase2_6_cta_first_cleanup_cli_defaults_to_cta_first_contract():
     assert args.radius_x == 220
     assert args.radius_y == 180
     assert args.ctd_max_edge_distance_px == 20.0
+
+
+def test_phase3_context_font_selection_cli_defaults_to_dry_run_contract():
+    parser = phase3_context_font_selection.build_parser()
+
+    args = parser.parse_args(
+        [
+            "--font-comparison-run-dir",
+            "outputs/runs/phase3",
+            "--layout-run-dir",
+            "outputs/runs/phase4",
+            "--cleanup-run-dir",
+            "outputs/runs/phase6",
+        ]
+    )
+
+    assert args.font_comparison_run_dir == "outputs/runs/phase3"
+    assert args.layout_run_dir == "outputs/runs/phase4"
+    assert args.cleanup_run_dir == "outputs/runs/phase6"
+    assert args.sample_limit == 1
+    assert args.candidate_limit == 16
+    assert args.call_mimo is False
 
 
 def test_phase6_nonbubble_cli_can_disable_mimo_locator():

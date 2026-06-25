@@ -8,6 +8,8 @@ from typing import Any, Protocol
 
 from PIL import Image, ImageDraw, ImageFont
 
+from .review_tiles import segmented_review_tile
+
 
 @dataclass(frozen=True)
 class PreviewMethodInput:
@@ -184,9 +186,9 @@ def _write_near_square_result_sheet(path: Path, results: list[dict[str, Any]], c
         return path
 
     font = ImageFont.load_default()
-    columns = _near_square_columns(len(items), cell_width=320, cell_height=360)
+    columns = _near_square_columns(len(items), cell_width=360, cell_height=690)
     rows = math.ceil(len(items) / columns)
-    tile_w, tile_h, label_h, pad = 300, 320, 42, 12
+    tile_w, tile_h, label_h, pad = 340, 620, 42, 12
     width = pad + columns * (tile_w + pad)
     height = pad + rows * (tile_h + label_h + pad)
     sheet = Image.new("RGB", (width, height), "white")
@@ -200,7 +202,8 @@ def _write_near_square_result_sheet(path: Path, results: list[dict[str, Any]], c
         draw.rectangle((x, y, x + tile_w, y + label_h), fill=(245, 245, 245), outline=(180, 180, 180))
         draw.text((x + 5, y + 5), item["method"][:44], fill="black", font=font)
         draw.text((x + 5, y + 23), _score_label(item)[:44], fill=(70, 70, 70), font=font)
-        _paste_fitted(sheet, item["image"], (x, y + label_h, tile_w, tile_h))
+        review_tile = segmented_review_tile(item["image"], size=(tile_w, tile_h))
+        sheet.paste(review_tile, (x, y + label_h))
         draw.rectangle((x, y + label_h, x + tile_w, y + label_h + tile_h), outline=(210, 210, 210))
 
     sheet.save(path)
@@ -332,7 +335,9 @@ def _run_mimo_comparison(
         [
             "Evaluate this near-square manga lettering comparison grid.",
             "Each tile is the same target text area after a different cleanup/layout method.",
+            "Tall vertical text areas are enlarged by splitting each tile into ordered TOP/MIDDLE/BOTTOM segments; judge all segments for the same method together.",
             "Prefer methods that fully remove Japanese source text, keep surrounding manga art intact, preserve natural vertical manga lettering, avoid rotation, avoid oversized/heavy lettering, and keep phrase breaks natural.",
+            "Do not claim a method is horizontal or rotated unless that is visibly different in the candidate tile.",
             "Do not judge translation meaning; compare visual editing quality only.",
             f"Methods JSON: {json.dumps([result['label'] for result in results], ensure_ascii=False)}",
             "Return only JSON with keys: best_method, ranking, scores, unacceptable_methods, per_method_notes, reasoning_summary.",

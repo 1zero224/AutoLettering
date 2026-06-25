@@ -169,6 +169,7 @@ def test_build_preview_evaluation_prompt_lists_records_and_methods():
     assert "Long vertical records may be split into numbered segments" in prompt
     assert "do not treat repeated panel borders, columns, or multiple segments as duplicated lettering" in prompt
     assert "Judge the combined sequence of segments in segment order" in prompt
+    assert "bottom segments may be intentionally blank" in prompt
     assert "Do not echo the Records JSON" in prompt
     assert "That JSON object must include score and usable" in prompt
     assert "score" in prompt

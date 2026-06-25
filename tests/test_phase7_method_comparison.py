@@ -61,6 +61,57 @@ def test_phase7_method_comparison_near_square_grid_uses_text_bbox(tmp_path: Path
     assert 0.75 <= ratio <= 1.35
 
 
+def test_phase7_method_comparison_mimo_prompt_describes_segmented_vertical_tiles(tmp_path: Path):
+    preview = _write_preview_run(tmp_path / "method-preview", "method-a", (250, 250, 250), (230, 230, 230))
+    evaluation = _write_eval_run(tmp_path / "method-eval", 8)
+    client = FakeComparisonClient()
+
+    run_dir = run_phase7_method_comparison(
+        [PreviewMethodInput("method-a", preview, evaluation)],
+        output_root=tmp_path,
+        run_id="mimo-comparison",
+        client=client,
+    )
+
+    assert "splitting each tile into ordered TOP/MIDDLE/BOTTOM segments" in client.prompt
+    assert "Do not claim a method is horizontal or rotated" in client.prompt
+    payload = json.loads((run_dir / "method-comparison.json").read_text(encoding="utf-8"))
+    assert payload["mimo"]["status"] == "ok"
+    with Image.open(run_dir / "debug" / "near-square-result-grid.png") as grid:
+        assert grid.height >= 600
+
+
+class FakeComparisonClient:
+    def __init__(self) -> None:
+        self.prompt = ""
+
+    def analyze_image(
+        self,
+        image_path: str | Path,
+        prompt: str,
+        kind: str = "image_analysis",
+        max_completion_tokens: int | None = None,
+    ) -> dict:
+        assert Path(image_path).exists()
+        assert kind == "phase7_near_square_method_comparison"
+        assert max_completion_tokens == 1200
+        self.prompt = prompt
+        return {
+            "raw_text": json.dumps(
+                {
+                    "best_method": "method-a",
+                    "ranking": ["method-a"],
+                    "scores": {"method-a": 8},
+                    "unacceptable_methods": [],
+                    "per_method_notes": {"method-a": "usable"},
+                    "reasoning_summary": "usable",
+                }
+            ),
+            "request": {"image_path": str(image_path), "prompt_chars": len(prompt)},
+            "response": {"status": "ok"},
+        }
+
+
 def _write_preview_run(path: Path, cleanup_method: str, cleaned_color: tuple[int, int, int], final_color: tuple[int, int, int]) -> Path:
     page_name = "GBC06-01-png.png"
     original = _page(path / "pages" / "original" / page_name, (255, 255, 255))
