@@ -133,6 +133,7 @@ def _evaluation_row(row: dict, result: ReplacementQualityResult, raw_text: str, 
         "outside_mask_preserved": result.outside_mask_preserved,
         "issues": result.issues,
         "summary": result.summary,
+        "observed_text": result.observed_text,
         "failure_reason": result.failure_reason,
         "replacement_method": cleanup.get("replacement_method"),
         "replacement_crop_path": cleanup.get("replacement_crop_path"),
@@ -168,6 +169,7 @@ def _failure_evaluation(row: dict, exc: Exception, image_path: str) -> dict:
         "outside_mask_preserved": None,
         "issues": [],
         "summary": None,
+        "observed_text": None,
         "failure_reason": f"api_error:{type(exc).__name__}",
         "replacement_method": cleanup.get("replacement_method"),
         "replacement_crop_path": cleanup.get("replacement_crop_path"),
@@ -243,4 +245,3 @@ def _write_report(output_path: Path, cleanup_run_dir: str | Path, evaluations: l
     ]
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-

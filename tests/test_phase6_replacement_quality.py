@@ -38,6 +38,7 @@ class FakeReplacementQualityClient:
         return {
             "raw_text": json.dumps(
                 {
+                    "observed_text": "新川崎（暫）",
                     "score": 6,
                     "usable": False,
                     "exact_text_correct": True,
@@ -76,7 +77,31 @@ def test_parse_replacement_quality_response_accepts_json_fences():
     assert result.outside_mask_preserved is True
     assert result.issues == ["style_mismatch"]
     assert result.summary == "text ok, style off"
+    assert result.observed_text is None
     assert result.failure_reason is None
+
+
+def test_parse_replacement_quality_response_keeps_observed_text():
+    result = parse_replacement_quality_response(
+        json.dumps(
+            {
+                "observed_text": "漫画第一卷\n026 6月29日发售!!",
+                "score": 3,
+                "usable": False,
+                "exact_text_correct": False,
+                "simplified_chinese_correct": True,
+                "no_japanese_remaining": True,
+                "region_correct": True,
+                "style_consistent": False,
+                "outside_mask_preserved": True,
+                "issues": [],
+                "summary": "date is missing characters",
+            },
+            ensure_ascii=False,
+        )
+    )
+
+    assert result.observed_text == "漫画第一卷\n026 6月29日发售!!"
 
 
 def test_parse_replacement_quality_response_normalizes_contradictory_region_issue():
@@ -145,6 +170,7 @@ def test_build_replacement_quality_prompt_is_strict_about_gpt_text():
     assert "Do not select a different text region" in prompt
     assert "新川崎（仮）" in prompt
     assert "If the replacement appears in a different bubble" in prompt
+    assert "observed_text" in prompt
 
 
 def test_run_phase6_replacement_quality_writes_results_and_review_sheet(tmp_path: Path):
@@ -185,6 +211,7 @@ def test_run_phase6_replacement_quality_writes_results_and_review_sheet(tmp_path
     assert rows[0]["exact_text_correct"] is True
     assert rows[0]["simplified_chinese_correct"] is True
     assert rows[0]["style_consistent"] is False
+    assert rows[0]["observed_text"] == "新川崎（暫）"
     assert rows[0]["replacement_method"] == "gpt_image2_masked_edit"
     assert rows[0]["source_request_image_path"] == str(edit_input)
     assert rows[0]["source_request_mask_path"] == str(mask)

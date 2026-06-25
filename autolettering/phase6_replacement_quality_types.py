@@ -16,4 +16,5 @@ class ReplacementQualityResult:
     outside_mask_preserved: bool | None
     issues: list[str]
     summary: str | None
+    observed_text: str | None
     failure_reason: str | None

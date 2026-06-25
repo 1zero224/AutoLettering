@@ -28,6 +28,8 @@ def build_replacement_quality_prompt(row: dict) -> str:
             "If another nearby bubble or caption contains more natural matching text, ignore it unless it is inside the indicated target mask.",
             "If the replacement appears in a different bubble, card, caption, or unmasked area, set region_correct=false even if the Chinese text is readable.",
             "The final result must contain the exact Simplified Chinese text requested for this record.",
+            "First transcribe the visible text in the final replacement crop into observed_text before scoring.",
+            "If observed_text omits digits, omits Chinese characters, has extra visible text, or differs from translated_text in any way, set exact_text_correct=false.",
             "Judge simplified_chinese_correct separately from exact_text_correct.",
             "Be strict about glyph variants: 暂 is correct when requested, but 暫 is incorrect.",
             "Reject if Japanese text remains in the target region, if the text is in the wrong region, or if the replacement targets unrelated text.",
@@ -35,7 +37,7 @@ def build_replacement_quality_prompt(row: dict) -> str:
             "Reject if gpt-image-2 damaged art, tones, panel texture, logos, or other content outside the mask.",
             "Do not over-credit readable Chinese text when it uses the wrong glyph, wrong style, or wrong placement.",
             f"Record JSON: {json.dumps(payload, ensure_ascii=False)}",
-            "Return only JSON with keys: score (0-10), usable, exact_text_correct, simplified_chinese_correct, no_japanese_remaining, region_correct, style_consistent, outside_mask_preserved, issues, summary.",
+            "Return only JSON with keys: observed_text, score (0-10), usable, exact_text_correct, simplified_chinese_correct, no_japanese_remaining, region_correct, style_consistent, outside_mask_preserved, issues, summary.",
         ]
     )
 
@@ -62,6 +64,7 @@ def parse_replacement_quality_response(raw_text: str) -> ReplacementQualityResul
         outside_mask_preserved=_optional_bool(payload.get("outside_mask_preserved")),
         issues=_normalized_issues(issues, payload.get("region_correct"), region_correct),
         summary=summary,
+        observed_text=_optional_text(payload.get("observed_text")),
         failure_reason=None,
     )
 
@@ -132,6 +135,13 @@ def _string_list(value: object) -> list[str]:
     return [str(item).strip() for item in value if str(item).strip()]
 
 
+def _optional_text(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def _failed(reason: str) -> ReplacementQualityResult:
     return ReplacementQualityResult(
         status="failed",
@@ -145,5 +155,6 @@ def _failed(reason: str) -> ReplacementQualityResult:
         outside_mask_preserved=None,
         issues=[],
         summary=None,
+        observed_text=None,
         failure_reason=reason,
     )
