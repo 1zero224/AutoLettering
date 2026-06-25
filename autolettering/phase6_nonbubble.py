@@ -148,6 +148,27 @@ def _fallback_gpt_cleanup_one(
     locator = _refine_fallback_locator_bbox(locator, context["input_path"], context_bbox)
     validation = _validate_fallback_locator_semantics(run_dir, detection, locator, context["locator_path"], mimo_client)
     if validation.get("status") != "accepted":
+        retry_locator = _relocate_after_semantic_rejection(
+            detection,
+            context["locator_path"],
+            context_bbox,
+            locator,
+            validation,
+            mimo_client,
+        )
+        if retry_locator.get("status") == "ok":
+            retry_locator = _refine_fallback_locator_bbox(retry_locator, context["input_path"], context_bbox)
+            retry_validation = _validate_fallback_locator_semantics(
+                run_dir,
+                detection,
+                retry_locator,
+                context["locator_path"],
+                mimo_client,
+            )
+            if retry_validation.get("status") == "accepted":
+                locator = retry_locator
+                validation = retry_validation
+    if validation.get("status") != "accepted":
         return {
             "record_id": detection["record_id"],
             "image_name": detection.get("image_name"),
@@ -479,6 +500,58 @@ def _retry_locate_fallback_bbox(
         first_response=first_response,
         retry_of_error=type(first_error).__name__,
     )
+
+
+def _relocate_after_semantic_rejection(
+    detection: dict,
+    context_path: Path,
+    context_bbox: tuple[int, int, int, int],
+    locator: dict,
+    validation: dict,
+    mimo_client,
+) -> dict:
+    if mimo_client is None:
+        return {"status": "failed", "failure_reason": "mimo_client_required_for_semantic_locator_retry"}
+    width = context_bbox[2] - context_bbox[0]
+    height = context_bbox[3] - context_bbox[1]
+    prompt = "\n".join(
+        [
+            "Previous yellow bbox validation rejected the locator result.",
+            f"Crop dimensions are width={width} and height={height} pixels.",
+            f"Chinese translation: {detection.get('translated_text', '')}",
+            f"Previous bbox_xyxy: {locator.get('local_bbox_xyxy')}",
+            f"Validation feedback: {validation.get('reasoning_summary', '')}",
+            "Use the feedback to return a corrected crop-local bbox for the original Japanese text.",
+            "If feedback says the target is above, below, left, or right of the yellow bbox, move the bbox accordingly.",
+            "Return only JSON with bbox_xyxy, confidence, and reasoning_summary.",
+        ]
+    )
+    response = mimo_client.analyze_image(
+        context_path,
+        prompt,
+        kind="phase6_fallback_text_locator_semantic_retry",
+        max_completion_tokens=800,
+    )
+    try:
+        payload, local_bbox = _parse_mimo_locator_response(response, context_bbox)
+    except Exception as exc:
+        return {
+            "status": "failed",
+            "failure_reason": f"invalid_mimo_bbox_semantic_retry:{type(exc).__name__}",
+            "raw_text": response.get("raw_text", ""),
+            "locator_image_path": str(context_path),
+            "request": response.get("request"),
+            "response": response.get("response"),
+            "first_raw_text": locator.get("raw_text", ""),
+            "first_validation_raw_text": validation.get("raw_text", ""),
+        }
+    result = _fallback_locator_payload(payload, local_bbox, response, context_bbox, context_path)
+    result["first_raw_text"] = locator.get("raw_text", "")
+    result["first_request"] = locator.get("request")
+    result["first_response"] = locator.get("response")
+    result["first_validation_raw_text"] = validation.get("raw_text", "")
+    result["semantic_retry_of_validation"] = validation.get("failure_reason", "fallback_locator_semantic_rejected")
+    return result
 
 
 def _fallback_locator_payload(
@@ -1009,7 +1082,7 @@ def _mimo_bbox_payload(raw_text: str) -> dict:
 
 
 def _mimo_object_payload(raw_text: str) -> dict:
-    payload = json.loads(_strip_json_wrapper(raw_text))
+    payload = _loads_mimo_json_payload(_strip_json_wrapper(raw_text))
     if isinstance(payload, list):
         if not payload or not isinstance(payload[0], dict):
             raise ValueError("mimo_bbox_array_empty_or_invalid")
@@ -1017,6 +1090,17 @@ def _mimo_object_payload(raw_text: str) -> dict:
     if not isinstance(payload, dict):
         raise ValueError("mimo_bbox_payload_not_object")
     return payload
+
+
+def _loads_mimo_json_payload(text: str) -> object:
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as first_error:
+        try:
+            payload, _ = json.JSONDecoder().raw_decode(text)
+        except json.JSONDecodeError:
+            raise first_error
+        return payload
 
 
 def _refine_fallback_locator_bbox(locator: dict, context_path: str | Path, context_bbox: tuple[int, int, int, int]) -> dict:

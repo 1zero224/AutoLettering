@@ -274,6 +274,122 @@ def test_run_phase2_fallback_context_is_expanded_to_near_square_for_vision(tmp_p
     assert record["fallback"]["context_shape"] == "near_square"
 
 
+def test_run_phase2_fallback_context_includes_nearby_ctd_candidate_for_mimo_locator(
+    tmp_path: Path, monkeypatch
+):
+    project_dir = tmp_path / "sample_project"
+    project_dir.mkdir()
+    image_path = project_dir / "page.png"
+    _write_project_image(image_path, size=(1000, 1000))
+    _write_labelplus(project_dir / "翻译_0.txt", position=(0.5, 0.7))
+    component_mask = tmp_path / "component.png"
+    _write_component_mask(component_mask, (480, 520, 540, 550), size=(1000, 1000))
+
+    monkeypatch.setattr(
+        "autolettering.phase2.detect_ctd_mask_components_for_image",
+        lambda image, output_dir, **kwargs: [
+            CtdMaskComponent(
+                component_id="component-0001",
+                bbox_xyxy=(480, 520, 540, 550),
+                area_px=1800,
+                centroid_xy=(510.0, 535.0),
+                mask_path=component_mask,
+            )
+        ],
+    )
+
+    run_dir = run_phase2(
+        project_dir / "翻译_0.txt",
+        output_root=tmp_path / "outputs",
+        run_id="phase2-fallback-candidate-context",
+        sample_limit=1,
+        detection_strategy="ctd_mask",
+        radius_x=140,
+        radius_y=100,
+        ctd_max_edge_distance_px=20,
+    )
+
+    record = json.loads((run_dir / "detections.jsonl").read_text(encoding="utf-8").strip())
+    assert record["status"] == "fallback_required"
+    assert record["ctd_match_diagnostics"]["nearest_edge_distance_px"] == 150.0
+    assert record["fallback"]["source_context_bbox_xyxy"] == [360, 600, 640, 800]
+    assert record["fallback"]["expanded_source_context_bbox_xyxy"] == [360, 520, 640, 800]
+    assert record["fallback"]["context_bbox_xyxy"] == [360, 520, 640, 800]
+    assert record["fallback"]["context_source"] == "labelplus_search_region_plus_ctd_candidates"
+    assert record["fallback"]["context_candidate_component_ids"] == ["component-0001"]
+    assert record["fallback"]["context_candidate_bboxes_xyxy"] == [[480, 520, 540, 550]]
+    assert record["fallback"]["labelplus_point_xy"] == [500, 700]
+    assert record["fallback"]["context_labelplus_point_xy"] == [140, 180]
+
+
+def test_run_phase2_fallback_context_groups_nearby_ctd_candidates_for_large_sound_effect(
+    tmp_path: Path, monkeypatch
+):
+    project_dir = tmp_path / "sample_project"
+    project_dir.mkdir()
+    image_path = project_dir / "page.png"
+    _write_project_image(image_path, size=(1000, 1000))
+    _write_labelplus(project_dir / "翻译_0.txt", position=(0.52, 0.74))
+    same_text_mask = tmp_path / "same-text.png"
+    _write_component_mask(same_text_mask, (430, 500, 460, 620), size=(1000, 1000))
+    same_text_mask_2 = tmp_path / "same-text-2.png"
+    _write_component_mask(same_text_mask_2, (470, 505, 500, 625), size=(1000, 1000))
+    far_bubble_mask = tmp_path / "far-bubble.png"
+    _write_component_mask(far_bubble_mask, (800, 700, 840, 820), size=(1000, 1000))
+
+    monkeypatch.setattr(
+        "autolettering.phase2.detect_ctd_mask_components_for_image",
+        lambda image, output_dir, **kwargs: [
+            CtdMaskComponent(
+                component_id="component-sound-a",
+                bbox_xyxy=(430, 500, 460, 620),
+                area_px=3600,
+                centroid_xy=(445.0, 560.0),
+                mask_path=same_text_mask,
+            ),
+            CtdMaskComponent(
+                component_id="component-sound-b",
+                bbox_xyxy=(470, 505, 500, 625),
+                area_px=3600,
+                centroid_xy=(485.0, 565.0),
+                mask_path=same_text_mask_2,
+            ),
+            CtdMaskComponent(
+                component_id="component-other",
+                bbox_xyxy=(800, 700, 840, 820),
+                area_px=4800,
+                centroid_xy=(820.0, 760.0),
+                mask_path=far_bubble_mask,
+            ),
+        ],
+    )
+
+    run_dir = run_phase2(
+        project_dir / "翻译_0.txt",
+        output_root=tmp_path / "outputs",
+        run_id="phase2-fallback-cluster-context",
+        sample_limit=1,
+        detection_strategy="ctd_mask",
+        radius_x=120,
+        radius_y=80,
+        ctd_max_edge_distance_px=20,
+    )
+
+    record = json.loads((run_dir / "detections.jsonl").read_text(encoding="utf-8").strip())
+    assert record["status"] == "fallback_required"
+    assert record["fallback"]["source_context_bbox_xyxy"] == [400, 660, 640, 820]
+    assert record["fallback"]["expanded_source_context_bbox_xyxy"] == [400, 500, 640, 820]
+    assert record["fallback"]["context_bbox_xyxy"] == [360, 500, 680, 820]
+    assert record["fallback"]["context_candidate_component_ids"] == [
+        "component-sound-b",
+        "component-sound-a",
+    ]
+    assert record["fallback"]["context_candidate_bboxes_xyxy"] == [
+        [470, 505, 500, 625],
+        [430, 500, 460, 620],
+    ]
+
+
 def test_run_phase2_defaults_ctd_mask_edge_distance_to_twenty(tmp_path: Path, monkeypatch):
     project_dir = tmp_path / "sample_project"
     project_dir.mkdir()
@@ -304,29 +420,33 @@ def test_run_phase2_defaults_ctd_mask_edge_distance_to_twenty(tmp_path: Path, mo
     assert captured["max_edge_distance_px"] == 20.0
 
 
-def _write_project_image(path: Path) -> None:
-    image = Image.new("RGB", (240, 240), "white")
+def _write_project_image(path: Path, size: tuple[int, int] = (240, 240)) -> None:
+    image = Image.new("RGB", size, "white")
     draw = ImageDraw.Draw(image)
     draw.rectangle((90, 72, 115, 150), fill="black")
     image.save(path)
 
 
-def _write_component_mask(path: Path, bbox: tuple[int, int, int, int]) -> None:
-    image = Image.new("L", (240, 240), 0)
+def _write_component_mask(
+    path: Path,
+    bbox: tuple[int, int, int, int],
+    size: tuple[int, int] = (240, 240),
+) -> None:
+    image = Image.new("L", size, 0)
     ImageDraw.Draw(image).rectangle((bbox[0], bbox[1], bbox[2] - 1, bbox[3] - 1), fill=255)
     image.save(path)
 
 
-def _write_labelplus(path: Path) -> None:
+def _write_labelplus(path: Path, position: tuple[float, float] = (0.425, 0.458)) -> None:
     path.write_text(
-        """1,0
+        f"""1,0
 -
 框外
 -
 Comment
 
 >>>>>>>>[page.png]<<<<<<<<
-----------------[1]----------------[0.425,0.458,1]
+----------------[1]----------------[{position[0]},{position[1]},1]
 测试
 """,
         encoding="utf-8",

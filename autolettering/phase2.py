@@ -26,6 +26,9 @@ from .text_body_bbox import selected_text_body_bbox
 
 
 CTA_MATCH_DIAGNOSTICS_SCHEMA_VERSION = "autolettering.cta_mask_match_diagnostics.v1"
+CTA_MATCH_DIAGNOSTICS_TOP_LIMIT = 12
+FALLBACK_CONTEXT_CLUSTER_GAP_PX = 140.0
+FALLBACK_CONTEXT_DISTANCE_RATIO_LIMIT = 2.0
 
 
 def run_phase2(
@@ -171,6 +174,7 @@ def _detect_record(
             radius_y,
             payload.get("failure_reason"),
             ctd_max_edge_distance_px=ctd_max_edge_distance_px,
+            ctd_match_diagnostics=ctd_match_diagnostics,
         )
     payload["lettering_route"] = _lettering_route_payload(payload, detection_strategy)
     payload.update(_text_region_payload(payload, detection_strategy))
@@ -314,7 +318,7 @@ def _ctd_match_diagnostics_payload(
     rows: list[dict],
     match: CtdMaskMatch | None,
     threshold_px: float,
-    top_limit: int = 5,
+    top_limit: int = CTA_MATCH_DIAGNOSTICS_TOP_LIMIT,
 ) -> dict:
     sorted_rows = sorted(rows, key=lambda item: (item["edge_distance_px"], item["component_id"]))
     nearest = sorted_rows[0] if sorted_rows else None
@@ -393,13 +397,18 @@ def _mimo_gpt_fallback_payload(
     radius_y: int,
     trigger_reason: str | None = None,
     ctd_max_edge_distance_px: float | None = None,
+    ctd_match_diagnostics: dict | None = None,
 ) -> dict:
     source_bbox = build_search_region(label.x_px, label.y_px, image_width, image_height, radius_x, radius_y)
-    context_bbox = _near_square_bbox(source_bbox, image_width, image_height)
-    return {
+    candidate_context = _fallback_context_candidates(ctd_match_diagnostics)
+    expanded_source_bbox = _union_bboxes([source_bbox, *candidate_context.bboxes])
+    context_bbox = _near_square_bbox(expanded_source_bbox, image_width, image_height)
+    payload = {
         "method": "mimo_crop_then_gpt_image2_masked_edit",
         "context_bbox_xyxy": list(context_bbox),
         "source_context_bbox_xyxy": list(source_bbox),
+        "expanded_source_context_bbox_xyxy": list(expanded_source_bbox),
+        "context_source": candidate_context.source,
         "labelplus_point_xy": [label.x_px, label.y_px],
         "context_labelplus_point_xy": [label.x_px - context_bbox[0], label.y_px - context_bbox[1]],
         "context_shape": "near_square",
@@ -411,6 +420,91 @@ def _mimo_gpt_fallback_payload(
         "locator_target_kind": "original_text_region_inside_context",
         "preferred_mask_shape": "tight_local_bbox",
     }
+    if candidate_context.bboxes:
+        payload["context_candidate_component_ids"] = candidate_context.component_ids
+        payload["context_candidate_bboxes_xyxy"] = [list(bbox) for bbox in candidate_context.bboxes]
+    return payload
+
+
+class _FallbackContextCandidates:
+    def __init__(self, component_ids: list[str], bboxes: list[tuple[int, int, int, int]]) -> None:
+        self.component_ids = component_ids
+        self.bboxes = bboxes
+
+    @property
+    def source(self) -> str:
+        if self.bboxes:
+            return "labelplus_search_region_plus_ctd_candidates"
+        return "labelplus_search_region"
+
+
+def _fallback_context_candidates(ctd_match_diagnostics: dict | None) -> _FallbackContextCandidates:
+    if not ctd_match_diagnostics or ctd_match_diagnostics.get("match_status") != "fallback_required":
+        return _FallbackContextCandidates([], [])
+    top_candidates = ctd_match_diagnostics.get("top_candidates") or []
+    if not top_candidates:
+        return _FallbackContextCandidates([], [])
+    usable_candidates = []
+    for candidate in top_candidates:
+        parsed_candidate = _fallback_context_candidate_tuple(candidate)
+        if parsed_candidate is not None:
+            usable_candidates.append(parsed_candidate)
+    if not usable_candidates:
+        return _FallbackContextCandidates([], [])
+    selected = [usable_candidates[0]]
+    selected_bbox = usable_candidates[0][1]
+    max_distance = usable_candidates[0][2] * FALLBACK_CONTEXT_DISTANCE_RATIO_LIMIT
+    for candidate in usable_candidates[1:]:
+        if candidate[2] > max_distance:
+            continue
+        if _bbox_gap_px(candidate[1], selected_bbox) > FALLBACK_CONTEXT_CLUSTER_GAP_PX:
+            continue
+        selected.append(candidate)
+        selected_bbox = _union_bboxes([selected_bbox, candidate[1]])
+    return _FallbackContextCandidates(
+        [candidate[0] for candidate in selected],
+        [candidate[1] for candidate in selected],
+    )
+
+
+def _fallback_context_candidate_tuple(
+    candidate: dict,
+) -> tuple[str, tuple[int, int, int, int], float] | None:
+    bbox = candidate.get("component_bbox_xyxy")
+    if not _is_bbox_like(bbox):
+        return None
+    component_id = candidate.get("component_id")
+    distance_px = candidate.get("edge_distance_px")
+    if not isinstance(distance_px, int | float):
+        return None
+    return str(component_id), _bbox_tuple(bbox), float(distance_px)
+
+
+def _is_bbox_like(value: object) -> bool:
+    return (
+        isinstance(value, list | tuple)
+        and len(value) == 4
+        and all(isinstance(item, int | float) for item in value)
+    )
+
+
+def _bbox_tuple(value: list[int | float] | tuple[int | float, ...]) -> tuple[int, int, int, int]:
+    return tuple(int(round(item)) for item in value)  # type: ignore[return-value]
+
+
+def _union_bboxes(bboxes: list[tuple[int, int, int, int]]) -> tuple[int, int, int, int]:
+    return (
+        min(bbox[0] for bbox in bboxes),
+        min(bbox[1] for bbox in bboxes),
+        max(bbox[2] for bbox in bboxes),
+        max(bbox[3] for bbox in bboxes),
+    )
+
+
+def _bbox_gap_px(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
+    dx = max(a[0] - b[2], b[0] - a[2], 0)
+    dy = max(a[1] - b[3], b[1] - a[3], 0)
+    return float((dx * dx + dy * dy) ** 0.5)
 
 
 def _text_region_payload(payload: dict, detection_strategy: str) -> dict:

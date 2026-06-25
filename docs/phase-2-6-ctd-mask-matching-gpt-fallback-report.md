@@ -451,6 +451,56 @@ Controlled `gpt-image-2` replacement on `GBC06_16.png#5`:
 
 That full-context experiment remains useful evidence, but the current operational path has been tightened again after the later CTA-first rewrite: GPT receives a padded target edit crop, not the full LabelPlus context crop. The full context crop is retained as the Phase 7 replacement canvas.
 
+## 2026-06-26 Update: Fallback Context Expansion And Semantic Relocation
+
+This update revisited `GBC06_02.png#14` after the CTA-first rewrite. The LabelPlus point is far below the large `スタスタ...` sound effect, so the default CTA miss context was too centered around the point.
+
+Phase 2 now keeps the strict CTA/CTD match threshold unchanged and only expands the MIMO fallback context:
+
+- `fallback_required` remains `fallback_required`; a far CTA/CTD component is not promoted to a matched mask.
+- `fallback.source_context_bbox_xyxy` keeps the original LabelPlus search region.
+- `fallback.expanded_source_context_bbox_xyxy` records the union of the search region and nearby CTA/CTD diagnostic candidates.
+- `fallback.context_candidate_component_ids` and `fallback.context_candidate_bboxes_xyxy` record which diagnostic components expanded the context.
+- CTD diagnostics now retain 12 nearest candidates so a large sound effect split across multiple components can still be used as context evidence.
+
+Real Phase 2 checks for `GBC06_02.png#14`:
+
+| Run | Status | Nearest CTA component | Fallback context | Notes |
+| --- | --- | --- | --- | --- |
+| `phase2-gbc06-02-14-cta-default-v1` | `fallback_required` | `component-0048`, `222.056px` | `[504, 1253, 944, 1693]` | Old baseline; sound effect is partially cropped. |
+| `phase2-gbc06-02-14-cta-fallback-context-v1` | `fallback_required` | `component-0048`, `222.056px` | `[484, 1173, 964, 1653]` | Includes only the nearest diagnostic component; still too narrow for the full sound effect. |
+| `phase2-gbc06-02-14-cta-fallback-context-v2` | `fallback_required` | `component-0048`, `222.056px` | `[318, 1001, 970, 1653]` | Uses clustered nearby diagnostic candidates; covers the full large sound effect. |
+
+The useful Phase 2 visual artifact is:
+
+- `outputs/runs/phase2-gbc06-02-14-cta-fallback-context-v2/debug/fallback-context-overlay.png`
+
+Phase 6 then exposed a separate failure mode: MIMO often described the correct sound effect but returned a bbox shifted downward. Two safeguards were added:
+
+- MIMO JSON parsing now recovers the first complete JSON object when the model returns a valid object followed by stray trailing text such as `]`.
+- When semantic validation rejects a locator bbox, Phase 6 performs one semantic relocation pass using the validation feedback, then validates the corrected bbox again. GPT remains blocked if the second validation is still rejected.
+
+Real Phase 6 dry-runs for `GBC06_02.png#14`:
+
+| Run | Locator bbox | Validation | GPT status | Result |
+| --- | --- | --- | --- | --- |
+| `phase6-gbc06-02-14-fallback-context-mimo-v1` | `[43, 510, 555, 635]` | `rejected` | `not_called` | Bbox shifted onto blank/hair area; guard blocked GPT. |
+| `phase6-gbc06-02-14-fallback-context-mimo-v2-json-recover` | `[0, 498, 608, 608]` | `rejected` | `not_called` | JSON recovery avoided an unnecessary retry, but bbox was still too low. |
+| `phase6-gbc06-02-14-fallback-context-mimo-v3-semantic-retry` | `[24, 428, 634, 515]` | `accepted` | `dry_run` | Semantic relocation moved the bbox onto the sound effect. It is usable but still loose. |
+
+Important v3 artifacts:
+
+- Locator input: `outputs/runs/phase6-gbc06-02-14-fallback-context-mimo-v3-semantic-retry/fallback_locator_input/GBC06-02-png-14.png`
+- Validation image: `outputs/runs/phase6-gbc06-02-14-fallback-context-mimo-v3-semantic-retry/fallback_locator_validation_input/GBC06-02-png-14.png`
+- Locator grid: `outputs/runs/phase6-gbc06-02-14-fallback-context-mimo-v3-semantic-retry/visuals/fallback-locator-grid.png`
+- Replacement grid: `outputs/runs/phase6-gbc06-02-14-fallback-context-mimo-v3-semantic-retry/visuals/fallback-replacement-grid.png`
+
+Current conclusion:
+
+- This is now a usable fallback locator path for this previously failing sound-effect record: Phase 6 can reach `fallback_locator_validation.status=accepted` without calling GPT.
+- The bbox remains too loose, and MIMO explicitly reports `tight_enough=false`; subsequent work should trim accepted sound-effect bboxes by dark-pixel support or ask for a second tightness-only correction before real `gpt-image-2` calls.
+- The conservative safety behavior is preserved: all rejected locator attempts still produce `gpt_image2_edit.status=not_called`.
+
 ## Current Recommendation
 
 Use the CTD matched path with `lama_large_512px` for non-bubble text when CTD detects the original text. This is the currently usable route.
@@ -471,10 +521,10 @@ Next experiments should focus on fallback locator stability:
 ## Verification
 
 ```powershell
-python -m pytest tests/test_ctd_mask_matching.py tests/test_phase2_ctd_strategy.py tests/test_phase2_detection.py tests/test_experiment_clis.py tests/test_text_bbox.py tests/test_phase3_fonts.py tests/test_phase6_nonbubble_cleanup.py tests/test_phase6_nonbubble_gpt_replace.py tests/test_phase7_preview.py tests/test_phase7_preview_evaluation.py tests/test_phase8_photoshop_export.py tests/test_phase8_photoshop_export_alignment.py tests/test_phase7_8_smoke.py -q
+python -m pytest tests/test_phase2_ctd_strategy.py tests/test_ctd_mask_matching.py tests/test_phase2_threshold_sweep.py tests/test_cta_first_pipeline.py tests/test_phase6_nonbubble_cleanup.py -q
 ```
 
-Result: `130 passed`.
+Result: `65 passed`.
 
 Full regression:
 
@@ -482,4 +532,4 @@ Full regression:
 python -m pytest -q
 ```
 
-Result: `252 passed`.
+Result: `336 passed`.
