@@ -615,6 +615,8 @@ def test_run_phase7_preview_does_not_require_or_overlay_layout_for_gpt_direct_re
         [_cleanup_payload("page.png#1", _write_cleaned_crop(tmp_path / "local.png"), bbox, replacement_path)],
     )
     _write_jsonl(layout_run / "layout-results.jsonl", [])
+    quality_run = tmp_path / "phase6-replacement-quality"
+    _write_replacement_quality(quality_run, "page.png#1")
 
     run_dir = run_phase7_preview(
         detection_run_dir=detection_run,
@@ -623,6 +625,7 @@ def test_run_phase7_preview_does_not_require_or_overlay_layout_for_gpt_direct_re
         output_root=tmp_path / "outputs",
         run_id="phase7-gpt-direct",
         sample_limit=1,
+        phase6_gpt_quality_run_dir=quality_run,
     )
 
     rows = _read_jsonl(run_dir / "preview-results.jsonl")
@@ -632,6 +635,86 @@ def test_run_phase7_preview_does_not_require_or_overlay_layout_for_gpt_direct_re
     with Image.open(rows[0]["preview"]["page_preview_path"]).convert("RGB") as preview:
         assert preview.getpixel((50, 30)) == (255, 0, 0)
         assert preview.getpixel((60, 45)) == (0, 0, 255)
+
+
+def test_run_phase7_preview_requires_layout_when_gpt_replacement_quality_fails(tmp_path: Path):
+    page_path = _write_page(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    cleanup_run = tmp_path / "phase6"
+    layout_run = tmp_path / "phase4"
+    detection_run.mkdir()
+    cleanup_run.mkdir()
+    layout_run.mkdir()
+    bbox = [40, 20, 80, 70]
+    replacement_path = tmp_path / "bad-replacement.png"
+    Image.new("RGB", (40, 50), "red").save(replacement_path)
+    _write_jsonl(
+        detection_run / "detections.jsonl",
+        [_detection_payload("page.png#1", page_path, bbox, status="fallback_required")],
+    )
+    _write_jsonl(
+        cleanup_run / "cleanup-results.jsonl",
+        [_cleanup_payload("page.png#1", _write_cleaned_crop(tmp_path / "local.png"), bbox, replacement_path)],
+    )
+    _write_jsonl(layout_run / "layout-results.jsonl", [])
+    quality_run = tmp_path / "phase6-replacement-quality"
+    _write_replacement_quality(quality_run, "page.png#1", usable=False, exact_text_correct=False)
+
+    run_dir = run_phase7_preview(
+        detection_run_dir=detection_run,
+        cleanup_run_dir=cleanup_run,
+        layout_run_dir=layout_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase7-gpt-quality-failed",
+        sample_limit=1,
+        phase6_gpt_quality_run_dir=quality_run,
+    )
+
+    rows = _read_jsonl(run_dir / "preview-results.jsonl")
+    assert rows == [_skipped_payload("page.png#1", "missing_layout")]
+
+
+def test_run_phase7_preview_uses_cleaned_crop_when_gpt_replacement_quality_fails(tmp_path: Path):
+    page_path = _write_page(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    cleanup_run = tmp_path / "phase6"
+    layout_run = tmp_path / "phase4"
+    detection_run.mkdir()
+    cleanup_run.mkdir()
+    layout_run.mkdir()
+    bbox = [40, 20, 80, 70]
+    cleaned_path = _write_cleaned_crop(tmp_path / "local.png")
+    replacement_path = tmp_path / "bad-replacement.png"
+    Image.new("RGB", (40, 50), "red").save(replacement_path)
+    _write_jsonl(
+        detection_run / "detections.jsonl",
+        [_detection_payload("page.png#1", page_path, bbox, status="fallback_required")],
+    )
+    _write_jsonl(
+        cleanup_run / "cleanup-results.jsonl",
+        [_cleanup_payload("page.png#1", cleaned_path, bbox, replacement_path)],
+    )
+    _write_jsonl(layout_run / "layout-results.jsonl", [_layout_payload("page.png#1", _transparent_layout(tmp_path))])
+    quality_run = tmp_path / "phase6-replacement-quality"
+    _write_replacement_quality(quality_run, "page.png#1", usable=False, exact_text_correct=False)
+
+    run_dir = run_phase7_preview(
+        detection_run,
+        cleanup_run,
+        layout_run,
+        tmp_path / "outputs",
+        "phase7-gpt-quality-failed-with-layout",
+        1,
+        phase6_gpt_quality_run_dir=quality_run,
+    )
+
+    rows = _read_jsonl(run_dir / "preview-results.jsonl")
+    record = rows[0]["records"][0]
+    assert record["cleanup_method"] == "bubble_fill"
+    assert record["cleanup_crop_path"] == str(cleaned_path)
+    assert record["text_overlay_required"] is True
+    with Image.open(rows[0]["preview"]["page_preview_path"]).convert("RGB") as preview:
+        assert preview.getpixel((50, 30)) == (255, 255, 255)
 
 
 def test_run_phase7_preview_requires_layout_when_gpt_replacement_crop_is_missing(tmp_path: Path):
@@ -797,6 +880,35 @@ def _write_jsonl(path: Path, payloads: list[dict]) -> None:
 
 def _jsonl(payloads: list[dict]) -> str:
     return "".join(json.dumps(payload, ensure_ascii=False) + "\n" for payload in payloads)
+
+
+def _write_replacement_quality(
+    run_dir: Path,
+    record_id: str,
+    *,
+    usable: bool = True,
+    exact_text_correct: bool = True,
+) -> None:
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _write_jsonl(
+        run_dir / "replacement-quality.jsonl",
+        [
+            {
+                "record_id": record_id,
+                "status": "evaluated",
+                "score": 9 if usable else 0,
+                "usable": usable,
+                "exact_text_correct": exact_text_correct,
+                "simplified_chinese_correct": exact_text_correct,
+                "no_japanese_remaining": exact_text_correct,
+                "region_correct": usable,
+                "style_consistent": usable,
+                "outside_mask_preserved": True,
+                "issues": [] if usable and exact_text_correct else ["bad_gpt_replacement"],
+                "observed_text": "啪嗒啪嗒" if exact_text_correct else "嗒嗒哈哈",
+            }
+        ],
+    )
 
 
 def _read_jsonl(path: Path) -> list[dict]:

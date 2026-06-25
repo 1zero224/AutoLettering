@@ -207,7 +207,7 @@ def _repair_sources(repaired_info: object) -> list[dict]:
 
 
 def _repair_source_payload(source: dict) -> dict:
-    return {
+    payload = {
         "record_id": source.get("record_id"),
         "bbox_xyxy": source.get("bbox_xyxy"),
         "cleanup_method": source.get("cleanup_method"),
@@ -222,6 +222,9 @@ def _repair_source_payload(source: dict) -> dict:
         "gpt_image2_edit_status": source.get("gpt_image2_edit_status"),
         "text_overlay_required": bool(source.get("text_overlay_required", False)),
     }
+    if source.get("gpt_replacement_quality") is not None:
+        payload["gpt_replacement_quality"] = source.get("gpt_replacement_quality")
+    return payload
 
 
 def _bbox_payload(bbox: list[int]) -> dict:
@@ -344,7 +347,7 @@ def _cleanup_payload(cleanup_row: dict | None, image_size: tuple[int, int] | Non
     replacement_method = cleanup.get("replacement_method")
     method = cleanup.get("method")
     bbox = cleanup.get("bbox")
-    return {
+    payload = {
         "status": cleanup_row.get("status"),
         "method": method,
         "bbox": _bbox_payload(bbox) if bbox else None,
@@ -359,6 +362,9 @@ def _cleanup_payload(cleanup_row: dict | None, image_size: tuple[int, int] | Non
         "effective_method": replacement_method or method,
         "effective_crop_path": replacement_crop_path or cleaned_crop_path,
     }
+    if cleanup.get("gpt_replacement_quality") is not None:
+        payload["gpt_replacement_quality"] = cleanup.get("gpt_replacement_quality")
+    return payload
 
 
 def _cleanup_already_contains_replacement_text(cleanup_row: dict | None) -> bool:

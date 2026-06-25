@@ -6,6 +6,7 @@ from pathlib import Path
 from .rendering.compose import compose_page_records
 from .cleanup_runs import CleanupRunInput, format_cleanup_run_dirs, load_cleanup_rows_by_id
 from .export.photoshop import build_photoshop_manifest, write_json, write_photoshop_import_jsx
+from .phase6_replacement_quality_gate import effective_cleanup_for_gpt_quality, load_replacement_quality_by_id
 
 
 def run_phase8_photoshop_export(
@@ -18,19 +19,22 @@ def run_phase8_photoshop_export(
     sample_limit: int = 5,
     font_mapping_path: str | Path | None = None,
     preview_run_dir: str | Path | None = None,
+    phase6_gpt_quality_run_dir: str | Path | list[str | Path] | None = None,
 ) -> Path:
     run_dir = Path(output_root) / (run_id or "phase8-photoshop-export")
     run_dir.mkdir(parents=True, exist_ok=True)
     font_mapping = _load_font_mapping(font_mapping_path)
     detection_rows = _load_jsonl_by_id(Path(detection_run_dir) / "detections.jsonl", {"ok", "fallback_required"})
     cleanup_rows = load_cleanup_rows_by_id(cleanup_run_dir)
+    replacement_quality = load_replacement_quality_by_id(phase6_gpt_quality_run_dir) if phase6_gpt_quality_run_dir is not None else None
+    effective_cleanup_rows = _effective_cleanup_rows(cleanup_rows, replacement_quality)
     repaired_pages = _load_repaired_pages(preview_run_dir)
-    repaired_pages.update(_synthesize_repaired_pages(run_dir, detection_rows, cleanup_rows, repaired_pages))
+    repaired_pages.update(_synthesize_repaired_pages(run_dir, detection_rows, effective_cleanup_rows, repaired_pages))
     manifest = build_photoshop_manifest(
         detection_rows=detection_rows,
         font_rows=_load_jsonl_by_id(Path(font_selection_run_dir) / "font-selections.jsonl", "selected"),
         layout_rows=_load_jsonl(Path(layout_run_dir) / "layout-results.jsonl", "layout_generated"),
-        cleanup_rows=cleanup_rows,
+        cleanup_rows=effective_cleanup_rows,
         sample_limit=sample_limit,
         font_mapping=font_mapping,
         repaired_pages=repaired_pages,
@@ -49,6 +53,15 @@ def run_phase8_photoshop_export(
     )
     _write_photoshop_validation_checklist(run_dir / "reports" / "photoshop-validation-checklist.md", manifest, font_mapping_path)
     return run_dir
+
+
+def _effective_cleanup_rows(cleanup_rows: dict[str, dict], replacement_quality: dict[str, dict] | None) -> dict[str, dict]:
+    rows: dict[str, dict] = {}
+    for record_id, row in cleanup_rows.items():
+        payload = dict(row)
+        payload["cleanup"] = effective_cleanup_for_gpt_quality(record_id, row.get("cleanup") or {}, replacement_quality)
+        rows[record_id] = payload
+    return rows
 
 
 def _synthesize_repaired_pages(
@@ -76,13 +89,17 @@ def _synthesize_repaired_pages(
     repaired: dict[str, dict] = {}
     for image_name, records in records_by_image.items():
         output_path = run_dir / "repaired_pages" / f"{_safe_name(image_name)}.png"
-        compose_page_records(image_paths[image_name], records, output_path)
+        compose_page_records(image_paths[image_name], _repair_image_records(records), output_path)
         repaired[image_name] = {
             "image_path": image_paths[image_name],
             "repaired_image_path": str(output_path),
             "repair_sources": [_repair_source_payload(record) for record in records],
         }
     return repaired
+
+
+def _repair_image_records(records: list[dict]) -> list[dict]:
+    return [{**record, "text_overlay_required": False, "layout_preview_path": ""} for record in records]
 
 
 def _cleanup_record_for_page(detection: dict, cleanup_row: dict) -> dict | None:
@@ -107,7 +124,8 @@ def _cleanup_record_for_page(detection: dict, cleanup_row: dict) -> dict | None:
         "fallback_locator_validation": cleanup_row.get("fallback_locator_validation"),
         "gpt_image2_edit_status": (cleanup_row.get("gpt_image2_edit") or {}).get("status"),
         "layout_preview_path": "",
-        "text_overlay_required": False,
+        "text_overlay_required": bool(cleanup.get("text_overlay_required", False)),
+        "gpt_replacement_quality": cleanup.get("gpt_replacement_quality"),
     }
 
 
@@ -129,7 +147,7 @@ def _text_region_source(cleanup: dict, detection: dict) -> str | None:
         return detection.get("text_region_source")
     if _ctd_match_payload(detection).get("status") == "matched":
         return "ctd_refined_mask_component"
-    if cleanup.get("replacement_method") == "gpt_image2_masked_edit" and _is_fallback_detection(detection):
+    if (cleanup.get("replacement_method") == "gpt_image2_masked_edit" or cleanup.get("gpt_replacement_quality")) and _is_fallback_detection(detection):
         return "mimo_vision_model"
     return None
 
@@ -143,7 +161,11 @@ def _cleanup_route(cleanup: dict, detection: dict, cleanup_row: dict) -> str | N
     if _ctd_match_payload(detection).get("status") == "matched" and "lama_large" in str(cleanup.get("method", "")):
         return "cta_mask_lama_large_512px"
     gpt_edit = cleanup_row.get("gpt_image2_edit") or {}
-    if (cleanup.get("replacement_method") == "gpt_image2_masked_edit" or gpt_edit.get("status") == "ok") and _is_fallback_detection(detection):
+    if (
+        cleanup.get("replacement_method") == "gpt_image2_masked_edit"
+        or cleanup.get("gpt_replacement_quality")
+        or gpt_edit.get("status") == "ok"
+    ) and _is_fallback_detection(detection):
         return "mimo_locator_gpt_image2_masked_edit"
     return None
 
@@ -158,7 +180,7 @@ def _ctd_match_payload(detection: dict) -> dict:
 
 
 def _repair_source_payload(record: dict) -> dict:
-    return {
+    payload = {
         "record_id": record.get("record_id"),
         "bbox_xyxy": record.get("bbox"),
         "cleanup_method": record.get("cleanup_method"),
@@ -173,6 +195,9 @@ def _repair_source_payload(record: dict) -> dict:
         "gpt_image2_edit_status": record.get("gpt_image2_edit_status"),
         "text_overlay_required": bool(record.get("text_overlay_required", False)),
     }
+    if record.get("gpt_replacement_quality") is not None:
+        payload["gpt_replacement_quality"] = record.get("gpt_replacement_quality")
+    return payload
 
 
 def _compact_locator_payload(locator: object) -> dict | None:
@@ -253,25 +278,26 @@ def _load_repaired_pages_from_manifest(path: Path) -> dict[str, dict]:
 def _preview_repair_sources(page: dict) -> list[dict]:
     sources: list[dict] = []
     for record in page.get("records", []):
-        sources.append(
-            {
-                "record_id": record.get("record_id"),
-                "bbox_xyxy": record.get("bbox") or record.get("cleanup_bbox"),
-                "cleanup_method": record.get("cleanup_method"),
-                "replacement_method": record.get("replacement_method"),
-                "effective_method": record.get("replacement_method") or record.get("cleanup_method"),
-                "effective_crop_path": record.get("effective_crop_path")
-                or record.get("cleaned_crop_path")
-                or record.get("cleanup_crop_path"),
-                "route": record.get("route"),
-                "text_region_source": record.get("text_region_source"),
-                "source_mask_path": record.get("source_mask_path"),
-                "fallback_locator": _compact_locator_payload(record.get("fallback_locator")),
-                "fallback_locator_validation": _compact_validation_payload(record.get("fallback_locator_validation")),
-                "gpt_image2_edit_status": record.get("gpt_image2_edit_status"),
-                "text_overlay_required": bool(record.get("text_overlay_required", True)),
-            }
-        )
+        payload = {
+            "record_id": record.get("record_id"),
+            "bbox_xyxy": record.get("bbox") or record.get("cleanup_bbox"),
+            "cleanup_method": record.get("cleanup_method"),
+            "replacement_method": record.get("replacement_method"),
+            "effective_method": record.get("replacement_method") or record.get("cleanup_method"),
+            "effective_crop_path": record.get("effective_crop_path")
+            or record.get("cleaned_crop_path")
+            or record.get("cleanup_crop_path"),
+            "route": record.get("route"),
+            "text_region_source": record.get("text_region_source"),
+            "source_mask_path": record.get("source_mask_path"),
+            "fallback_locator": _compact_locator_payload(record.get("fallback_locator")),
+            "fallback_locator_validation": _compact_validation_payload(record.get("fallback_locator_validation")),
+            "gpt_image2_edit_status": record.get("gpt_image2_edit_status"),
+            "text_overlay_required": bool(record.get("text_overlay_required", True)),
+        }
+        if record.get("gpt_replacement_quality") is not None:
+            payload["gpt_replacement_quality"] = record.get("gpt_replacement_quality")
+        sources.append(payload)
     return sources
 
 

@@ -33,7 +33,7 @@ REQUIRED_ARTIFACTS_BY_FIELD = {
     "preview_run_dir": ("preview-results.jsonl",),
     "export_run_dir": ("photoshop-manifest.json",),
     "phase6_cleanup_quality_run_dir": ("cleanup-quality.jsonl",),
-    "phase6_gpt_quality_run_dir": ("manifest.json",),
+    "phase6_gpt_quality_run_dir": (("replacement-quality.jsonl", "manifest.json"),),
     "phase7_preview_evaluation_run_dir": ("preview-evaluation.jsonl",),
     "phase8_export_audit_run_dir": ("phase8-export-audit.json",),
 }
@@ -71,6 +71,11 @@ def validate_pipeline_registry_entry(entry: dict[str, Any]) -> None:
         paths = _entry_paths(entry, field)
         for run_dir in paths:
             for artifact in artifacts:
+                if isinstance(artifact, tuple):
+                    if not any((run_dir / candidate).exists() for candidate in artifact):
+                        candidates = " or ".join(str(run_dir / candidate) for candidate in artifact)
+                        missing.append(f"{field}: {candidates}")
+                    continue
                 artifact_path = run_dir / artifact
                 if not artifact_path.exists():
                     missing.append(f"{field}: {artifact_path}")

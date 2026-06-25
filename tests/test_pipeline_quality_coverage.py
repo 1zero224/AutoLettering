@@ -279,6 +279,59 @@ def test_build_pipeline_coverage_reads_legacy_phase6_gpt_mimo_evaluation(tmp_pat
     assert report["records"]["r1"]["quality_issues"] == ["phase6_gpt_image2_quality_unacceptable"]
 
 
+def test_build_pipeline_coverage_reads_phase6_replacement_quality_jsonl(tmp_path: Path):
+    phase1 = tmp_path / "phase1"
+    phase2 = tmp_path / "phase2"
+    gpt_quality = tmp_path / "phase6-replacement-quality"
+    _write_phase1_manifest(phase1 / "manifest.json")
+    _write_jsonl(phase2 / "detections.jsonl", [_row("r1", "ok")])
+    _write_jsonl(
+        gpt_quality / "replacement-quality.jsonl",
+        [
+            {
+                "record_id": "r1",
+                "image_name": "page.png",
+                "status": "evaluated",
+                "score": 0,
+                "usable": False,
+                "exact_text_correct": False,
+                "simplified_chinese_correct": False,
+                "no_japanese_remaining": False,
+                "region_correct": True,
+                "style_consistent": True,
+                "outside_mask_preserved": True,
+                "issues": ["observed_text_mismatch"],
+            }
+        ],
+    )
+
+    report = build_pipeline_coverage(
+        phase1_run_dir=phase1,
+        detection_run_dir=phase2,
+        phase6_gpt_quality_run_dir=gpt_quality,
+    )
+
+    quality = report["quality"]["phase6_gpt_replacement"]
+    assert quality["gpt_quality_checked_count"] == 1
+    assert quality["gpt_quality_failed_count"] == 1
+    assert quality["records"] == [
+        {
+            "record_id": "r1",
+            "image_name": "page.png",
+            "status": "evaluated",
+            "usable": False,
+            "exact_text_correct": False,
+            "simplified_chinese_correct": False,
+            "region_correct": True,
+            "issues": ["phase6_gpt_image2_quality_unacceptable", "observed_text_mismatch"],
+        }
+    ]
+    assert report["records"]["r1"]["quality_issues"] == [
+        "phase6_gpt_image2_quality_unacceptable",
+        "observed_text_mismatch",
+    ]
+
+
 def test_write_pipeline_coverage_report_includes_quality_section(tmp_path: Path):
     phase1 = tmp_path / "phase1"
     phase2 = tmp_path / "phase2"

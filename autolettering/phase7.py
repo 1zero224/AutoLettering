@@ -6,6 +6,7 @@ from pathlib import Path
 from PIL import Image
 
 from .cleanup_runs import CleanupRunInput, format_cleanup_run_dirs, load_cleanup_rows_by_id
+from .phase6_replacement_quality_gate import effective_cleanup_for_gpt_quality, load_replacement_quality_by_id
 from .phase7_manifest import write_phase7_manifest
 from .phase7_review import write_phase7_manual_review_csv
 from .rendering.compose import compose_page_stages
@@ -22,13 +23,15 @@ def run_phase7_preview(
     output_root: str | Path = "outputs/runs",
     run_id: str | None = None,
     sample_limit: int = 5,
+    phase6_gpt_quality_run_dir: str | Path | list[str | Path] | None = None,
 ) -> Path:
     run_dir = Path(output_root) / (run_id or "phase7-page-preview")
     run_dir.mkdir(parents=True, exist_ok=True)
     detections = _load_detection_rows(Path(detection_run_dir) / "detections.jsonl")
     cleanups = load_cleanup_rows_by_id(cleanup_run_dir)
+    replacement_quality = load_replacement_quality_by_id(phase6_gpt_quality_run_dir) if phase6_gpt_quality_run_dir is not None else None
     layouts = _load_jsonl_by_id(Path(layout_run_dir) / "layout-results.jsonl", "layout_generated")
-    rows = _preview_rows(run_dir, detections, cleanups, layouts, sample_limit)
+    rows = _preview_rows(run_dir, detections, cleanups, layouts, sample_limit, replacement_quality)
     _write_jsonl(run_dir / "preview-results.jsonl", rows)
     write_phase7_manual_review_csv(run_dir / "reports" / "manual-review.csv", rows)
     write_phase7_manifest(
@@ -69,8 +72,9 @@ def _preview_rows(
     cleanups: dict[str, dict],
     layouts: dict[str, dict],
     sample_limit: int,
+    replacement_quality: dict[str, dict] | None,
 ) -> list[dict]:
-    records, skipped_rows = _preview_records(detections, cleanups, layouts, sample_limit)
+    records, skipped_rows = _preview_records(detections, cleanups, layouts, sample_limit, replacement_quality)
     page_rows = [
         _preview_page(run_dir, image_name, page_records)
         for image_name, page_records in _group_by_image(records).items()
@@ -83,6 +87,7 @@ def _preview_records(
     cleanups: dict[str, dict],
     layouts: dict[str, dict],
     sample_limit: int,
+    replacement_quality: dict[str, dict] | None,
 ) -> tuple[list[dict], list[dict]]:
     records: list[dict] = []
     skipped_rows: list[dict] = []
@@ -94,31 +99,36 @@ def _preview_records(
         if detection is None:
             skipped_rows.append(_skipped_row(record_id, "missing_detection"))
             continue
-        if layout is None and _text_overlay_required(cleanup["cleanup"]):
+        effective_cleanup = effective_cleanup_for_gpt_quality(record_id, cleanup["cleanup"], replacement_quality)
+        if layout is None and _text_overlay_required(effective_cleanup):
             skipped_rows.append(_skipped_row(record_id, "missing_layout"))
             continue
-        records.append(_preview_record(detection, cleanup, layout))
+        records.append(_preview_record(detection, cleanup, layout, effective_cleanup))
     return records, skipped_rows
 
 
-def _preview_record(detection: dict, cleanup: dict, layout: dict | None) -> dict:
-    bbox = cleanup["cleanup"]["bbox"]
-    text_overlay_required = _text_overlay_required(cleanup["cleanup"])
+def _preview_record(detection: dict, cleanup: dict, layout: dict | None, effective_cleanup: dict | None = None) -> dict:
+    cleanup_payload = effective_cleanup or cleanup["cleanup"]
+    bbox = cleanup_payload["bbox"]
+    text_overlay_required = _text_overlay_required(cleanup_payload)
     layout_payload = layout["layout"] if layout is not None else {}
-    text_bbox = _text_overlay_bbox(cleanup["cleanup"], layout_payload, bbox)
-    return {
+    text_bbox = _text_overlay_bbox(cleanup_payload, layout_payload, bbox)
+    record = {
         "record_id": detection["record_id"],
         "image_name": detection.get("image_name"),
         "translated_text": detection.get("translated_text", ""),
         "image_path": detection["image_path"],
         "bbox": bbox,
         "text_bbox": text_bbox,
-        "cleanup_method": _cleanup_method(cleanup["cleanup"]),
-        "cleaned_crop_path": _cleanup_crop_path(cleanup["cleanup"]),
-        "cleanup_mask_path": _cleanup_mask_path(cleanup["cleanup"]),
+        "cleanup_method": _cleanup_method(cleanup_payload),
+        "cleaned_crop_path": _cleanup_crop_path(cleanup_payload),
+        "cleanup_mask_path": _cleanup_mask_path(cleanup_payload),
         "layout_preview_path": layout_payload.get("preview_path", ""),
         "text_overlay_required": text_overlay_required,
     }
+    if cleanup_payload.get("gpt_replacement_quality") is not None:
+        record["gpt_replacement_quality"] = cleanup_payload.get("gpt_replacement_quality")
+    return record
 
 
 def _text_overlay_bbox(cleanup: dict, layout: dict, bbox: list[int]) -> list[int]:
@@ -155,7 +165,7 @@ def _preview_page(run_dir: Path, image_name: str, records: list[dict]) -> dict:
 
 
 def _record_summary(record: dict) -> dict:
-    return {
+    payload = {
         "record_id": record["record_id"],
         "bbox": record["bbox"],
         "text_bbox": record.get("text_bbox", record["bbox"]),
@@ -166,6 +176,9 @@ def _record_summary(record: dict) -> dict:
         "text_overlay_required": record.get("text_overlay_required", True),
         "preview_before_after_path": record.get("preview_before_after_path", ""),
     }
+    if record.get("gpt_replacement_quality") is not None:
+        payload["gpt_replacement_quality"] = record.get("gpt_replacement_quality")
+    return payload
 
 
 def _cleanup_crop_path(cleanup: dict) -> str:

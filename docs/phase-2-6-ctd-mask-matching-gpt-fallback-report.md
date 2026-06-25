@@ -568,6 +568,57 @@ Current conclusion for this sample:
 - `gpt-image-2` direct replacement is still not usable for this sound-effect sample. Across real calls it either generates the wrong Chinese characters or edits the wrong/too-low region when the locator is unstable.
 - MIMO replacement evaluation is useful as evidence but not sufficient as an automatic acceptance gate. It correctly rejected v3/v5, but falsely accepted v4, so manual review or an additional OCR/shape check is still required before consuming GPT direct replacements.
 
+### 2026-06-26 Follow-up: GPT Replacement Quality Gate For Phase 7/8 Consumption
+
+The GPT replacement trials above exposed a downstream contract bug: Phase 7 and
+Phase 8 treated `gpt_image2_edit.status=ok` plus `cleanup.replacement_crop_path`
+as enough evidence that a direct replacement could be consumed as final text.
+That was unsafe for `GBC06_02.png#14`: v3/v5 were correctly rejected by MIMO,
+and v4 was manually identified as a false-positive despite the model score.
+
+The consumption contract is now stricter when a Phase 6 replacement-quality run
+is supplied:
+
+- `phase6_replacement_quality.py` writes `replacement-quality.jsonl` with
+  `usable`, `exact_text_correct`, `simplified_chinese_correct`,
+  `no_japanese_remaining`, `region_correct`, and style/preservation fields.
+- Phase 7 and Phase 8 accept a repeatable `--phase6-gpt-quality-run-dir`
+  argument.
+- A `gpt_image2_masked_edit` replacement crop is consumed as final text only
+  when the quality row for the same `record_id` has:
+  - `status=evaluated`
+  - `usable=true`
+  - `exact_text_correct=true`
+  - `simplified_chinese_correct=true`
+  - `no_japanese_remaining=true`
+  - `region_correct=true`
+- If the quality row is missing or any required boolean is false, the GPT
+  replacement crop is ignored by consumers. Phase 7 requires/uses the normal
+  layout overlay path; Phase 8 exports an editable Photoshop text layer and
+  uses the cleaned/background crop instead of baking the bad GPT text into the
+  page-level `修复图像`.
+- The rejected replacement keeps a compact `gpt_replacement_quality` payload in
+  preview/export metadata so the user can see why the GPT crop was not used.
+- Pipeline coverage now reads the new `replacement-quality.jsonl` directly and
+  reports `phase6_gpt_image2_quality_unacceptable` per affected record. The
+  older manifest/MIMO summary path remains supported for legacy runs.
+
+Example gated preview:
+
+```powershell
+python experiments/phase7_page_preview.py --detection-run-dir outputs/runs/<phase2> --cleanup-run-dir outputs/runs/<phase6-gpt> --layout-run-dir outputs/runs/<phase4-layout> --phase6-gpt-quality-run-dir outputs/runs/<phase6-replacement-quality> --output-root outputs/runs --run-id <phase7-gated> --sample-limit 1
+```
+
+Example gated Photoshop export:
+
+```powershell
+python experiments/phase8_photoshop_export.py --detection-run-dir outputs/runs/<phase2> --font-selection-run-dir outputs/runs/<phase3-font> --layout-run-dir outputs/runs/<phase4-layout> --cleanup-run-dir outputs/runs/<phase6-gpt> --phase6-gpt-quality-run-dir outputs/runs/<phase6-replacement-quality> --output-root outputs/runs --run-id <phase8-gated> --sample-limit 1
+```
+
+Important scope note: if no `--phase6-gpt-quality-run-dir` is supplied, Phase 7
+and Phase 8 keep their previous compatibility behavior. Strict gating is
+enabled by passing the quality run directory.
+
 ## Current Recommendation
 
 Use the CTD matched path with `lama_large_512px` for non-bubble text when CTD detects the original text. This is the currently usable route.

@@ -162,6 +162,17 @@ def _phase6_cleanup_issues(phase6_cleanup: dict) -> dict[str, list[str]]:
 
 
 def _phase6_gpt_replacement_quality_summary(run_dir: RunDirInput) -> dict:
+    replacement_rows = _phase6_replacement_quality_rows(run_dir)
+    if replacement_rows:
+        records = _phase6_replacement_quality_records(replacement_rows)
+        return {
+            "run_count": len(_run_dirs(run_dir)),
+            "gpt_quality_checked_count": sum(1 for row in replacement_rows if row.get("status") == "evaluated"),
+            "gpt_quality_failed_count": len(records),
+            "record_count": len(records),
+            "record_issue_count": sum(len(record.get("issues") or []) for record in records),
+            "records": records,
+        }
     manifests = _phase6_gpt_replacement_manifests(run_dir)
     runs = [_phase6_gpt_replacement_run(item, manifest) for item, manifest in manifests]
     records = _phase6_gpt_replacement_records(run_dir, runs)
@@ -173,6 +184,50 @@ def _phase6_gpt_replacement_quality_summary(run_dir: RunDirInput) -> dict:
         "record_issue_count": sum(len(record.get("issues") or []) for record in records),
         "records": records,
     }
+
+
+def _phase6_replacement_quality_rows(run_dir: RunDirInput) -> list[dict]:
+    rows: list[dict] = []
+    for item in _run_dirs(run_dir):
+        path = Path(item) / "replacement-quality.jsonl"
+        if path.exists():
+            rows.extend(_jsonl_rows(path))
+    return rows
+
+
+def _phase6_replacement_quality_records(rows: list[dict]) -> list[dict]:
+    records: list[dict] = []
+    for row in rows:
+        if _phase6_replacement_quality_accepted(row):
+            continue
+        record_id = row.get("record_id")
+        if not record_id:
+            continue
+        issues = ["phase6_gpt_image2_quality_unacceptable", *[str(item) for item in row.get("issues") or []]]
+        records.append(
+            {
+                "record_id": str(record_id),
+                "image_name": row.get("image_name"),
+                "status": row.get("status"),
+                "usable": row.get("usable"),
+                "exact_text_correct": row.get("exact_text_correct"),
+                "simplified_chinese_correct": row.get("simplified_chinese_correct"),
+                "region_correct": row.get("region_correct"),
+                "issues": _dedupe(issues),
+            }
+        )
+    return records
+
+
+def _phase6_replacement_quality_accepted(row: dict) -> bool:
+    return (
+        row.get("status") == "evaluated"
+        and row.get("usable") is True
+        and row.get("exact_text_correct") is True
+        and row.get("simplified_chinese_correct") is True
+        and row.get("no_japanese_remaining") is True
+        and row.get("region_correct") is True
+    )
 
 
 def _phase6_gpt_replacement_manifests(run_dir: RunDirInput) -> list[tuple[Path, dict]]:
