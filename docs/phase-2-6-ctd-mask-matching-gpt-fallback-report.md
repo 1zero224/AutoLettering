@@ -487,6 +487,8 @@ Real Phase 6 dry-runs for `GBC06_02.png#14`:
 | `phase6-gbc06-02-14-fallback-context-mimo-v1` | `[43, 510, 555, 635]` | `rejected` | `not_called` | Bbox shifted onto blank/hair area; guard blocked GPT. |
 | `phase6-gbc06-02-14-fallback-context-mimo-v2-json-recover` | `[0, 498, 608, 608]` | `rejected` | `not_called` | JSON recovery avoided an unnecessary retry, but bbox was still too low. |
 | `phase6-gbc06-02-14-fallback-context-mimo-v3-semantic-retry` | `[24, 428, 634, 515]` | `accepted` | `dry_run` | Semantic relocation moved the bbox onto the sound effect. It is usable but still loose. |
+| `phase6-gbc06-02-14-fallback-context-mimo-v6-percent-fallback` | `[8, 418, 602, 562]` | `accepted`, `tight_enough=false` | `dry_run` | Pixel bbox parsing worked and the rejected tightness retry was recorded, but the final bbox remained too loose. |
+| `phase6-gbc06-02-14-fallback-context-mimo-v7-tight-guard` | `[51, 549, 581, 652]` | `rejected` | `not_called` | A repeated MIMO run shifted downward again; the semantic guard correctly blocked GPT. |
 
 Important v3 artifacts:
 
@@ -497,9 +499,11 @@ Important v3 artifacts:
 
 Current conclusion:
 
-- This is now a usable fallback locator path for this previously failing sound-effect record: Phase 6 can reach `fallback_locator_validation.status=accepted` without calling GPT.
-- The bbox remains too loose, and MIMO explicitly reports `tight_enough=false`; subsequent work should trim accepted sound-effect bboxes by dark-pixel support or ask for a second tightness-only correction before real `gpt-image-2` calls.
-- The conservative safety behavior is preserved: all rejected locator attempts still produce `gpt_image2_edit.status=not_called`.
+- This is now a partially usable fallback locator path for this previously failing sound-effect record: Phase 6 can sometimes reach `fallback_locator_validation.status=accepted`, but repeated MIMO calls still vary.
+- The bbox remains too loose whenever accepted, and MIMO explicitly reports `tight_enough=false`; Phase 6 now refuses real GPT calls in that state with `gpt_image2_edit.status=not_called` / `reason=fallback_locator_bbox_not_tight`.
+- MIMO pixel bbox parsing now falls back to `bbox_percent_xyxy` when the pixel bbox is out of bounds.
+- One tightness retry is attempted for semantically accepted but loose bboxes, but the retry is only adopted when the second validation is also accepted and `tight_enough=true`; otherwise the original accepted bbox is retained and the failed tightening attempt is recorded.
+- The conservative safety behavior is preserved: rejected or loose locator attempts block GPT rather than risking a broad masked edit over hair/background.
 
 ## Current Recommendation
 

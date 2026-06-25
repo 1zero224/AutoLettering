@@ -184,6 +184,57 @@ def _fallback_gpt_cleanup_one(
             "fallback_locator_validation": validation,
             "gpt_image2_edit": {"status": "not_called", "reason": "fallback_locator_semantic_rejected"},
         }
+    if validation.get("tight_enough") is not True:
+        tight_locator = _tighten_accepted_locator_bbox(
+            detection,
+            context["locator_path"],
+            context_bbox,
+            locator,
+            validation,
+            mimo_client,
+        )
+        if tight_locator.get("status") == "ok":
+            tight_locator = _refine_fallback_locator_bbox(tight_locator, context["input_path"], context_bbox)
+            tight_validation = _validate_fallback_locator_semantics(
+                run_dir,
+                detection,
+                tight_locator,
+                context["locator_path"],
+                mimo_client,
+            )
+            if tight_validation.get("status") == "accepted":
+                if tight_validation.get("tight_enough") is True:
+                    locator = tight_locator
+                    validation = tight_validation
+                else:
+                    locator["tightness_retry"] = {
+                        "status": "rejected",
+                        "reason": "retry_bbox_not_tight",
+                        "local_bbox_xyxy": tight_locator.get("local_bbox_xyxy"),
+                        "validation": {
+                            "status": tight_validation.get("status"),
+                            "tight_enough": tight_validation.get("tight_enough"),
+                            "reasoning_summary": tight_validation.get("reasoning_summary"),
+                        },
+                    }
+    if validation.get("tight_enough") is not True:
+        return {
+            "record_id": detection["record_id"],
+            "image_name": detection.get("image_name"),
+            "translated_text": detection.get("translated_text", ""),
+            "status": "failed",
+            "cleanup": {
+                "method": "gpt_image2_masked_edit",
+                "bbox": list(context_bbox),
+                "text_bbox": list(_global_bbox(context_bbox, tuple(locator.get("local_bbox_xyxy")))),
+                "failure_reason": "fallback_locator_bbox_not_tight",
+                "cleaned_crop_path": str(context["input_path"]),
+                "text_overlay_required": True,
+            },
+            "fallback_locator": locator,
+            "fallback_locator_validation": validation,
+            "gpt_image2_edit": {"status": "not_called", "reason": "fallback_locator_bbox_not_tight"},
+        }
     local_bbox = tuple(locator.get("local_bbox_xyxy") or (0, 0, context["size"][0], context["size"][1]))
     mask_local_bbox = _fallback_mask_bbox(local_bbox, context["size"], validation)
     edit_context = _write_fallback_edit_context(run_dir, detection, context, mask_local_bbox)
@@ -442,8 +493,8 @@ def _parse_mimo_locator_response(
     context_bbox: tuple[int, int, int, int],
 ) -> tuple[dict, list[int]]:
     payload = _mimo_bbox_payload(response.get("raw_text", ""))
-    local_bbox = _mimo_local_bbox(payload, context_bbox)
-    _validate_local_bbox(local_bbox, context_bbox)
+    local_bbox, coordinate_source = _mimo_local_bbox(payload, context_bbox)
+    payload["_bbox_coordinate_source"] = coordinate_source
     return payload, local_bbox
 
 
@@ -554,6 +605,58 @@ def _relocate_after_semantic_rejection(
     return result
 
 
+def _tighten_accepted_locator_bbox(
+    detection: dict,
+    context_path: Path,
+    context_bbox: tuple[int, int, int, int],
+    locator: dict,
+    validation: dict,
+    mimo_client,
+) -> dict:
+    if mimo_client is None:
+        return {"status": "failed", "failure_reason": "mimo_client_required_for_tightness_retry"}
+    width = context_bbox[2] - context_bbox[0]
+    height = context_bbox[3] - context_bbox[1]
+    prompt = "\n".join(
+        [
+            "The previous bbox was semantically correct but too loose.",
+            f"Crop dimensions are width={width} and height={height} pixels.",
+            f"Chinese translation: {detection.get('translated_text', '')}",
+            f"Previous bbox_xyxy: {locator.get('local_bbox_xyxy')}",
+            f"Validation feedback: {validation.get('reasoning_summary', '')}",
+            "Return a tighter crop-local bbox around only the visible original Japanese text.",
+            "Keep all visible target characters, but remove surrounding blank space, characters' hair, panel background, unrelated text, and UI/grid marks.",
+            "Return only JSON with bbox_xyxy, confidence, and reasoning_summary.",
+        ]
+    )
+    response = mimo_client.analyze_image(
+        context_path,
+        prompt,
+        kind="phase6_fallback_text_locator_tightness_retry",
+        max_completion_tokens=800,
+    )
+    try:
+        payload, local_bbox = _parse_mimo_locator_response(response, context_bbox)
+    except Exception as exc:
+        return {
+            "status": "failed",
+            "failure_reason": f"invalid_mimo_bbox_tightness_retry:{type(exc).__name__}",
+            "raw_text": response.get("raw_text", ""),
+            "locator_image_path": str(context_path),
+            "request": response.get("request"),
+            "response": response.get("response"),
+            "first_raw_text": locator.get("raw_text", ""),
+            "first_validation_raw_text": validation.get("raw_text", ""),
+        }
+    result = _fallback_locator_payload(payload, local_bbox, response, context_bbox, context_path)
+    result["first_raw_text"] = locator.get("raw_text", "")
+    result["first_request"] = locator.get("request")
+    result["first_response"] = locator.get("response")
+    result["first_validation_raw_text"] = validation.get("raw_text", "")
+    result["tightness_retry_of_validation"] = "accepted_bbox_not_tight"
+    return result
+
+
 def _fallback_locator_payload(
     payload: dict,
     local_bbox: list[int],
@@ -569,6 +672,7 @@ def _fallback_locator_payload(
         "global_bbox_xyxy": list(_global_bbox(context_bbox, tuple(local_bbox))),
         "confidence": payload.get("confidence"),
         "reasoning_summary": payload.get("reasoning_summary"),
+        "bbox_coordinate_source": payload.get("_bbox_coordinate_source"),
         "raw_text": response.get("raw_text", ""),
         "locator_image_path": str(context_path),
         "request": response.get("request"),
@@ -1179,16 +1283,42 @@ def _mimo_bool(value: object) -> bool | None:
 
 
 def _mimo_local_bbox(payload: dict, context_bbox: tuple[int, int, int, int]) -> list[int]:
+    errors: list[Exception] = []
     for key in ("bbox_xyxy", "bbox"):
         if key in payload:
-            bbox = _number_list(payload[key], key)
-            if _looks_normalized_bbox(bbox):
-                return _scaled_bbox(bbox, context_bbox, scale=1.0)
-            return [int(round(value)) for value in bbox]
+            try:
+                bbox = _number_list(payload[key], key)
+                if _looks_normalized_bbox(bbox):
+                    return _validated_scaled_bbox(bbox, context_bbox, scale=1.0), key
+                return _validated_pixel_bbox(bbox, context_bbox), key
+            except ValueError as exc:
+                errors.append(exc)
     if "bbox_percent_xyxy" in payload:
-        return _scaled_bbox(_number_list(payload["bbox_percent_xyxy"], "bbox_percent_xyxy"), context_bbox, scale=100.0)
+        try:
+            return (
+                _validated_scaled_bbox(
+                    _number_list(payload["bbox_percent_xyxy"], "bbox_percent_xyxy"),
+                    context_bbox,
+                    scale=100.0,
+                ),
+                "bbox_percent_xyxy",
+            )
+        except ValueError as exc:
+            errors.append(exc)
     if "bbox_normalized_xyxy" in payload:
-        return _scaled_bbox(_number_list(payload["bbox_normalized_xyxy"], "bbox_normalized_xyxy"), context_bbox, scale=1.0)
+        try:
+            return (
+                _validated_scaled_bbox(
+                    _number_list(payload["bbox_normalized_xyxy"], "bbox_normalized_xyxy"),
+                    context_bbox,
+                    scale=1.0,
+                ),
+                "bbox_normalized_xyxy",
+            )
+        except ValueError as exc:
+            errors.append(exc)
+    if errors:
+        raise errors[0]
     raise ValueError("mimo_bbox_missing")
 
 
@@ -1217,6 +1347,18 @@ def _scaled_bbox(values: list[float], context_bbox: tuple[int, int, int, int], s
         int(round(x2 / scale * width)),
         int(round(y2 / scale * height)),
     ]
+
+
+def _validated_pixel_bbox(values: list[float], context_bbox: tuple[int, int, int, int]) -> list[int]:
+    local_bbox = [int(round(value)) for value in values]
+    _validate_local_bbox(local_bbox, context_bbox)
+    return local_bbox
+
+
+def _validated_scaled_bbox(values: list[float], context_bbox: tuple[int, int, int, int], scale: float) -> list[int]:
+    local_bbox = _scaled_bbox(values, context_bbox, scale)
+    _validate_local_bbox(local_bbox, context_bbox)
+    return local_bbox
 
 
 def _validate_local_bbox(local_bbox: list[int], context_bbox: tuple[int, int, int, int]) -> None:
