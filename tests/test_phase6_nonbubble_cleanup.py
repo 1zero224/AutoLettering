@@ -255,6 +255,26 @@ def test_inpaint_crop_supports_flat_median_fill_method():
     assert result.convert("L").getpixel((20, 30)) < 40
 
 
+def test_inpaint_crop_supports_texture_blur_fill_for_tall_colored_banner():
+    crop = Image.new("RGB", (60, 260), (205, 58, 72))
+    draw = ImageDraw.Draw(crop)
+    for y in range(0, 260):
+        shade = 190 + (y % 18)
+        draw.line((0, y, 59, y), fill=(shade, 58, 72))
+    for y in range(24, 230, 42):
+        draw.rectangle((18, y, 42, y + 24), fill="white")
+    mask = Image.new("L", crop.size, 0)
+    for y in range(24, 230, 42):
+        ImageDraw.Draw(mask).rectangle((18, y, 42, y + 24), fill=255)
+
+    method, result = inpaint_crop(crop, mask, "texture_blur_fill")
+
+    assert method == "texture_blur_fill"
+    assert result.getpixel((20, 36)) != (255, 255, 255)
+    assert result.getpixel((3, 36)) != crop.getpixel((3, 36))
+    assert result.getpixel((30, 250))[0] > 170
+
+
 def test_run_phase6_nonbubble_cleanup_writes_local_and_gpt_dry_run(tmp_path: Path):
     image_path = _write_nonbubble_image(tmp_path / "page.png")
     detection_run = tmp_path / "phase2"

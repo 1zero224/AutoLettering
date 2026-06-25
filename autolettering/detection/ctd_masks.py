@@ -120,6 +120,43 @@ def assign_labelplus_points_to_ctd_masks(
     return matches
 
 
+def labelplus_ctd_mask_distance_rows(
+    labels: list[ManifestLabel],
+    components: list[CtdMaskComponent],
+    max_edge_distance_px: float = 12.0,
+) -> list[dict]:
+    rows: list[dict] = []
+    for label in labels:
+        for component in components:
+            distance = _point_to_component_edge_distance(label.x_px, label.y_px, component)
+            rows.append(
+                {
+                    "record_id": label.id,
+                    "labelplus_point_xy": [label.x_px, label.y_px],
+                    "component_id": component.component_id,
+                    "component_bbox_xyxy": list(component.bbox_xyxy),
+                    "component_mask_path": str(component.mask_path),
+                    "edge_distance_px": round(distance, 3),
+                    "within_threshold": distance <= max_edge_distance_px,
+                    "threshold_px": max_edge_distance_px,
+                }
+            )
+    return sorted(rows, key=lambda item: (item["record_id"], item["edge_distance_px"], item["component_id"]))
+
+
+def ctd_mask_component_rows(components: list[CtdMaskComponent]) -> list[dict]:
+    return [
+        {
+            "component_id": component.component_id,
+            "bbox_xyxy": list(component.bbox_xyxy),
+            "area_px": component.area_px,
+            "centroid_xy": list(component.centroid_xy),
+            "mask_path": str(component.mask_path),
+        }
+        for component in components
+    ]
+
+
 def _component_record(
     component_id: str,
     pixels: list[tuple[int, int]],

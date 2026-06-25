@@ -100,6 +100,12 @@ def _cleanup_record_for_page(detection: dict, cleanup_row: dict) -> dict | None:
         "effective_method": cleanup.get("replacement_method") or cleanup.get("method"),
         "effective_crop_path": cleaned_path,
         "cleanup_mask_path": None if cleanup.get("replacement_crop_path") else cleanup.get("cleanup_mask_path"),
+        "source_mask_path": cleanup.get("source_mask_path") or cleanup.get("text_mask_path"),
+        "route": cleanup.get("route") or (detection.get("lettering_route") or {}).get("route"),
+        "text_region_source": cleanup.get("text_region_source") or detection.get("text_region_source"),
+        "fallback_locator": cleanup_row.get("fallback_locator"),
+        "fallback_locator_validation": cleanup_row.get("fallback_locator_validation"),
+        "gpt_image2_edit_status": (cleanup_row.get("gpt_image2_edit") or {}).get("status"),
         "layout_preview_path": "",
         "text_overlay_required": False,
     }
@@ -113,7 +119,36 @@ def _repair_source_payload(record: dict) -> dict:
         "replacement_method": record.get("replacement_method"),
         "effective_method": record.get("effective_method"),
         "effective_crop_path": record.get("effective_crop_path") or record.get("cleaned_crop_path"),
+        "route": record.get("route"),
+        "text_region_source": record.get("text_region_source"),
+        "source_mask_path": record.get("source_mask_path"),
+        "fallback_locator": _compact_locator_payload(record.get("fallback_locator")),
+        "fallback_locator_validation": _compact_validation_payload(record.get("fallback_locator_validation")),
+        "gpt_image2_edit_status": record.get("gpt_image2_edit_status"),
         "text_overlay_required": bool(record.get("text_overlay_required", False)),
+    }
+
+
+def _compact_locator_payload(locator: object) -> dict | None:
+    if not isinstance(locator, dict):
+        return None
+    return {
+        "status": locator.get("status"),
+        "local_bbox_xyxy": locator.get("local_bbox_xyxy"),
+        "global_bbox_xyxy": locator.get("global_bbox_xyxy"),
+        "confidence": locator.get("confidence"),
+        "locator_image_path": locator.get("locator_image_path"),
+    }
+
+
+def _compact_validation_payload(validation: object) -> dict | None:
+    if not isinstance(validation, dict):
+        return None
+    return {
+        "status": validation.get("status"),
+        "semantic_correct": validation.get("semantic_correct"),
+        "tight_enough": validation.get("tight_enough"),
+        "validation_image_path": validation.get("validation_image_path"),
     }
 
 
@@ -175,6 +210,12 @@ def _preview_repair_sources(page: dict) -> list[dict]:
                 "replacement_method": record.get("replacement_method"),
                 "effective_method": record.get("replacement_method") or record.get("cleanup_method"),
                 "effective_crop_path": record.get("effective_crop_path") or record.get("cleaned_crop_path"),
+                "route": record.get("route"),
+                "text_region_source": record.get("text_region_source"),
+                "source_mask_path": record.get("source_mask_path"),
+                "fallback_locator": _compact_locator_payload(record.get("fallback_locator")),
+                "fallback_locator_validation": _compact_validation_payload(record.get("fallback_locator_validation")),
+                "gpt_image2_edit_status": record.get("gpt_image2_edit_status"),
                 "text_overlay_required": bool(record.get("text_overlay_required", True)),
             }
         )
@@ -225,7 +266,7 @@ def _write_report(
         f"- Pages exported: {manifest['summary']['page_count']}",
         f"- Text layers exported: {manifest['summary']['record_count']}",
         "- `photoshop-import.jsx` reads project output `photoshop-manifest.json`, not the LabelPlus txt directly.",
-        "- PSD layer order is editable `嵌字图层*` layers above `修复图像`, above `原图`.",
+        "- PSD layer order is editable `嵌字图层1`, `嵌字图层2`, ... above `修复图像`, above `原图`.",
         "",
         "## Cleanup Summary",
         "",
@@ -236,7 +277,7 @@ def _write_report(
         "## JSX Behavior",
         "",
         "- Adds page-level `repaired_image_path` as a bitmap layer named `修复图像` above the original image when a Phase 7 preview run is supplied.",
-        "- Synthesizes page-level `repaired_image_path` from cleanup crops when no Phase 7 repaired page is supplied and source crop files exist.",
+        "- Synthesizes page-level `repaired_image_path` from LaMA cleanup crops and successful `gpt-image-2` replacement crops when no Phase 7 repaired page is supplied and source crop files exist.",
         "- Skips per-record cleanup patch layers when a page-level repaired image is available.",
         "- Places `cleanup.effective_crop_path` as a bitmap patch layer only when no page-level repaired image is available.",
         "- Creates one editable Photoshop paragraph text layer per exported layer using `text_bbox` width, height, and initial position.",

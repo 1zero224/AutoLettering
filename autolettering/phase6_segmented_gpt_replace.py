@@ -54,11 +54,42 @@ def run_phase6_segmented_gpt_replace(
         for detection in detections
     ]
     _write_jsonl(run_dir / "segmented-gpt-replace-results.jsonl", rows)
+    _write_jsonl(run_dir / "cleanup-results.jsonl", _cleanup_rows(rows))
     grid = _write_grid(run_dir / "visuals" / "segmented-gpt-replace-grid.png", rows)
     mimo = _write_mimo_evaluation(run_dir, grid, rows, mimo_client) if mimo_client else None
     _write_manifest(run_dir / "manifest.json", detection_run_dir, rows, grid, mimo)
     _write_report(run_dir / "reports" / "phase6-segmented-gpt-replace-report.md", detection_run_dir, rows, grid, mimo)
     return run_dir
+
+
+def _cleanup_rows(rows: list[dict]) -> list[dict]:
+    cleanup_rows: list[dict] = []
+    for row in rows:
+        replacement = row.get("segmented_gpt_replace") or {}
+        target_crop_path = replacement.get("target_crop_path")
+        ok = replacement.get("status") == "ok" and bool(target_crop_path)
+        cleanup_rows.append(
+            {
+                "record_id": row["record_id"],
+                "image_name": row.get("image_name"),
+                "translated_text": row.get("translated_text"),
+                "status": "cleaned" if ok else "failed",
+                "cleanup": {
+                    "method": replacement.get("method") or "segmented_gpt_image2_masked_edit",
+                    "bbox": row.get("bbox"),
+                    "text_bbox": row.get("bbox"),
+                    "mask_bbox": row.get("bbox"),
+                    "layout_text_bbox": row.get("bbox"),
+                    "cleaned_crop_path": target_crop_path,
+                    "before_after_path": target_crop_path,
+                    "text_overlay_required": False,
+                    "replacement_method": "gpt_image2_masked_edit" if ok else None,
+                    "replacement_crop_path": target_crop_path if ok else None,
+                },
+                "segmented_gpt_replace": replacement,
+            }
+        )
+    return cleanup_rows
 
 
 def _load_nonbubble_detections(path: Path, sample_limit: int, record_ids: list[str] | None) -> list[dict]:
@@ -239,6 +270,7 @@ def _run_segment(
         "page_bbox": list(page_bbox),
         "context_segment_bbox": list(segment_bbox),
         "local_edit_bbox": list(local_edit_bbox),
+        "paste_bbox": list(local_edit_bbox),
         "input_path": str(input_path),
         "mask_path": str(mask_path),
         "mask_overlay_path": str(overlay_path),
@@ -300,8 +332,10 @@ def _compose_segments(run_dir: Path, record_id: str, context_path: Path, segment
             continue
         with Image.open(normalized) as edited:
             patch = edited.convert("RGB")
-        x1, y1, _, _ = segment["context_segment_bbox"]
-        canvas.paste(patch, (x1, y1))
+        segment_x1, segment_y1, _, _ = segment["context_segment_bbox"]
+        paste_bbox = tuple(segment.get("paste_bbox") or segment["local_edit_bbox"])
+        paste_patch = patch.crop(paste_bbox)
+        canvas.paste(paste_patch, (segment_x1 + paste_bbox[0], segment_y1 + paste_bbox[1]))
     canvas.save(output)
     return output
 

@@ -11,7 +11,9 @@ from .detection.ctd_masks import (
     CtdMaskMatch,
     assign_labelplus_points_to_ctd_masks,
     _ballonstranslator_ctd_config,
+    ctd_mask_component_rows,
     detect_ctd_mask_components_for_image,
+    labelplus_ctd_mask_distance_rows,
 )
 from .detection.models import CandidateBox, DetectionResult
 from .detection.regions import build_search_region
@@ -228,6 +230,7 @@ def _ctd_matches_by_record(
     matches: dict[str, CtdMaskMatch] = {}
     for image, labels in _group_labels_by_image(selected_records):
         components = _detect_page_components(run_dir, image)
+        _write_ctd_distance_rows(run_dir, image, labels, components, max_edge_distance_px)
         matches.update(assign_labelplus_points_to_ctd_masks(labels, components, max_edge_distance_px=max_edge_distance_px))
     return matches
 
@@ -245,14 +248,48 @@ def _group_labels_by_image(
 
 
 def _detect_page_components(run_dir: Path, image: ManifestImage) -> list[CtdMaskComponent]:
-    output_dir = run_dir / "debug" / "ctd_masks" / Path(image.image_name).stem
+    output_dir = _ctd_mask_output_dir(run_dir, image)
     _write_json(output_dir / "ctd-config.json", _ballonstranslator_ctd_config(Path("BallonsTranslator")))
-    return detect_ctd_mask_components_for_image(image.image_path, output_dir)
+    components = detect_ctd_mask_components_for_image(image.image_path, output_dir)
+    _write_json(
+        output_dir / "cta-closed-mask-components.json",
+        {
+            "schema_version": "autolettering.cta_mask_components.v1",
+            "image_name": image.image_name,
+            "image_path": str(image.image_path),
+            "source_mask_path": str(output_dir / "ctd-refined-mask.png"),
+            "componentization": "8_connected_components_over_ballonstranslator_ctd_refined_mask",
+            "components": ctd_mask_component_rows(components),
+        },
+    )
+    return components
+
+
+def _write_ctd_distance_rows(
+    run_dir: Path,
+    image: ManifestImage,
+    labels: list[ManifestLabel],
+    components: list[CtdMaskComponent],
+    max_edge_distance_px: float,
+) -> None:
+    rows = labelplus_ctd_mask_distance_rows(labels, components, max_edge_distance_px=max_edge_distance_px)
+    _write_jsonl(_ctd_mask_output_dir(run_dir, image) / "ctd-mask-edge-distances.jsonl", rows)
+
+
+def _ctd_mask_output_dir(run_dir: Path, image: ManifestImage) -> Path:
+    return run_dir / "debug" / "ctd_masks" / Path(image.image_name).stem
 
 
 def _write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _write_jsonl(path: Path, rows: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
 def _ctd_match_payload(match: CtdMaskMatch) -> dict:
@@ -518,6 +555,8 @@ def _write_phase2_report(
         "",
         "- `detections.jsonl`",
         "- `debug/detection/*.png`",
+        "- `debug/ctd_masks/<page>/cta-closed-mask-components.json`",
+        "- `debug/ctd_masks/<page>/ctd-mask-edge-distances.jsonl`",
         "- `reports/manual-review.csv`",
         "",
         "Debug overlay colors: raw selected box = red, full text evidence box = green, body text box = purple.",

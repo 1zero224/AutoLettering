@@ -145,7 +145,9 @@ JSX_SOURCE = """#target photoshop
             if (!hasRepairedImage) {
                 try { addCleanupPatchLayer(doc, page.layers[j]); } catch (err) {}
             }
-            addTextLayer(doc, page.layers[j]);
+        }
+        for (var k = page.layers.length - 1; k >= 0; k--) {
+            addTextLayer(doc, page.layers[k]);
         }
         var saveFile = new File(outputFolder.fsName + '/' + baseName(page.image_name) + '.psd');
         var options = new PhotoshopSaveOptions();

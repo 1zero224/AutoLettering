@@ -14,7 +14,7 @@ def test_run_phase2_ctd_strategy_uses_matched_mask_component_as_text_region(tmp_
     _write_project_image(image_path)
     _write_labelplus(project_dir / "翻译_0.txt")
     component_mask = tmp_path / "component.png"
-    Image.new("L", (240, 240), 0).save(component_mask)
+    _write_component_mask(component_mask, (88, 70, 116, 151))
 
     monkeypatch.setattr(
         "autolettering.phase2.detect_ctd_mask_components_for_image",
@@ -53,7 +53,7 @@ def test_run_phase2_cta_strategy_writes_mask_component_as_primary_text_region(tm
     _write_project_image(image_path)
     _write_labelplus(project_dir / "翻译_0.txt")
     component_mask = tmp_path / "component.png"
-    Image.new("L", (240, 240), 0).save(component_mask)
+    _write_component_mask(component_mask, (88, 70, 116, 151))
 
     monkeypatch.setattr(
         "autolettering.phase2.detect_ctd_mask_components_for_image",
@@ -103,6 +103,32 @@ def test_run_phase2_cta_strategy_writes_mask_component_as_primary_text_region(tm
     assert record["cta_match"]["status"] == "matched"
     assert record["cta_match"]["component_id"] == "component-0001"
     assert record["ctd_match"] == record["cta_match"]
+    ctd_dir = run_dir / "debug" / "ctd_masks" / "page"
+    components = json.loads((ctd_dir / "cta-closed-mask-components.json").read_text(encoding="utf-8"))
+    assert components["schema_version"] == "autolettering.cta_mask_components.v1"
+    assert components["componentization"] == "8_connected_components_over_ballonstranslator_ctd_refined_mask"
+    assert components["components"] == [
+        {
+            "component_id": "component-0001",
+            "bbox_xyxy": [88, 70, 116, 151],
+            "area_px": 2268,
+            "centroid_xy": [102.0, 110.0],
+            "mask_path": str(component_mask),
+        }
+    ]
+    distances = _read_jsonl(ctd_dir / "ctd-mask-edge-distances.jsonl")
+    assert distances == [
+        {
+            "record_id": "page.png#1",
+            "labelplus_point_xy": [102, 110],
+            "component_id": "component-0001",
+            "component_bbox_xyxy": [88, 70, 116, 151],
+            "component_mask_path": str(component_mask),
+            "edge_distance_px": 14.0,
+            "within_threshold": True,
+            "threshold_px": 20.0,
+        }
+    ]
 
 
 def test_run_phase2_ctd_strategy_records_fallback_required_when_no_component_is_close(tmp_path: Path, monkeypatch):
@@ -233,6 +259,12 @@ def _write_project_image(path: Path) -> None:
     image.save(path)
 
 
+def _write_component_mask(path: Path, bbox: tuple[int, int, int, int]) -> None:
+    image = Image.new("L", (240, 240), 0)
+    ImageDraw.Draw(image).rectangle((bbox[0], bbox[1], bbox[2] - 1, bbox[3] - 1), fill=255)
+    image.save(path)
+
+
 def _write_labelplus(path: Path) -> None:
     path.write_text(
         """1,0
@@ -247,3 +279,7 @@ Comment
 """,
         encoding="utf-8",
     )
+
+
+def _read_jsonl(path: Path) -> list[dict]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]

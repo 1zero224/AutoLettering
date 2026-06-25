@@ -31,7 +31,7 @@ def inpaint_nonbubble_text(
         crop = image.convert("RGB").crop(bbox)
 
     text_mask = (
-        _crop_external_mask(text_mask_path, bbox, crop.size)
+        _dilate_mask(_crop_external_mask(text_mask_path, bbox, crop.size), mask_dilate_px)
         if text_mask_path
         else build_text_mask(crop, dark_threshold, mask_dilate_px, polarity=polarity, light_threshold=light_threshold)
     )
@@ -79,6 +79,8 @@ def inpaint_crop(
         return "flat_median_fill", flat_median_fill(crop, text_mask)
     if method == "dark_panel_fill":
         return "dark_panel_fill", dark_panel_fill(crop, text_mask)
+    if method == "texture_blur_fill":
+        return "texture_blur_fill", texture_blur_fill(crop, text_mask)
     if method == "bt_aot":
         return "bt_aot_inpaint", balloons_aot_inpaint(crop, text_mask)
     if method == "bt_lama_mpe":
@@ -152,6 +154,17 @@ def dark_panel_fill(crop: Image.Image, text_mask: Image.Image) -> Image.Image:
     result = array.copy()
     result[mask] = fill_color
     return Image.fromarray(result, mode="RGB")
+
+
+def texture_blur_fill(crop: Image.Image, text_mask: Image.Image) -> Image.Image:
+    mask = _texture_blur_mask(crop, text_mask)
+    if not bool((np.array(mask.convert("L"), dtype=np.uint8) > 0).any()):
+        return crop.convert("RGB")
+    radius = max(10, min(40, int(round(min(crop.size) * 0.16))))
+    blurred = crop.convert("RGB").filter(ImageFilter.GaussianBlur(radius=radius))
+    result = crop.convert("RGB").copy()
+    result.paste(blurred, (0, 0), mask)
+    return result
 
 
 def flat_median_fill(crop: Image.Image, text_mask: Image.Image) -> Image.Image:
@@ -298,6 +311,23 @@ def _crop_external_mask(mask_path: str | Path, bbox: tuple[int, int, int, int], 
     return crop
 
 
+def _dilate_mask(mask: Image.Image, dilate_px: int) -> Image.Image:
+    filter_size = max(3, dilate_px if dilate_px % 2 == 1 else dilate_px + 1)
+    return mask.convert("L").filter(ImageFilter.MaxFilter(filter_size))
+
+
+def _texture_blur_mask(crop: Image.Image, text_mask: Image.Image) -> Image.Image:
+    mask = text_mask.convert("L")
+    binary = np.array(mask, dtype=np.uint8) > 0
+    if not bool(binary.any()):
+        return mask
+    height, width = binary.shape
+    row_coverage = float(binary.any(axis=1).mean())
+    if height >= width * 3 and row_coverage >= 0.35:
+        return Image.new("L", crop.size, 255)
+    return mask.filter(ImageFilter.MaxFilter(11))
+
+
 def _safe_name(value: str) -> str:
     return "".join(char if char.isalnum() else "-" for char in value).strip("-") or "record"
 
@@ -310,4 +340,5 @@ def _canonical_method(method: str) -> str:
         "aot": "bt_aot",
         "lama_mpe": "bt_lama_mpe",
         "lama_large_512px": "bt_lama_large",
+        "texture-blur-fill": "texture_blur_fill",
     }.get(method, method)

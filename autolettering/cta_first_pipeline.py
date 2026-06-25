@@ -104,6 +104,8 @@ def _text_detection_plan() -> dict:
         "ballonstranslator_config_path": "BallonsTranslator/config/config.json",
         "ballonstranslator_config_key": "module.textdetector_params.ctd",
         "mask_artifact": "debug/ctd_masks/<page>/ctd-refined-mask.png",
+        "component_manifest": "debug/ctd_masks/<page>/cta-closed-mask-components.json",
+        "distance_artifact": "debug/ctd_masks/<page>/ctd-mask-edge-distances.jsonl",
         "componentization": "connected_components_over_refined_mask",
         "matching_metric": "labelplus_point_to_mask_edge",
         "matching_cardinality": "unique_mask_component_claim",
@@ -131,7 +133,8 @@ def _photoshop_export_contract() -> dict:
     return {
         "project_manifest": "photoshop-manifest.json",
         "import_script": "photoshop-import.jsx",
-        "layer_order_top_to_bottom": ["嵌字图层*", "修复图像", "原图"],
+        "layer_order_top_to_bottom": ["嵌字图层1", "嵌字图层2", "...", "修复图像", "原图"],
+        "repaired_image_source": "page-level image synthesized from lama_large_512px cleanup crops plus successful gpt-image-2 replacement crops",
     }
 
 
@@ -197,6 +200,7 @@ def _write_report(path: Path, manifest: dict) -> None:
         "- BallonsTranslator detector: `ctd` / `ComicTextDetector`",
         "- CTA-first means CTD refined-mask connected components first, then unique LabelPlus point-to-mask-edge matching.",
         "- `cta_mask` is the project-facing strategy name; it is not a separate BallonsTranslator detector module.",
+        "- Each page records closed mask components in `cta-closed-mask-components.json` and all LabelPlus point-to-mask-edge distances in `ctd-mask-edge-distances.jsonl`.",
         "",
         "## Routes",
         "",
@@ -206,7 +210,7 @@ def _write_report(path: Path, manifest: dict) -> None:
         "## Photoshop Export Contract",
         "",
         "- `photoshop-import.jsx` reads `photoshop-manifest.json`, not the LabelPlus txt directly.",
-        "- PSD layer order is editable `嵌字图层*` layers above `修复图像`, above `原图`.",
+        "- PSD layer order is editable `嵌字图层1`, `嵌字图层2`, ... above `修复图像`, above `原图`.",
         "",
         "## Review Image Contract",
         "",

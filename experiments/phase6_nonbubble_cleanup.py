@@ -38,6 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
             "opencv_telea",
             "opencv_ns",
             "dark_panel_fill",
+            "texture_blur_fill",
             "bt_aot",
             "bt_lama_large",
             "bt_patchmatch",

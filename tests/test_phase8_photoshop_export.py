@@ -16,7 +16,8 @@ def test_run_phase8_photoshop_export_writes_manifest_and_jsx(tmp_path: Path):
         "project_manifest": "photoshop-manifest.json",
         "import_script": "photoshop-import.jsx",
         "does_not_read_labelplus_txt_directly": True,
-        "layer_order_top_to_bottom": ["嵌字图层*", "修复图像", "原图"],
+        "layer_order_top_to_bottom": ["嵌字图层1", "嵌字图层2", "...", "修复图像", "原图"],
+        "repaired_image_source": "page-level image synthesized from lama_large_512px cleanup crops and successful gpt-image-2 replacement crops",
     }
     assert manifest["summary"] == {"record_count": 1, "page_count": 1}
     assert manifest["pages"][0]["layer_order"] == ["text_layers", "repaired_image", "original_image"]
@@ -45,12 +46,13 @@ def test_run_phase8_photoshop_export_writes_manifest_and_jsx(tmp_path: Path):
     _assert_rich_jsx_importer(jsx)
     main_name_original = jsx.rindex("nameOriginalLayer(doc);")
     main_add_repaired = jsx.rindex("var hasRepairedImage = addRepairedImageLayer(doc, page);")
-    main_add_text = jsx.rindex("addTextLayer(doc, page.layers[j]);")
-    assert main_name_original < main_add_repaired < main_add_text
+    main_add_patch = jsx.rindex("addCleanupPatchLayer(doc, page.layers[j]);")
+    main_add_text = jsx.rindex("addTextLayer(doc, page.layers[k]);")
+    assert main_name_original < main_add_repaired < main_add_patch < main_add_text
     report = (run_dir / "reports" / "phase8-report.md").read_text(encoding="utf-8")
     assert "Missing cleanup layers: 0" in report
     assert "`photoshop-import.jsx` reads project output `photoshop-manifest.json`, not the LabelPlus txt directly." in report
-    assert "PSD layer order is editable `嵌字图层*` layers above `修复图像`, above `原图`." in report
+    assert "PSD layer order is editable `嵌字图层1`, `嵌字图层2`, ... above `修复图像`, above `原图`." in report
     assert "`bubble_fill=1`" in report
     assert "Places `cleanup.effective_crop_path` as a bitmap patch layer" in report
     assert "paragraph text layer" in report
@@ -63,7 +65,8 @@ def test_run_phase8_photoshop_export_writes_manifest_and_jsx(tmp_path: Path):
     assert "Run `photoshop-import.jsx` from this export directory" in checklist
     assert "Expected PSD output folder: `psd/`" in checklist
     assert "- Expected editable text layers: 1" in checklist
-    assert "- Expected cleanup patch layers: 1" in checklist
+    assert "- Expected page-level repaired image layers: 1" in checklist
+    assert "- Expected cleanup patch layers: 0" in checklist
     assert "Font mapping file: none" in checklist
     assert "vertical_align=top" in checklist
 
@@ -104,6 +107,12 @@ def test_run_phase8_photoshop_export_preserves_replacement_cleanup(tmp_path: Pat
             "replacement_method": "gpt_image2_masked_edit",
             "effective_method": "gpt_image2_masked_edit",
             "effective_crop_path": str(replacement_path),
+            "route": None,
+            "text_region_source": None,
+            "source_mask_path": None,
+            "fallback_locator": None,
+            "fallback_locator_validation": None,
+            "gpt_image2_edit_status": None,
             "text_overlay_required": False,
         }
     ]
@@ -231,6 +240,12 @@ def test_run_phase8_photoshop_export_synthesizes_repaired_page_from_cleanup_rows
             "replacement_method": None,
             "effective_method": "bubble_fill",
             "effective_crop_path": str(cleaned_crop),
+            "route": None,
+            "text_region_source": None,
+            "source_mask_path": None,
+            "fallback_locator": None,
+            "fallback_locator_validation": None,
+            "gpt_image2_edit_status": None,
             "text_overlay_required": False,
         }
     ]
@@ -242,6 +257,94 @@ def test_run_phase8_photoshop_export_synthesizes_repaired_page_from_cleanup_rows
     checklist = (run_dir / "reports" / "photoshop-validation-checklist.md").read_text(encoding="utf-8")
     assert "- Expected page-level repaired image layers: 1" in checklist
     assert "- Expected cleanup patch layers: 0" in checklist
+
+
+def test_run_phase8_photoshop_export_synthesizes_mixed_lama_and_gpt_repaired_page(tmp_path: Path):
+    image_path = tmp_path / "page.png"
+    Image.new("RGB", (140, 160), "white").save(image_path)
+    lama_crop = tmp_path / "lama-cleaned.png"
+    gpt_crop = tmp_path / "gpt-replacement.png"
+    mask_path = tmp_path / "ctd-mask.png"
+    Image.new("RGB", (30, 30), (160, 160, 160)).save(lama_crop)
+    Image.new("RGB", (30, 30), (80, 120, 220)).save(gpt_crop)
+    Image.new("L", (140, 160), 255).save(mask_path)
+    detection_run = _mkdir(tmp_path / "phase2")
+    font_run = _mkdir(tmp_path / "phase3")
+    layout_run = _mkdir(tmp_path / "phase4")
+    cleanup_run = _mkdir(tmp_path / "phase6")
+    _write_jsonl(
+        detection_run / "detections.jsonl",
+        [
+            _detection_payload(image_path, record_id="page.png#1", selected_bbox=[10, 20, 40, 50]),
+            _detection_payload(image_path, record_id="page.png#2", status="fallback_required", selected_bbox=None),
+        ],
+    )
+    _write_jsonl(font_run / "font-selections.jsonl", [_font_payload(tmp_path / "font.ttf", "page.png#1")])
+    _write_jsonl(layout_run / "layout-results.jsonl", [_layout_payload("page.png#1")])
+    _write_jsonl(
+        cleanup_run / "cleanup-results.jsonl",
+        [
+            _cleanup_payload(
+                lama_crop,
+                cleanup_bbox=[10, 20, 40, 50],
+                record_id="page.png#1",
+                method="bt_lama_large_inpaint",
+                route="cta_mask_lama_large_512px",
+                text_region_source="ctd_refined_mask_component",
+                source_mask_path=str(mask_path),
+            ),
+            _cleanup_payload(
+                tmp_path / "fallback-input.png",
+                gpt_crop,
+                cleanup_bbox=[70, 80, 100, 110],
+                record_id="page.png#2",
+                method="gpt_image2_masked_edit",
+                route="mimo_locator_gpt_image2_masked_edit",
+                text_region_source="mimo_vision_model",
+                fallback_locator={
+                    "status": "ok",
+                    "local_bbox_xyxy": [5, 6, 35, 36],
+                    "global_bbox_xyxy": [70, 80, 100, 110],
+                    "confidence": 0.91,
+                    "locator_image_path": str(tmp_path / "locator.png"),
+                },
+                fallback_locator_validation={
+                    "status": "accepted",
+                    "semantic_correct": True,
+                    "tight_enough": True,
+                    "validation_image_path": str(tmp_path / "validation.png"),
+                },
+                gpt_image2_edit_status="ok",
+            ),
+        ],
+    )
+
+    run_dir = run_phase8_photoshop_export(
+        detection_run,
+        font_run,
+        layout_run,
+        cleanup_run,
+        tmp_path / "outputs",
+        sample_limit=2,
+    )
+
+    manifest = json.loads((run_dir / "photoshop-manifest.json").read_text(encoding="utf-8"))
+    page = manifest["pages"][0]
+    assert [layer["record_id"] for layer in page["layers"]] == ["page.png#1"]
+    assert page["layers"][0]["text_layer_name"] == "嵌字图层1"
+    assert [source["effective_method"] for source in page["repair_sources"]] == [
+        "bt_lama_large_inpaint",
+        "gpt_image2_masked_edit",
+    ]
+    assert page["repair_sources"][0]["route"] == "cta_mask_lama_large_512px"
+    assert page["repair_sources"][0]["source_mask_path"] == str(mask_path)
+    assert page["repair_sources"][1]["route"] == "mimo_locator_gpt_image2_masked_edit"
+    assert page["repair_sources"][1]["fallback_locator"]["global_bbox_xyxy"] == [70, 80, 100, 110]
+    assert page["repair_sources"][1]["fallback_locator_validation"]["status"] == "accepted"
+    assert page["repair_sources"][1]["gpt_image2_edit_status"] == "ok"
+    with Image.open(page["repaired_image_path"]).convert("RGB") as repaired:
+        assert repaired.getpixel((12, 22)) == (160, 160, 160)
+        assert repaired.getpixel((72, 82)) == (80, 120, 220)
 
 
 def test_run_phase8_photoshop_export_skips_text_layer_for_gpt_replacement_cleanup(tmp_path: Path):
@@ -280,6 +383,12 @@ def test_run_phase8_photoshop_export_skips_text_layer_for_gpt_replacement_cleanu
             "replacement_method": "gpt_image2_masked_edit",
             "effective_method": "gpt_image2_masked_edit",
             "effective_crop_path": str(replacement_path),
+            "route": None,
+            "text_region_source": None,
+            "source_mask_path": None,
+            "fallback_locator": None,
+            "fallback_locator_validation": None,
+            "gpt_image2_edit_status": None,
             "text_overlay_required": False,
         }
     ]
@@ -355,6 +464,12 @@ def test_run_phase8_photoshop_export_uses_phase7_manifest_for_repaired_page_with
             "replacement_method": None,
             "effective_method": "gpt_image2_masked_edit",
             "effective_crop_path": None,
+            "route": None,
+            "text_region_source": None,
+            "source_mask_path": None,
+            "fallback_locator": None,
+            "fallback_locator_validation": None,
+            "gpt_image2_edit_status": None,
             "text_overlay_required": False,
         }
     ]
@@ -686,7 +801,14 @@ def _cleanup_payload(
     layout_text_bbox: list[int] | None = None,
     record_id: str = "page.png#1",
     method: str = "bubble_fill",
+    route: str | None = None,
+    text_region_source: str | None = None,
+    source_mask_path: str | None = None,
+    fallback_locator: dict | None = None,
+    fallback_locator_validation: dict | None = None,
+    gpt_image2_edit_status: str | None = None,
 ) -> dict:
+    _ensure_image(cleaned_path, cleanup_bbox)
     cleanup = {
         "method": method,
         "cleaned_crop_path": str(cleaned_path),
@@ -700,15 +822,41 @@ def _cleanup_payload(
         cleanup["mask_bbox"] = mask_bbox
     if layout_text_bbox is not None:
         cleanup["layout_text_bbox"] = layout_text_bbox
+    if route is not None:
+        cleanup["route"] = route
+    if text_region_source is not None:
+        cleanup["text_region_source"] = text_region_source
+    if source_mask_path is not None:
+        cleanup["source_mask_path"] = source_mask_path
     if replacement_path is not None:
-        cleanup["method"] = "local_diffusion_inpaint"
+        if not replacement_path.exists():
+            _ensure_image(replacement_path, cleanup_bbox)
+        cleanup["method"] = method if method == "gpt_image2_masked_edit" else "local_diffusion_inpaint"
         cleanup["replacement_method"] = "gpt_image2_masked_edit"
         cleanup["replacement_crop_path"] = str(replacement_path)
-    return {
+    row = {
         "record_id": record_id,
         "status": "cleaned",
         "cleanup": cleanup,
     }
+    if fallback_locator is not None:
+        row["fallback_locator"] = fallback_locator
+    if fallback_locator_validation is not None:
+        row["fallback_locator_validation"] = fallback_locator_validation
+    if gpt_image2_edit_status is not None:
+        row["gpt_image2_edit"] = {"status": gpt_image2_edit_status}
+    return row
+
+
+def _ensure_image(path: Path, bbox: list[int] | None) -> None:
+    if path.exists():
+        return
+    width = 70
+    height = 70
+    if bbox is not None:
+        width = max(1, bbox[2] - bbox[0])
+        height = max(1, bbox[3] - bbox[1])
+    Image.new("RGB", (width, height), "gray").save(path)
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:

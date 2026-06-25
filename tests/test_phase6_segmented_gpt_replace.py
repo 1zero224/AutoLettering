@@ -42,11 +42,21 @@ def test_run_phase6_segmented_gpt_replace_splits_tall_vertical_target(tmp_path: 
     assert all(call["image_size"][1] < 760 for call in fake_client.calls)
     assert Path(row["segmented_gpt_replace"]["composed_context_path"]).exists()
     assert Path(row["segmented_gpt_replace"]["target_crop_path"]).exists()
+    assert all("paste_bbox" in segment for segment in row["segments"])
+    with Image.open(row["segmented_gpt_replace"]["composed_context_path"]).convert("RGB") as composed:
+        assert composed.getpixel((2, 20)) == (205, 58, 72)
+        assert composed.getpixel((12, 20)) == (255, 255, 255)
     assert (run_dir / "visuals" / "segmented-gpt-replace-grid.png").exists()
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["gpt_ok_count"] == 1
     assert manifest["gpt_quality_failed_count"] == 0
     assert manifest["mimo"]["quality"]["segmented_gpt_status"] == "acceptable"
+    cleanup_rows = _read_jsonl(run_dir / "cleanup-results.jsonl")
+    assert cleanup_rows[0]["status"] == "cleaned"
+    assert cleanup_rows[0]["cleanup"]["method"] == "segmented_gpt_image2_masked_edit"
+    assert cleanup_rows[0]["cleanup"]["replacement_method"] == "gpt_image2_masked_edit"
+    assert cleanup_rows[0]["cleanup"]["replacement_crop_path"] == row["segmented_gpt_replace"]["target_crop_path"]
+    assert cleanup_rows[0]["cleanup"]["text_overlay_required"] is False
 
 
 def test_segmented_gpt_prompt_rejects_unjustified_black_outline():
@@ -104,7 +114,7 @@ class FakeMimoClient:
 def _write_tall_banner(path: Path) -> Path:
     image = Image.new("RGB", (220, 900), "white")
     draw = ImageDraw.Draw(image)
-    draw.rectangle((88, 30, 132, 870), fill=(205, 58, 72))
+    draw.rectangle((80, 22, 140, 878), fill=(205, 58, 72))
     for y in range(60, 830, 90):
         draw.rectangle((98, y, 122, y + 42), fill="white")
     path.parent.mkdir(parents=True, exist_ok=True)

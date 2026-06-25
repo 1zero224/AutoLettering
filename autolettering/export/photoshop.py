@@ -39,7 +39,8 @@ def _source_contract() -> dict:
         "project_manifest": "photoshop-manifest.json",
         "import_script": "photoshop-import.jsx",
         "does_not_read_labelplus_txt_directly": True,
-        "layer_order_top_to_bottom": ["嵌字图层*", "修复图像", "原图"],
+        "layer_order_top_to_bottom": ["嵌字图层1", "嵌字图层2", "...", "修复图像", "原图"],
+        "repaired_image_source": "page-level image synthesized from lama_large_512px cleanup crops and successful gpt-image-2 replacement crops",
     }
 
 
@@ -201,8 +202,26 @@ def _repair_sources(repaired_info: object) -> list[dict]:
     normalized: list[dict] = []
     for source in sources:
         if isinstance(source, dict):
-            normalized.append(dict(source))
+            normalized.append(_repair_source_payload(source))
     return normalized
+
+
+def _repair_source_payload(source: dict) -> dict:
+    return {
+        "record_id": source.get("record_id"),
+        "bbox_xyxy": source.get("bbox_xyxy"),
+        "cleanup_method": source.get("cleanup_method"),
+        "replacement_method": source.get("replacement_method"),
+        "effective_method": source.get("effective_method"),
+        "effective_crop_path": source.get("effective_crop_path"),
+        "route": source.get("route"),
+        "text_region_source": source.get("text_region_source"),
+        "source_mask_path": source.get("source_mask_path"),
+        "fallback_locator": source.get("fallback_locator"),
+        "fallback_locator_validation": source.get("fallback_locator_validation"),
+        "gpt_image2_edit_status": source.get("gpt_image2_edit_status"),
+        "text_overlay_required": bool(source.get("text_overlay_required", False)),
+    }
 
 
 def _bbox_payload(bbox: list[int]) -> dict:

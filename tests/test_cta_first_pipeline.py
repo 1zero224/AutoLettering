@@ -100,6 +100,8 @@ def test_run_cta_first_cleanup_pipeline_routes_matched_and_fallback_records(tmp_
         "ballonstranslator_config_path": "BallonsTranslator/config/config.json",
         "ballonstranslator_config_key": "module.textdetector_params.ctd",
         "mask_artifact": "debug/ctd_masks/<page>/ctd-refined-mask.png",
+        "component_manifest": "debug/ctd_masks/<page>/cta-closed-mask-components.json",
+        "distance_artifact": "debug/ctd_masks/<page>/ctd-mask-edge-distances.jsonl",
         "componentization": "connected_components_over_refined_mask",
         "matching_metric": "labelplus_point_to_mask_edge",
         "matching_cardinality": "unique_mask_component_claim",
@@ -119,10 +121,14 @@ def test_run_cta_first_cleanup_pipeline_routes_matched_and_fallback_records(tmp_
     assert manifest["photoshop_export_contract"]["project_manifest"] == "photoshop-manifest.json"
     assert manifest["photoshop_export_contract"]["import_script"] == "photoshop-import.jsx"
     assert manifest["photoshop_export_contract"]["layer_order_top_to_bottom"] == [
-        "嵌字图层*",
+        "嵌字图层1",
+        "嵌字图层2",
+        "...",
         "修复图像",
         "原图",
     ]
+    assert "lama_large_512px" in manifest["photoshop_export_contract"]["repaired_image_source"]
+    assert "gpt-image-2" in manifest["photoshop_export_contract"]["repaired_image_source"]
     assert manifest["review_image_contract"] == {
         "font_and_effect_grids": "use near_square_columns instead of long strips",
         "fallback_locator_grid": "visuals/fallback-locator-grid.png",
