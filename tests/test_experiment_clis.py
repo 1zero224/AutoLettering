@@ -2,6 +2,7 @@ from experiments import (
     phase2_detect_text_regions,
     phase2_6_cta_first_cleanup,
     phase6_cleanup_quality,
+    phase6_cleanup_gate,
     phase6_replacement_quality,
     phase6_cleanup_retry,
     phase6_nonbubble_cleanup,
@@ -114,6 +115,24 @@ def test_phase6_cleanup_retry_cli_builds_mimo_config_from_env(monkeypatch):
     assert config.model == "mimo-v2.5"
     assert config.max_completion_tokens == 900
     assert config.thinking_type == "disabled"
+
+
+def test_phase6_cleanup_gate_cli_defaults_to_quality_gate_contract():
+    parser = phase6_cleanup_gate.build_parser()
+
+    args = parser.parse_args(
+        [
+            "--cleanup-run-dir",
+            "outputs/runs/phase6",
+            "--cleanup-quality-run-dir",
+            "outputs/runs/quality",
+        ]
+    )
+
+    assert args.cleanup_run_dir == "outputs/runs/phase6"
+    assert args.cleanup_quality_run_dir == "outputs/runs/quality"
+    assert args.sample_limit == 20
+    assert args.min_usable_score == 7
 
 
 def test_phase6_segmented_gpt_cli_defaults_to_readable_tight_context():
