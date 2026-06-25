@@ -100,15 +100,61 @@ def _cleanup_record_for_page(detection: dict, cleanup_row: dict) -> dict | None:
         "effective_method": cleanup.get("replacement_method") or cleanup.get("method"),
         "effective_crop_path": cleaned_path,
         "cleanup_mask_path": None if cleanup.get("replacement_crop_path") else cleanup.get("cleanup_mask_path"),
-        "source_mask_path": cleanup.get("source_mask_path") or cleanup.get("text_mask_path"),
-        "route": cleanup.get("route") or (detection.get("lettering_route") or {}).get("route"),
-        "text_region_source": cleanup.get("text_region_source") or detection.get("text_region_source"),
+        "source_mask_path": _source_mask_path(cleanup, detection),
+        "route": _cleanup_route(cleanup, detection, cleanup_row),
+        "text_region_source": _text_region_source(cleanup, detection),
         "fallback_locator": cleanup_row.get("fallback_locator"),
         "fallback_locator_validation": cleanup_row.get("fallback_locator_validation"),
         "gpt_image2_edit_status": (cleanup_row.get("gpt_image2_edit") or {}).get("status"),
         "layout_preview_path": "",
         "text_overlay_required": False,
     }
+
+
+def _source_mask_path(cleanup: dict, detection: dict) -> str | None:
+    if cleanup.get("source_mask_path"):
+        return cleanup.get("source_mask_path")
+    if detection.get("text_region_mask_path"):
+        return detection.get("text_region_mask_path")
+    ctd_match = _ctd_match_payload(detection)
+    if ctd_match.get("mask_path"):
+        return ctd_match.get("mask_path")
+    return cleanup.get("text_mask_path")
+
+
+def _text_region_source(cleanup: dict, detection: dict) -> str | None:
+    if cleanup.get("text_region_source"):
+        return cleanup.get("text_region_source")
+    if detection.get("text_region_source"):
+        return detection.get("text_region_source")
+    if _ctd_match_payload(detection).get("status") == "matched":
+        return "ctd_refined_mask_component"
+    if cleanup.get("replacement_method") == "gpt_image2_masked_edit" and _is_fallback_detection(detection):
+        return "mimo_vision_model"
+    return None
+
+
+def _cleanup_route(cleanup: dict, detection: dict, cleanup_row: dict) -> str | None:
+    if cleanup.get("route"):
+        return cleanup.get("route")
+    route = detection.get("lettering_route") or {}
+    if isinstance(route, dict) and route.get("route"):
+        return route.get("route")
+    if _ctd_match_payload(detection).get("status") == "matched" and "lama_large" in str(cleanup.get("method", "")):
+        return "cta_mask_lama_large_512px"
+    gpt_edit = cleanup_row.get("gpt_image2_edit") or {}
+    if (cleanup.get("replacement_method") == "gpt_image2_masked_edit" or gpt_edit.get("status") == "ok") and _is_fallback_detection(detection):
+        return "mimo_locator_gpt_image2_masked_edit"
+    return None
+
+
+def _is_fallback_detection(detection: dict) -> bool:
+    return detection.get("status") == "fallback_required" or isinstance(detection.get("fallback"), dict)
+
+
+def _ctd_match_payload(detection: dict) -> dict:
+    match = detection.get("cta_match") or detection.get("ctd_match") or {}
+    return match if isinstance(match, dict) else {}
 
 
 def _repair_source_payload(record: dict) -> dict:

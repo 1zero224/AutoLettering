@@ -124,6 +124,32 @@ The export contract is now explicit:
   - successful `gpt-image-2` replacement crops for fallback records.
 - Records already containing final GPT replacement text are omitted from editable text layers to avoid duplicate Chinese text.
 
+## Real Experiment: Phase 8 Synthesized Repaired Page
+
+Command:
+
+```powershell
+python experiments/phase8_photoshop_export.py --detection-run-dir outputs/runs/phase2-gbc06-cta-mask-01-16-default-v2 --font-selection-run-dir outputs/runs/phase3-gbc06-01-16-manual-song-selection-v1 --layout-run-dir outputs/runs/phase4-gbc06-01-16-layout-song-fs40-top-noangle-v10 --cleanup-run-dir outputs/runs/phase6-gbc06-cta-lama-01-16-default-v2 --output-root outputs/runs --run-id phase8-gbc06-cta-lama-01-16-synth-repair-v1 --sample-limit 1
+```
+
+This run deliberately omits `--preview-run-dir`, so Phase 8 has to synthesize the full-page `修复图像` from cleanup crops.
+
+Result:
+
+- Run directory: `outputs/runs/phase8-gbc06-cta-lama-01-16-synth-repair-v1`
+- Manifest: `photoshop-manifest.json`
+- Import script: `photoshop-import.jsx`
+- Synthesized repaired page: `repaired_pages/GBC06-01-png.png`
+- Repaired page size: `1440x2048`
+- Text layer name: `嵌字图层1`
+- Source contract layer order: `嵌字图层1 > 嵌字图层2 > ... > 修复图像 > 原图`
+- Repair source method: `bt_lama_large_inpaint`
+- Repair source route: `cta_mask_lama_large_512px`
+- Repair source text region: `ctd_refined_mask_component`
+- Repair source mask: `outputs/runs/phase2-gbc06-cta-mask-01-16-default-v2/debug/ctd_masks/GBC06_01/components/component-0001+component-0012+component-0016+component-0018+component-0026.png`
+
+Compatibility note: this experiment uses older Phase 2/6 outputs that predate the newer explicit `route` and `text_region_source` fields. Phase 8 now recovers that provenance from legacy `cta_match` / `ctd_match` rows when the cleanup method is LaMA.
+
 ## Current Conclusion
 
 The CTA-first recognition contract is now backed by machine-readable artifacts and a real GBC06 detection run. The matched route correctly uses the CTD mask as the text region and produces the required LaMA cleanup row for downstream editable lettering.

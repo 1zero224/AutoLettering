@@ -259,6 +259,48 @@ def test_run_phase8_photoshop_export_synthesizes_repaired_page_from_cleanup_rows
     assert "- Expected cleanup patch layers: 0" in checklist
 
 
+def test_run_phase8_photoshop_export_recovers_cta_provenance_from_legacy_rows(tmp_path: Path):
+    image_path = tmp_path / "page.png"
+    Image.new("RGB", (120, 160), "white").save(image_path)
+    cleaned_crop = tmp_path / "cleaned.png"
+    component_mask = tmp_path / "ctd-component.png"
+    local_mask = tmp_path / "local-crop-mask.png"
+    Image.new("RGB", (30, 30), "gray").save(cleaned_crop)
+    Image.new("L", (120, 160), 255).save(component_mask)
+    Image.new("L", (30, 30), 255).save(local_mask)
+    detection_run = _mkdir(tmp_path / "phase2")
+    font_run = _mkdir(tmp_path / "phase3")
+    layout_run = _mkdir(tmp_path / "phase4")
+    cleanup_run = _mkdir(tmp_path / "phase6")
+    detection = _detection_payload(image_path, selected_bbox=[10, 20, 40, 50])
+    detection["cta_match"] = {
+        "status": "matched",
+        "mask_path": str(component_mask),
+        "bbox_xyxy": [10, 20, 40, 50],
+    }
+    _write_jsonl(detection_run / "detections.jsonl", [detection])
+    _write_jsonl(font_run / "font-selections.jsonl", [_font_payload(tmp_path / "font.ttf")])
+    _write_jsonl(layout_run / "layout-results.jsonl", [_layout_payload()])
+    cleanup_row = _cleanup_payload(cleaned_crop, cleanup_bbox=[10, 20, 40, 50], method="bt_lama_large_inpaint")
+    cleanup_row["cleanup"]["text_mask_path"] = str(local_mask)
+    _write_jsonl(cleanup_run / "cleanup-results.jsonl", [cleanup_row])
+
+    run_dir = run_phase8_photoshop_export(
+        detection_run,
+        font_run,
+        layout_run,
+        cleanup_run,
+        tmp_path / "outputs",
+        sample_limit=1,
+    )
+
+    manifest = json.loads((run_dir / "photoshop-manifest.json").read_text(encoding="utf-8"))
+    source = manifest["pages"][0]["repair_sources"][0]
+    assert source["route"] == "cta_mask_lama_large_512px"
+    assert source["text_region_source"] == "ctd_refined_mask_component"
+    assert source["source_mask_path"] == str(component_mask)
+
+
 def test_run_phase8_photoshop_export_synthesizes_mixed_lama_and_gpt_repaired_page(tmp_path: Path):
     image_path = tmp_path / "page.png"
     Image.new("RGB", (140, 160), "white").save(image_path)
