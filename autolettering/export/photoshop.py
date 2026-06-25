@@ -147,6 +147,7 @@ def _page_payload_from_layer(layer: dict, repaired_info: object) -> dict:
         "width": layer["position"]["page_width"],
         "height": layer["position"]["page_height"],
         "repaired_image_path": _repaired_image_path(repaired_info),
+        "repair_sources": _repair_sources(repaired_info),
         "layer_order": ["text_layers", "repaired_image", "original_image"],
         "layers": [],
     }
@@ -169,6 +170,7 @@ def _page_payload_from_repaired_page(image_name: str, repaired_info: object, det
         "width": width,
         "height": height,
         "repaired_image_path": repaired_image_path,
+        "repair_sources": _repair_sources(repaired_info),
         "layer_order": ["text_layers", "repaired_image", "original_image"],
         "layers": [],
     }
@@ -188,6 +190,19 @@ def _repaired_image_path(repaired_info: object) -> str | None:
         value = repaired_info.get("repaired_image_path") or repaired_info.get("cleaned_page_path")
         return str(value) if value else None
     return None
+
+
+def _repair_sources(repaired_info: object) -> list[dict]:
+    if not isinstance(repaired_info, dict):
+        return []
+    sources = repaired_info.get("repair_sources")
+    if not isinstance(sources, list):
+        return []
+    normalized: list[dict] = []
+    for source in sources:
+        if isinstance(source, dict):
+            normalized.append(dict(source))
+    return normalized
 
 
 def _bbox_payload(bbox: list[int]) -> dict:

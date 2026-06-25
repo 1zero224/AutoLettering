@@ -96,9 +96,22 @@ def test_run_phase8_photoshop_export_preserves_replacement_cleanup(tmp_path: Pat
     manifest = json.loads((run_dir / "photoshop-manifest.json").read_text(encoding="utf-8"))
     assert manifest["summary"] == {"record_count": 0, "page_count": 1}
     assert manifest["pages"][0]["layers"] == []
+    assert manifest["pages"][0]["repair_sources"] == [
+        {
+            "record_id": "page.png#1",
+            "bbox_xyxy": [10, 20, 80, 90],
+            "cleanup_method": "local_diffusion_inpaint",
+            "replacement_method": "gpt_image2_masked_edit",
+            "effective_method": "gpt_image2_masked_edit",
+            "effective_crop_path": str(replacement_path),
+            "text_overlay_required": False,
+        }
+    ]
     report = (run_dir / "reports" / "phase8-report.md").read_text(encoding="utf-8")
     assert str(cleanup_run_a) in report
     assert str(cleanup_run_b) in report
+    assert "`gpt_image2_masked_edit=1`" in report
+    assert "Page-level repaired image sources: 1" in report
     checklist = (run_dir / "reports" / "photoshop-validation-checklist.md").read_text(encoding="utf-8")
     assert "- Expected editable text layers: 0" in checklist
 
@@ -210,8 +223,22 @@ def test_run_phase8_photoshop_export_synthesizes_repaired_page_from_cleanup_rows
     repaired_path = Path(page["repaired_image_path"])
     assert repaired_path.parent.name == "repaired_pages"
     assert page["layers"][0]["text_layer_name"] == "嵌字图层1"
+    assert page["repair_sources"] == [
+        {
+            "record_id": "page.png#1",
+            "bbox_xyxy": [10, 20, 40, 60],
+            "cleanup_method": "bubble_fill",
+            "replacement_method": None,
+            "effective_method": "bubble_fill",
+            "effective_crop_path": str(cleaned_crop),
+            "text_overlay_required": False,
+        }
+    ]
     with Image.open(repaired_path).convert("RGB") as repaired:
         assert repaired.getpixel((12, 22)) == (128, 128, 128)
+    report = (run_dir / "reports" / "phase8-report.md").read_text(encoding="utf-8")
+    assert "`bubble_fill=1`" in report
+    assert "Page-level repaired image sources: 1" in report
     checklist = (run_dir / "reports" / "photoshop-validation-checklist.md").read_text(encoding="utf-8")
     assert "- Expected page-level repaired image layers: 1" in checklist
     assert "- Expected cleanup patch layers: 0" in checklist
@@ -245,6 +272,20 @@ def test_run_phase8_photoshop_export_skips_text_layer_for_gpt_replacement_cleanu
     assert manifest["summary"] == {"record_count": 0, "page_count": 1}
     assert page["layers"] == []
     assert page["repaired_image_path"]
+    assert page["repair_sources"] == [
+        {
+            "record_id": "page.png#1",
+            "bbox_xyxy": [10, 20, 80, 90],
+            "cleanup_method": "local_diffusion_inpaint",
+            "replacement_method": "gpt_image2_masked_edit",
+            "effective_method": "gpt_image2_masked_edit",
+            "effective_crop_path": str(replacement_path),
+            "text_overlay_required": False,
+        }
+    ]
+    report = (run_dir / "reports" / "phase8-report.md").read_text(encoding="utf-8")
+    assert "`gpt_image2_masked_edit=1`" in report
+    assert "Page-level repaired image sources: 1" in report
     checklist = (run_dir / "reports" / "photoshop-validation-checklist.md").read_text(encoding="utf-8")
     assert "- Expected editable text layers: 0" in checklist
     assert "- Expected page-level repaired image layers: 1" in checklist
@@ -306,6 +347,20 @@ def test_run_phase8_photoshop_export_uses_phase7_manifest_for_repaired_page_with
     assert page["image_path"] == str(image_path)
     assert page["repaired_image_path"] == str(repaired_page)
     assert page["layers"] == []
+    assert page["repair_sources"] == [
+        {
+            "record_id": "page.png#1",
+            "bbox_xyxy": None,
+            "cleanup_method": "gpt_image2_masked_edit",
+            "replacement_method": None,
+            "effective_method": "gpt_image2_masked_edit",
+            "effective_crop_path": None,
+            "text_overlay_required": False,
+        }
+    ]
+    report = (run_dir / "reports" / "phase8-report.md").read_text(encoding="utf-8")
+    assert "`gpt_image2_masked_edit=1`" in report
+    assert "Page-level repaired image sources: 1" in report
     checklist = (run_dir / "reports" / "photoshop-validation-checklist.md").read_text(encoding="utf-8")
     assert "- Expected editable text layers: 0" in checklist
     assert "- Expected page-level repaired image layers: 1" in checklist

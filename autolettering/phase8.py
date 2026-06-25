@@ -80,6 +80,7 @@ def _synthesize_repaired_pages(
         repaired[image_name] = {
             "image_path": image_paths[image_name],
             "repaired_image_path": str(output_path),
+            "repair_sources": [_repair_source_payload(record) for record in records],
         }
     return repaired
 
@@ -94,9 +95,25 @@ def _cleanup_record_for_page(detection: dict, cleanup_row: dict) -> dict | None:
         "record_id": detection.get("record_id"),
         "bbox": [int(value) for value in bbox],
         "cleaned_crop_path": cleaned_path,
+        "cleanup_method": cleanup.get("method"),
+        "replacement_method": cleanup.get("replacement_method"),
+        "effective_method": cleanup.get("replacement_method") or cleanup.get("method"),
+        "effective_crop_path": cleaned_path,
         "cleanup_mask_path": None if cleanup.get("replacement_crop_path") else cleanup.get("cleanup_mask_path"),
         "layout_preview_path": "",
         "text_overlay_required": False,
+    }
+
+
+def _repair_source_payload(record: dict) -> dict:
+    return {
+        "record_id": record.get("record_id"),
+        "bbox_xyxy": record.get("bbox"),
+        "cleanup_method": record.get("cleanup_method"),
+        "replacement_method": record.get("replacement_method"),
+        "effective_method": record.get("effective_method"),
+        "effective_crop_path": record.get("effective_crop_path") or record.get("cleaned_crop_path"),
+        "text_overlay_required": bool(record.get("text_overlay_required", False)),
     }
 
 
@@ -142,8 +159,26 @@ def _load_repaired_pages_from_manifest(path: Path) -> dict[str, dict]:
             repaired[image_name] = {
                 "image_path": page.get("original_page_path"),
                 "repaired_image_path": cleaned,
+                "repair_sources": _preview_repair_sources(page),
             }
     return repaired
+
+
+def _preview_repair_sources(page: dict) -> list[dict]:
+    sources: list[dict] = []
+    for record in page.get("records", []):
+        sources.append(
+            {
+                "record_id": record.get("record_id"),
+                "bbox_xyxy": record.get("bbox") or record.get("cleanup_bbox"),
+                "cleanup_method": record.get("cleanup_method"),
+                "replacement_method": record.get("replacement_method"),
+                "effective_method": record.get("replacement_method") or record.get("cleanup_method"),
+                "effective_crop_path": record.get("effective_crop_path") or record.get("cleaned_crop_path"),
+                "text_overlay_required": bool(record.get("text_overlay_required", True)),
+            }
+        )
+    return sources
 
 
 def _load_jsonl(path: Path, status: str | set[str]) -> list[dict]:
@@ -196,6 +231,7 @@ def _write_report(
         "",
         f"- Missing cleanup layers: {cleanup_summary['missing_count']}",
         f"- Effective cleanup methods: {_format_counts(cleanup_summary['effective_methods'])}",
+        f"- Page-level repaired image sources: {cleanup_summary['repair_source_count']}",
         "",
         "## JSX Behavior",
         "",
@@ -284,15 +320,28 @@ def _repaired_page_count(manifest: dict) -> int:
 def _cleanup_summary(manifest: dict) -> dict:
     missing_count = 0
     effective_methods: dict[str, int] = {}
+    repair_source_count = 0
     for page in manifest.get("pages", []):
+        has_repair_sources = bool(page.get("repair_sources"))
+        for source in page.get("repair_sources", []):
+            repair_source_count += 1
+            method = source.get("effective_method")
+            if method:
+                effective_methods[method] = effective_methods.get(method, 0) + 1
         for layer in page.get("layers", []):
             cleanup = layer.get("cleanup", {})
             if cleanup.get("status") == "missing":
                 missing_count += 1
+            if has_repair_sources:
+                continue
             method = cleanup.get("effective_method")
             if method:
                 effective_methods[method] = effective_methods.get(method, 0) + 1
-    return {"missing_count": missing_count, "effective_methods": effective_methods}
+    return {
+        "missing_count": missing_count,
+        "effective_methods": effective_methods,
+        "repair_source_count": repair_source_count,
+    }
 
 
 def _format_counts(counts: dict[str, int]) -> str:
