@@ -2,6 +2,7 @@ from experiments import (
     phase2_detect_text_regions,
     phase2_6_cta_first_cleanup,
     phase6_cleanup_quality,
+    phase6_replacement_quality,
     phase6_cleanup_retry,
     phase6_nonbubble_cleanup,
     phase6_nonbubble_gpt_replace,
@@ -84,6 +85,20 @@ def test_phase6_cleanup_quality_cli_builds_mimo_config_from_env(monkeypatch):
     assert config.api_key == "secret-value"
     assert config.model == "mimo-v2.5"
     assert config.max_completion_tokens == 900
+    assert config.thinking_type == "disabled"
+
+
+def test_phase6_replacement_quality_cli_builds_mimo_config_from_env(monkeypatch):
+    monkeypatch.setenv("MIMO_BASE_URL", "https://mimo.example/v1")
+    monkeypatch.setenv("MIMO_API_KEY", "secret-value")
+    monkeypatch.setenv("MIMO_VISION_MODEL", "mimo-v2.5")
+
+    config = phase6_replacement_quality._mimo_config_from_env()
+
+    assert config.base_url == "https://mimo.example/v1"
+    assert config.api_key == "secret-value"
+    assert config.model == "mimo-v2.5"
+    assert config.max_completion_tokens == 1200
     assert config.thinking_type == "disabled"
 
 
