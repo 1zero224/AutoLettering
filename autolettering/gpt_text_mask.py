@@ -26,9 +26,8 @@ def build_text_pixel_gpt_mask(
     text_mask = build_target_text_mask(target, polarity=polarity, expand_px=expand_px)
     editable_count = int(np.array(text_mask.convert("L"), dtype=np.uint8).sum() // 255)
     if editable_count == 0:
-        text_mask = _rect_mask((local_bbox[2] - local_bbox[0], local_bbox[3] - local_bbox[1]))
-        editable_count = int(np.array(text_mask, dtype=np.uint8).sum() // 255)
-        strategy = "rect_fallback_no_text_pixels"
+        text_mask = Image.new("L", (local_bbox[2] - local_bbox[0], local_bbox[3] - local_bbox[1]), 0)
+        strategy = "no_text_pixels_protected"
     else:
         strategy = "text_pixels_within_bbox"
 
@@ -77,9 +76,6 @@ def _remove_dominant_solid_non_text_components(mask: Image.Image) -> Image.Image
     for start_y, start_x in zip(*np.where(binary & ~visited)):
         components.append(_component(binary, visited, int(start_x), int(start_y)))
 
-    if len(components) < 3:
-        return mask.convert("L")
-
     text_like_areas = [component["area"] for component in components if component["area"] < height * width * 0.08]
     reference_area = float(np.median(text_like_areas or [component["area"] for component in components]))
     result = binary.copy()
@@ -89,7 +85,7 @@ def _remove_dominant_solid_non_text_components(mask: Image.Image) -> Image.Image
             result[y1:y2, x1:x2] = False
 
     if not bool(result.any()):
-        return mask.convert("L")
+        return Image.new("L", mask.size, 0)
     return Image.fromarray(result.astype(np.uint8) * 255, mode="L")
 
 

@@ -3,7 +3,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from autolettering.gpt_text_mask import build_target_text_mask
+from autolettering.gpt_text_mask import build_target_text_mask, build_text_pixel_gpt_mask
 from autolettering.models.gpt_image import GptImageConfig
 from autolettering.phase6_nonbubble_gpt_replace import run_phase6_nonbubble_gpt_replace
 
@@ -123,6 +123,16 @@ def test_light_on_dark_text_pixel_mask_excludes_bright_crop_edge():
     assert mask.getpixel((116, 30)) == 0
 
 
+def test_text_pixel_gpt_mask_does_not_fallback_to_full_rect_when_no_text_pixels():
+    crop = Image.new("RGB", (140, 100), (235, 232, 224))
+
+    result = build_text_pixel_gpt_mask(crop, (10, 10, 120, 90), polarity="dark_on_light", expand_px=1)
+
+    assert result.strategy == "no_text_pixels_protected"
+    assert result.editable_pixel_count == 0
+    assert not any(value == 0 for value in result.gpt_mask.getchannel("A").getdata())
+
+
 def test_run_phase6_nonbubble_gpt_replace_records_bt_method_failures(tmp_path: Path, monkeypatch):
     image_path = _write_nonbubble_image(tmp_path / "page.png")
     detection_run = tmp_path / "phase2"
@@ -217,9 +227,17 @@ def _write_nonbubble_image(path: Path) -> Path:
     draw = ImageDraw.Draw(image)
     for y in range(100):
         draw.line((0, y, 120, y), fill=(190 + y // 4, 185 + y // 5, 170 + y // 6))
-    draw.rectangle((35, 25, 62, 55), fill="black")
+    _draw_fake_text_strokes(draw, origin=(35, 25))
     image.save(path)
     return path
+
+
+def _draw_fake_text_strokes(draw: ImageDraw.ImageDraw, origin: tuple[int, int]) -> None:
+    ox, oy = origin
+    for offset in (0, 10, 20):
+        x = ox + offset
+        draw.line((x, oy, x, oy + 28), fill="black", width=3)
+        draw.line((x - 5, oy + 12, x + 6, oy + 12), fill="black", width=2)
 
 
 def _write_large_bbox_image(path: Path) -> Path:

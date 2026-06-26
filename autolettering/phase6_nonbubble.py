@@ -649,6 +649,8 @@ def _locate_fallback_bbox(detection: dict, context_path: Path, context_bbox: tup
             "Find the original Japanese text region corresponding to this Chinese translation inside the crop.",
             "The image includes a green coordinate grid and red pixel labels. The labels are guides only; do not include them in the target bbox.",
             "The blue LabelPlus cross marks the approximate label point; choose the corresponding original text nearest to that cross, not unrelated nearby bubble text.",
+            "The bbox may be a loose edit container, but it must include all visible target text.",
+            "It is acceptable if the bbox also includes passerby figures, hair, props, or background; GPT image editing will be constrained by a text-pixel mask.",
             f"The crop dimensions are width={context_bbox[2] - context_bbox[0]} and height={context_bbox[3] - context_bbox[1]} pixels.",
             f"Chinese translation: {detection.get('translated_text', '')}",
             "Return one JSON object, not an array.",
@@ -1349,8 +1351,9 @@ def _validate_fallback_locator_semantics(
             "The yellow bbox must cover the visible original Japanese text region that corresponds to the Chinese translation.",
             "Reject if the yellow bbox is on blank background, unrelated text, English lettering, UI marks, or only a partial phrase.",
             "Do not reject merely because the loose bbox also includes nearby people, hair, props, background, or other non-text manga artwork.",
+            "In other words, do not reject or relocate only because it also includes passerby figures or background around the target text.",
             "A loose bbox is acceptable when it still contains the full intended original Japanese text; mark tight_enough=false so a tighter edit mask can be used.",
-            "Set bbox_targets_unrelated_text=true only when the bbox targets a different text string; do not set it true for nearby people, hair, props, background, or other non-text artwork.",
+            "Set bbox_targets_unrelated_text=true only when it targets a different text string; do not set it true for nearby people, hair, props, background, or other non-text artwork.",
             f"Chinese translation: {detection.get('translated_text', '')}",
             "Return only JSON with keys: semantic_correct, tight_enough, bbox_on_blank_area, bbox_targets_unrelated_text, visible_original_text, recommendation, reasoning_summary.",
             "recommendation must be either accept or reject.",
@@ -1432,19 +1435,30 @@ def _fallback_validation_payload(payload: dict, response: dict, validation_image
     bbox_on_blank_area = _mimo_bool(payload.get("bbox_on_blank_area"))
     bbox_targets_unrelated_text = _mimo_bool(payload.get("bbox_targets_unrelated_text"))
     recommendation = str(payload.get("recommendation", "")).strip().lower()
+    visible_original_text = str(payload.get("visible_original_text", "")).strip() or None
+    reasoning_summary = payload.get("reasoning_summary")
+    semantic_overridden = _non_text_context_rejection_mentions_visible_target(
+        semantic_correct=semantic_correct,
+        bbox_on_blank_area=bbox_on_blank_area,
+        bbox_targets_unrelated_text=bbox_targets_unrelated_text,
+        visible_original_text=visible_original_text,
+        reasoning_summary=reasoning_summary,
+    )
+    if semantic_overridden:
+        semantic_correct = True
+        recommendation = "accept"
     hard_reject = semantic_correct is False or bbox_on_blank_area is True
     accepted = semantic_correct is True and not hard_reject
     needs_tighter_edit_mask = accepted and (tight_enough is not True or bbox_targets_unrelated_text is True)
-    status = "accepted" if accepted else "rejected"
-    return {
-        "status": status,
+    validation = {
+        "status": "accepted" if accepted else "rejected",
         "semantic_correct": semantic_correct,
         "tight_enough": tight_enough,
         "bbox_on_blank_area": bbox_on_blank_area,
         "bbox_targets_unrelated_text": bbox_targets_unrelated_text,
-        "visible_original_text": str(payload.get("visible_original_text", "")).strip() or None,
+        "visible_original_text": visible_original_text,
         "recommendation": recommendation or None,
-        "reasoning_summary": payload.get("reasoning_summary"),
+        "reasoning_summary": reasoning_summary,
         "needs_tighter_edit_mask": needs_tighter_edit_mask,
         "bbox_padding_px": 0,
         "failure_reason": None if accepted else "fallback_locator_semantic_rejected",
@@ -1453,6 +1467,60 @@ def _fallback_validation_payload(payload: dict, response: dict, validation_image
         "request": response.get("request"),
         "response": response.get("response"),
     }
+    if semantic_overridden:
+        validation["semantic_correct_overridden_from_non_text_context"] = True
+    return validation
+
+
+def _non_text_context_rejection_mentions_visible_target(
+    semantic_correct: bool | None,
+    bbox_on_blank_area: bool | None,
+    bbox_targets_unrelated_text: bool | None,
+    visible_original_text: str | None,
+    reasoning_summary: object,
+) -> bool:
+    if (
+        semantic_correct is not False
+        or bbox_on_blank_area is True
+        or bbox_targets_unrelated_text is not True
+        or not visible_original_text
+    ):
+        return False
+    summary = str(reasoning_summary or "").lower()
+    return _mentions_target_text_inside(summary) and _mentions_only_non_text_context(summary)
+
+
+def _mentions_target_text_inside(summary: str) -> bool:
+    target_markers = (
+        "contains the target text",
+        "contains target text",
+        "contains the intended target",
+        "includes the target text",
+        "includes target text",
+        "includes the intended target",
+        "covers the target text",
+        "covers target text",
+        "covers the intended target",
+        "target text is inside",
+        "visible target text is inside",
+    )
+    return any(marker in summary for marker in target_markers)
+
+
+def _mentions_only_non_text_context(summary: str) -> bool:
+    non_text_markers = (
+        "passerby",
+        "people",
+        "person",
+        "hair",
+        "background",
+        "background art",
+        "artwork",
+        "non-text",
+        "props",
+        "context",
+    )
+    return any(marker in summary for marker in non_text_markers)
 
 
 def _should_retry_fallback_validation(validation: dict) -> bool:

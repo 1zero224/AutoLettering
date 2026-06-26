@@ -83,6 +83,45 @@ def test_gpt_image_prompt_preserves_non_text_art_inside_wide_mask():
     assert "Do not replace `…` with three periods `...`" in prompt
 
 
+def test_fallback_locator_prompts_allow_loose_bbox_when_it_contains_target_text(tmp_path: Path):
+    image_path = _write_nonbubble_image(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(
+        detection_run / "detections.jsonl",
+        image_path,
+        rows=[
+            {
+                "record_id": "page.png#2",
+                "status": "fallback_required",
+                "group_name": "框外",
+                "selected_text_box_xyxy": None,
+                "fallback": {
+                    "method": "mimo_crop_then_gpt_image2_masked_edit",
+                    "context_bbox_xyxy": [10, 10, 100, 80],
+                    "translated_text": "背景文字",
+                },
+            }
+        ],
+    )
+    mimo = _FakeMimoLocatorPromptRecorder()
+
+    run_phase6_nonbubble_cleanup(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-fallback-loose-prompt-contract",
+        sample_limit=1,
+        mimo_client=mimo,
+    )
+
+    locator_prompt = mimo.prompts["phase6_fallback_text_locator"]
+    validation_prompt = mimo.prompts["phase6_fallback_text_locator_validation"]
+    assert "bbox may be a loose edit container" in locator_prompt
+    assert "must include all visible target text" in locator_prompt
+    assert "do not reject or relocate only because it also includes passerby" in validation_prompt
+    assert "bbox_targets_unrelated_text=true only when it targets a different text string" in validation_prompt
+
+
 def test_semantically_accepted_loose_fallback_bbox_does_not_expand_editable_mask(tmp_path: Path):
     validation = _fallback_validation_payload(
         {
@@ -1066,12 +1105,12 @@ def test_run_phase6_nonbubble_cleanup_fallback_uses_mimo_bbox_and_gpt_mask(tmp_p
         assert _has_reddish_pixel(locator_image)
     with Image.open(row["gpt_image2_edit"]["request"]["mask_path"]) as mask:
         assert mask.size == (59, 61)
-        assert mask.getpixel((16, 15))[3] == 0
+        assert _has_editable_pixel(mask)
         assert mask.getpixel((0, 0))[3] == 255
     with Image.open(row["cleanup"]["cleaned_crop_path"]).convert("RGB") as original:
         with Image.open(row["cleanup"]["replacement_crop_path"]).convert("RGB") as replacement:
             assert replacement.getpixel((0, 0)) == original.getpixel((0, 0))
-            assert replacement.getpixel((30, 20)) == (255, 255, 255)
+            assert ImageChops.difference(original, replacement).getbbox() is not None
 
 
 def test_run_phase6_nonbubble_cleanup_fallback_accepts_edit_padding_and_mask_expand(tmp_path: Path, monkeypatch):
@@ -1118,7 +1157,7 @@ def test_run_phase6_nonbubble_cleanup_fallback_accepts_edit_padding_and_mask_exp
     assert row["gpt_image2_edit"]["edit_context"]["local_context_bbox"] == [0, 0, 84, 70]
     with Image.open(row["gpt_image2_edit"]["request"]["mask_path"]) as mask:
         assert mask.size == (84, 70)
-        assert mask.getpixel((26, 25))[3] == 0
+        assert _has_editable_pixel(mask)
         assert mask.getpixel((4, 4))[3] == 255
 
 
@@ -1790,6 +1829,32 @@ def test_fallback_validation_accepts_target_text_with_extra_non_text_artwork(tmp
     assert validation["bbox_targets_unrelated_text"] is True
 
 
+def test_fallback_validation_normalizes_non_text_context_rejection_when_target_text_is_visible(tmp_path: Path):
+    response = {
+        "raw_text": "{}",
+        "request": {"kind": "phase6_fallback_text_locator_validation"},
+        "response": {"status": "ok"},
+    }
+    payload = {
+        "semantic_correct": False,
+        "tight_enough": False,
+        "bbox_on_blank_area": False,
+        "bbox_targets_unrelated_text": True,
+        "visible_original_text": "スッ スッ スッ",
+        "recommendation": "reject",
+        "reasoning_summary": "The yellow bbox contains the target text but also includes a passerby and background art.",
+    }
+
+    validation = _fallback_validation_payload(payload, response, tmp_path / "validation.png")
+
+    assert validation["status"] == "accepted"
+    assert validation["semantic_correct"] is True
+    assert validation["recommendation"] == "accept"
+    assert validation["needs_tighter_edit_mask"] is True
+    assert validation["semantic_correct_overridden_from_non_text_context"] is True
+    assert validation["failure_reason"] is None
+
+
 def test_run_phase6_nonbubble_cleanup_fallback_does_not_call_gpt_when_semantic_validation_rejects(
     tmp_path: Path,
     monkeypatch,
@@ -2355,6 +2420,15 @@ class _FakeMimoLocator:
             "request": {"kind": kind, "image_path": str(image_path)},
             "response": {"status": "ok"},
         }
+
+
+class _FakeMimoLocatorPromptRecorder(_FakeMimoLocator):
+    def __init__(self) -> None:
+        self.prompts: dict[str, str] = {}
+
+    def analyze_image(self, image_path: str, prompt: str, kind: str = "image_analysis", max_completion_tokens: int | None = None):
+        self.prompts[kind] = prompt
+        return super().analyze_image(image_path, prompt, kind, max_completion_tokens)
 
 
 class _FakeMimoLocatorArray:
@@ -2980,14 +3054,26 @@ def _has_reddish_pixel(image: Image.Image) -> bool:
     return False
 
 
+def _has_editable_pixel(mask: Image.Image) -> bool:
+    return any(value == 0 for value in mask.convert("RGBA").getchannel("A").getdata())
+
+
 def _write_nonbubble_image(path: Path) -> Path:
     image = Image.new("RGB", (120, 100), (210, 205, 190))
     draw = ImageDraw.Draw(image)
     for y in range(100):
         draw.line((0, y, 120, y), fill=(190 + y // 4, 185 + y // 5, 170 + y // 6))
-    draw.rectangle((35, 25, 62, 55), fill="black")
+    _draw_fake_text_strokes(draw, origin=(35, 25))
     image.save(path)
     return path
+
+
+def _draw_fake_text_strokes(draw: ImageDraw.ImageDraw, origin: tuple[int, int]) -> None:
+    ox, oy = origin
+    for offset in (0, 10, 20):
+        x = ox + offset
+        draw.line((x, oy, x, oy + 28), fill="black", width=3)
+        draw.line((x - 5, oy + 12, x + 6, oy + 12), fill="black", width=2)
 
 
 def _write_sparse_ink_nonbubble_image(path: Path) -> Path:

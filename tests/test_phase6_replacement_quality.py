@@ -150,6 +150,29 @@ def test_parse_replacement_quality_response_does_not_override_negated_region_iss
     assert "region_correct_overridden_from_issue_text" not in result.issues
 
 
+def test_parse_replacement_quality_response_keeps_region_when_only_loose_bbox_non_text_context():
+    result = parse_replacement_quality_response(
+        json.dumps(
+            {
+                "score": 8,
+                "usable": True,
+                "exact_text_correct": True,
+                "simplified_chinese_correct": True,
+                "no_japanese_remaining": True,
+                "region_correct": True,
+                "style_consistent": True,
+                "outside_mask_preserved": True,
+                "issues": ["Loose bbox includes a passerby and background, but target text was replaced inside the mask."],
+                "summary": "This is not a wrong text target; the edit keeps non-text art unchanged.",
+            },
+            ensure_ascii=False,
+        )
+    )
+
+    assert result.region_correct is True
+    assert "region_correct_overridden_from_issue_text" not in result.issues
+
+
 def test_build_replacement_quality_prompt_is_strict_about_gpt_text():
     prompt = build_replacement_quality_prompt(
         {
@@ -172,6 +195,8 @@ def test_build_replacement_quality_prompt_is_strict_about_gpt_text():
     assert "If the replacement appears in a different bubble" in prompt
     assert "may legitimately include nearby non-text context" in prompt
     assert "Do not set region_correct=false for extra non-text context alone" in prompt
+    assert "region_correct is about target lettering placement, not bbox cleanliness" in prompt
+    assert "A loose bbox that includes passerby/background remains region_correct=true" in prompt
     assert "observed_text" in prompt
 
 

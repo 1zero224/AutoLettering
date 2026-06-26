@@ -29,6 +29,8 @@ def build_replacement_quality_prompt(row: dict) -> str:
             "If the replacement appears in a different bubble, card, caption, or unmasked area, set region_correct=false even if the Chinese text is readable.",
             "The detected bbox/mask review area may legitimately include nearby non-text context such as people, hair, props, panel texture, or background.",
             "Do not set region_correct=false for extra non-text context alone when the intended original text is included and only the target lettering changed.",
+            "region_correct is about target lettering placement, not bbox cleanliness.",
+            "A loose bbox that includes passerby/background remains region_correct=true when the target lettering is included and the edit stays on that lettering.",
             "The final result must contain the exact Simplified Chinese text requested for this record.",
             "First transcribe the visible text in the final replacement crop into observed_text before scoring.",
             "If observed_text omits digits, omits Chinese characters, has extra visible text, or differs from translated_text in any way, set exact_text_correct=false.",
