@@ -626,9 +626,50 @@ Example gated Photoshop export:
 python experiments/phase8_photoshop_export.py --detection-run-dir outputs/runs/<phase2> --font-selection-run-dir outputs/runs/<phase3-font> --layout-run-dir outputs/runs/<phase4-layout> --cleanup-run-dir outputs/runs/<phase6-gpt> --phase6-gpt-quality-run-dir outputs/runs/<phase6-replacement-quality> --output-root outputs/runs --run-id <phase8-gated> --sample-limit 1
 ```
 
+Example local Phase 7/8 quality-gate smoke without new API calls:
+
+```powershell
+python experiments/phase7_8_gpt_quality_gate_smoke.py --detection-run-dir outputs/runs/<phase2> --cleanup-run-dir outputs/runs/<phase6-gpt> --phase6-gpt-quality-run-dir outputs/runs/<phase6-replacement-quality> --output-root outputs/runs --run-id <phase7-8-quality-gated-smoke> --sample-limit 1
+```
+
 Important scope note: if no `--phase6-gpt-quality-run-dir` is supplied, the
 CTA-first wrapper, Phase 7, and Phase 8 keep their previous compatibility
 behavior. Strict gating is enabled by passing the quality run directory.
+
+### Real Quality-Gated Smoke: `GBC06_02.png#14` GPT v3 Rejection
+
+This smoke uses existing real GPT and MIMO artifacts only; it does not call
+`gpt-image-2` or MIMO again.
+
+Command:
+
+```powershell
+python experiments/phase7_8_gpt_quality_gate_smoke.py --detection-run-dir outputs/runs/phase2-gbc06-02-14-cta-fallback-context-v2 --cleanup-run-dir outputs/runs/phase6-gbc06-02-14-fallback-context-gpt-v3-panel-divider-cap --phase6-gpt-quality-run-dir outputs/runs/phase6-gbc06-02-14-gpt-v3-mimo-quality --output-root outputs/runs --run-id phase7-8-gbc06-02-14-gpt-v3-quality-gated-smoke-v1 --sample-limit 1
+```
+
+Inputs:
+
+- Detection: `outputs/runs/phase2-gbc06-02-14-cta-fallback-context-v2`
+- GPT cleanup: `outputs/runs/phase6-gbc06-02-14-fallback-context-gpt-v3-panel-divider-cap`
+- MIMO replacement quality: `outputs/runs/phase6-gbc06-02-14-gpt-v3-mimo-quality`
+
+Output:
+
+- Run directory: `outputs/runs/phase7-8-gbc06-02-14-gpt-v3-quality-gated-smoke-v1`
+- Summary: `quality-gate-smoke-summary.json`
+- Phase 7 preview: `runs/phase7-preview/pages/GBC06-02-png.png`
+- Phase 8 manifest: `runs/phase8-export/photoshop-manifest.json`
+
+Result:
+
+- Quality gate: `accepted=false`, `failure_reason=quality_rejected`.
+- Phase 7 used `fallback_input/GBC06-02-png-14.png`, not the bad
+  `fallback_replacement_crop/GBC06-02-png-14.png`.
+- Phase 7 kept `text_overlay_required=true`.
+- Phase 8 exported an editable text layer for `GBC06_02.png#14`.
+- Phase 8 set `replacement_method=null` and used the same cleaned/background
+  crop as `effective_crop_path`, so the bad GPT text was not baked into
+  `修复图像`.
 
 ## Current Recommendation
 
