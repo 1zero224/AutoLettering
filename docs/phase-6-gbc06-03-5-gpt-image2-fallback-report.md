@@ -28,7 +28,7 @@ The fallback locator should not keep chasing a bbox only because it includes a p
 - Changed fallback GPT replacement crop composition to paste the GPT result through the transparent edit mask, instead of extracting dark text and filling the whole bbox background. This prevents mask-internal non-text art from being cleared by postprocessing.
 - Stopped treating `tight_enough=false` as a hard blocker when MIMO accepts the bbox semantically. A semantically accepted bbox can proceed to GPT even if it contains extra art or blank space.
 - Stopped expanding the editable mask merely because `tight_enough=false`. Loose semantic bboxes now keep the locator bbox as the edit mask unless an explicit experiment CLI expansion is requested.
-- Kept the special recovery for accepted bboxes that are clearly below the LabelPlus anchor.
+- Removed the special accepted-below-anchor recovery from the accepted-bbox path. Anchor recovery is reserved for semantic rejection/recovery cases; once validation accepts that the bbox contains the target text, Phase 6 keeps it even if it includes nearby non-text art.
 - Added a local GPT artifact gate. It compares the cleaned crop and GPT replacement crop and rejects large, nearly solid dark/gray overlays even when MIMO marks the text replacement usable.
 - Strengthened the GPT prompt again so the bbox is only a locator hint, and accidental non-text pixels inside the transparent mask are still not permission to change people, hair, clothing, body, background texture, or panel art.
 
@@ -259,6 +259,77 @@ Manual review:
 
 Conclusion: rejected for default use. Keep `rect` only as an explicit experiment option; the operational fallback default should remain `text_pixels`.
 
+### v18: accepted loose bbox, no accepted-bbox refine/recovery
+
+Command:
+
+```powershell
+python experiments/phase6_nonbubble_cleanup.py --detection-run-dir outputs/runs/phase2-gbc06-03-batch-4-6-cta-detection-v3-threshold40-merged --output-root outputs/runs --run-id phase6-gbc06-03-5-fallback-gpt-image2-v18-accepted-bbox-no-refine --sample-limit 1 --record-id "GBC06_03.png#5" --call-gpt-image --fallback-edit-padding-px 16 --fallback-mask-expand-px 0
+```
+
+Artifacts:
+
+- Replacement grid: `outputs/runs/phase6-gbc06-03-5-fallback-gpt-image2-v18-accepted-bbox-no-refine/visuals/fallback-replacement-grid.png`
+- Locator grid: `outputs/runs/phase6-gbc06-03-5-fallback-gpt-image2-v18-accepted-bbox-no-refine/visuals/fallback-locator-grid.png`
+- GPT mask: `outputs/runs/phase6-gbc06-03-5-fallback-gpt-image2-v18-accepted-bbox-no-refine/fallback_edit_gpt_mask/GBC06-03-png-5.png`
+- Quality sheet: `outputs/runs/phase6-gbc06-03-5-fallback-gpt-image2-v18-quality/debug/replacement_quality_sheets/GBC06-03-png-5.png`
+- Quality JSONL: `outputs/runs/phase6-gbc06-03-5-fallback-gpt-image2-v18-quality/replacement-quality.jsonl`
+- Phase 7/8 quality-gate evidence grid: `outputs/runs/phase7-8-gbc06-03-5-gpt-v18-quality-gate/visuals/quality-gate-evidence-grid.png`
+
+Phase 6 result:
+
+```json
+{
+  "status": "cleaned",
+  "fallback_locator.local_bbox_xyxy": [194, 103, 243, 395],
+  "fallback_locator_validation.status": "accepted",
+  "fallback_locator_validation.tight_enough": false,
+  "fallback_locator_validation.needs_tighter_edit_mask": false,
+  "gpt_image2_edit.status": "ok",
+  "gpt_mask_shape": "text_pixels",
+  "mask_strategy": "text_pixels_within_bbox",
+  "replacement_method": "gpt_image2_masked_edit",
+  "text_overlay_required": false
+}
+```
+
+MIMO replacement quality:
+
+```json
+{
+  "score": 9,
+  "usable": true,
+  "exact_text_correct": true,
+  "simplified_chinese_correct": true,
+  "no_japanese_remaining": true,
+  "region_correct": true,
+  "style_consistent": true,
+  "outside_mask_preserved": true,
+  "observed_text": "好孩子不要看…",
+  "issues": []
+}
+```
+
+Phase 7/8 quality gate:
+
+```json
+{
+  "gpt_quality_accepted": true,
+  "phase7_cleanup_method": "gpt_image2_masked_edit",
+  "phase7_text_overlay_required": false,
+  "phase8_text_layer_exported": false,
+  "phase8_effective_method": "gpt_image2_masked_edit"
+}
+```
+
+Manual review:
+
+- The accepted locator bbox contains non-text manga art, which is now allowed as long as the target Japanese text is inside it.
+- The generated mask is text-pixel shaped, not a full rectangle, so GPT is constrained to the original glyph area.
+- The final replacement reads `好孩子不要看…`, preserves the panel context, and avoids the broad dark/white block failures seen in earlier runs.
+
+Conclusion: accepted as the current best fallback result for this sample. It supersedes v14 because it validates the new no-refine/no-accepted-recovery contract with the same text-pixel mask approach and a fresh MIMO quality run.
+
 ## Local Artifact Gate
 
 Command:
@@ -306,11 +377,12 @@ The artifact gate is useful for catching large block failures, but it does not c
 
 ## Current Recommendation
 
-Use v14 as the current best GPT-image-2 fallback candidate for `GBC06_03.png#5`:
+Use v18 as the current best GPT-image-2 fallback candidate for `GBC06_03.png#5`:
 
 - `fallback_edit_padding_px=16`
 - `fallback_mask_expand_px=0`
 - `fallback_gpt_mask_shape=text_pixels` (now the default)
+- semantically accepted bboxes are kept even when `tight_enough=false`
 - prompt must explicitly preserve all non-text manga art and treat the bbox only as a locator hint
 - final replacement composition must use the transparent edit mask, not black-text extraction plus bbox fill
 
@@ -323,7 +395,7 @@ Do not trust MIMO alone for this route. It gave a false positive on v12, missed 
 
 ## Open Issues
 
-- Exact punctuation for `…` improved in v14/v15, but this is still a small-sample result rather than a robust guarantee.
+- Exact punctuation for `…` is correct in v18, but this is still a small-sample result rather than a robust guarantee.
 - `gpt-image-2` can still interpret a large transparent rectangle as permission to repaint non-text art despite prompt constraints, as v15 shows.
 - The local artifact gate catches the v12/v13 gray-block failures, but it is intentionally narrow. It does not replace manual review for typography, exact punctuation, subtle style mismatch, or small non-text redraws.
 

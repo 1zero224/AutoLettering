@@ -3,6 +3,7 @@ from pathlib import Path
 
 from PIL import Image
 
+from experiments.phase7_8_gpt_quality_gate_smoke import _gpt_replacement_crop_label
 from experiments.phase7_8_gpt_quality_gate_smoke import run_quality_gate_smoke
 
 
@@ -199,6 +200,12 @@ def test_run_quality_gate_smoke_consumes_fallback_cleaned_crop_without_gpt_repla
     }
     assert phase8_source["gpt_image2_edit_status"] == "dry_run"
     assert phase8_cleanup["replacement_failure_reason"] == "gpt_image2_replacement_not_completed"
+
+
+def test_gpt_replacement_crop_label_matches_quality_gate_status():
+    assert _gpt_replacement_crop_label("page.png#1", True) == "page.png#1 accepted GPT crop"
+    assert _gpt_replacement_crop_label("page.png#1", False) == "page.png#1 rejected GPT crop"
+    assert _gpt_replacement_crop_label("page.png#1", None) == "page.png#1 ungated GPT crop"
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:

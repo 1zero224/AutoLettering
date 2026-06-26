@@ -21,8 +21,6 @@ from autolettering.phase6_nonbubble import _refine_fallback_locator_bbox
 from autolettering.phase6_nonbubble import _recover_locator_from_labelplus_anchor
 from autolettering.phase6_nonbubble import _compose_gpt_replacement_region
 from autolettering.phase6_nonbubble import _write_fallback_replacement_crop
-from autolettering.phase6_nonbubble import _cv_tightness_override
-from autolettering.phase6_nonbubble import _accepted_locator_is_suspiciously_below_anchor
 from autolettering.phase6_nonbubble import _should_retry_fallback_validation
 from autolettering.phase6_nonbubble import _fallback_mask_bbox
 from autolettering.phase6_nonbubble import _fallback_validation_payload
@@ -88,6 +86,14 @@ def test_gpt_image_prompt_preserves_non_text_art_inside_wide_mask():
     assert "Do not replace `…` with three periods `...`" in prompt
 
 
+def test_phase6_fallback_does_not_keep_mimo_tightness_retry_prompt():
+    source_path = Path(inspect.getsourcefile(run_phase6_nonbubble_cleanup))
+    source = source_path.read_text(encoding="utf-8")
+
+    assert "phase6_fallback_text_locator_tightness_retry" not in source
+    assert "remove surrounding blank space, characters' hair" not in source
+
+
 def test_fallback_locator_prompts_allow_loose_bbox_when_it_contains_target_text(tmp_path: Path):
     image_path = _write_nonbubble_image(tmp_path / "page.png")
     detection_run = tmp_path / "phase2"
@@ -149,7 +155,7 @@ def test_semantically_accepted_loose_fallback_bbox_does_not_expand_editable_mask
 
     assert validation["status"] == "accepted"
     assert validation["bbox_padding_px"] == 0
-    assert validation["needs_tighter_edit_mask"] is True
+    assert validation["needs_tighter_edit_mask"] is False
     assert _fallback_mask_bbox((40, 30, 70, 120), (160, 180), validation) == (40, 30, 70, 120)
 
 
@@ -169,7 +175,7 @@ def test_semantically_accepted_loose_fallback_bbox_does_not_trigger_anchor_recov
     )
 
     assert validation["status"] == "accepted"
-    assert validation["needs_tighter_edit_mask"] is True
+    assert validation["needs_tighter_edit_mask"] is False
     assert _can_try_anchor_recovery(validation) is False
 
 
@@ -1654,6 +1660,54 @@ def test_run_phase6_nonbubble_cleanup_fallback_keeps_semantically_accepted_loose
     assert row["gpt_image2_edit"]["status"] == "dry_run"
 
 
+def test_run_phase6_nonbubble_cleanup_does_not_refine_semantically_accepted_bbox(tmp_path: Path):
+    image_path = tmp_path / "page.png"
+    image = Image.new("RGB", (160, 160), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((30, 42, 124, 110), fill=(250, 250, 250))
+    _draw_fake_text_strokes(draw, origin=(56, 58))
+    image.save(image_path)
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(
+        detection_run / "detections.jsonl",
+        image_path,
+        rows=[
+            {
+                "record_id": "page.png#2",
+                "status": "fallback_required",
+                "group_name": "框外",
+                "selected_text_box_xyxy": None,
+                "fallback": {
+                    "method": "mimo_crop_then_gpt_image2_masked_edit",
+                    "context_bbox_xyxy": [0, 0, 160, 160],
+                    "context_labelplus_point_xy": [80, 82],
+                    "translated_text": "背景文字",
+                },
+            }
+        ],
+    )
+    mimo = _FakeMimoLocatorLooseAcceptedWideInkBand()
+
+    run_dir = run_phase6_nonbubble_cleanup(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-fallback-accepted-wide-bbox-not-refined",
+        sample_limit=1,
+        mimo_client=mimo,
+    )
+
+    row = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]
+    assert mimo.kinds == [
+        "phase6_fallback_text_locator",
+        "phase6_fallback_text_locator_validation",
+    ]
+    assert row["fallback_locator"]["local_bbox_xyxy"] == [20, 30, 130, 130]
+    assert "refinement" not in row["fallback_locator"]
+    assert row["cleanup"]["layout_text_bbox"] == [20, 30, 130, 130]
+    assert row["gpt_image2_edit"]["edit_context"]["mask_strategy"] == "text_pixels_within_bbox"
+
+
 def test_run_phase6_nonbubble_cleanup_fallback_calls_gpt_when_accepted_bbox_stays_loose(
     tmp_path: Path,
     monkeypatch,
@@ -1709,77 +1763,6 @@ def test_run_phase6_nonbubble_cleanup_fallback_calls_gpt_when_accepted_bbox_stay
     assert row["gpt_image2_edit"]["status"] == "ok"
     assert row["gpt_image2_edit"]["edit_context"]["gpt_mask_shape"] == "text_pixels"
     assert row["gpt_image2_edit"]["edit_context"]["mask_strategy"] == "text_pixels_within_bbox"
-
-
-def test_cv_tightness_override_accepts_long_cv_refined_sound_effect_bbox():
-    locator = {
-        "local_bbox_xyxy": [41, 449, 563, 507],
-        "refinement": {
-            "method": "trim_to_light_text_ink_support",
-            "original_local_bbox_xyxy": [41, 449, 563, 605],
-            "refined_local_bbox_xyxy": [41, 449, 563, 507],
-        },
-    }
-    validation = {
-        "status": "accepted",
-        "semantic_correct": True,
-        "tight_enough": False,
-        "bbox_on_blank_area": False,
-        "bbox_targets_unrelated_text": False,
-        "recommendation": "reject",
-    }
-
-    override = _cv_tightness_override(locator, validation, (652, 652))
-
-    assert override["status"] == "accepted"
-    assert override["reason"] == "semantic_correct_after_cv_refinement"
-    assert override["bbox_area_ratio"] < 0.08
-
-
-def test_cv_tightness_override_rejects_bbox_that_stays_large_after_retry():
-    locator = {
-        "local_bbox_xyxy": [7, 9, 82, 61],
-        "refinement": {
-            "method": "trim_to_light_text_ink_support",
-            "original_local_bbox_xyxy": [5, 8, 84, 62],
-            "refined_local_bbox_xyxy": [7, 9, 82, 61],
-        },
-    }
-    validation = {
-        "status": "accepted",
-        "semantic_correct": True,
-        "tight_enough": False,
-        "bbox_on_blank_area": False,
-        "bbox_targets_unrelated_text": False,
-        "recommendation": "reject",
-    }
-
-    assert _cv_tightness_override(locator, validation, (90, 70)) is None
-
-
-def test_cv_tightness_override_accepts_anchor_recovered_sound_effect_bbox():
-    locator = {
-        "local_bbox_xyxy": [38, 398, 525, 488],
-        "refinement": {
-            "method": "recover_light_text_ink_band_near_labelplus_anchor",
-            "original_local_bbox_xyxy": [24, 501, 542, 601],
-            "refined_local_bbox_xyxy": [38, 398, 525, 488],
-        },
-    }
-    validation = {
-        "status": "accepted",
-        "semantic_correct": True,
-        "tight_enough": False,
-        "bbox_on_blank_area": False,
-        "bbox_targets_unrelated_text": False,
-        "recommendation": "reject",
-    }
-
-    override = _cv_tightness_override(locator, validation, (652, 652))
-
-    assert override["status"] == "accepted"
-    assert override["reason"] == "semantic_correct_after_cv_refinement"
-    assert override["refinement_method"] == "recover_light_text_ink_band_near_labelplus_anchor"
 
 
 def test_should_retry_validation_when_boolean_contradicts_reasoning_match():
@@ -1841,7 +1824,7 @@ def test_fallback_validation_accepts_target_text_with_extra_non_text_artwork(tmp
 
     assert validation["status"] == "accepted"
     assert validation["failure_reason"] is None
-    assert validation["needs_tighter_edit_mask"] is True
+    assert validation["needs_tighter_edit_mask"] is False
     assert validation["bbox_targets_unrelated_text"] is True
 
 
@@ -1866,8 +1849,37 @@ def test_fallback_validation_normalizes_non_text_context_rejection_when_target_t
     assert validation["status"] == "accepted"
     assert validation["semantic_correct"] is True
     assert validation["recommendation"] == "accept"
-    assert validation["needs_tighter_edit_mask"] is True
+    assert validation["needs_tighter_edit_mask"] is False
     assert validation["semantic_correct_overridden_from_non_text_context"] is True
+    assert validation["failure_reason"] is None
+
+
+def test_fallback_validation_normalizes_tightness_only_rejection_when_target_text_is_visible(tmp_path: Path):
+    response = {
+        "raw_text": "{}",
+        "request": {"kind": "phase6_fallback_text_locator_validation"},
+        "response": {"status": "ok"},
+    }
+    payload = {
+        "semantic_correct": False,
+        "tight_enough": False,
+        "bbox_on_blank_area": False,
+        "bbox_targets_unrelated_text": False,
+        "visible_original_text": "見ちゃダメよ…",
+        "recommendation": "reject",
+        "reasoning_summary": (
+            "The bounding box encloses the correct vertical Japanese text '見ちゃダメよ…'. "
+            "However, the box is extremely loose and includes the character's face, hair, and surrounding artwork."
+        ),
+    }
+
+    validation = _fallback_validation_payload(payload, response, tmp_path / "validation.png")
+
+    assert validation["status"] == "accepted"
+    assert validation["semantic_correct"] is True
+    assert validation["recommendation"] == "accept"
+    assert validation["needs_tighter_edit_mask"] is False
+    assert validation["semantic_correct_overridden_from_tightness_only_rejection"] is True
     assert validation["failure_reason"] is None
 
 
@@ -1895,7 +1907,7 @@ def test_fallback_validation_accepts_japanese_sound_effect_when_rejected_only_by
     assert validation["status"] == "accepted"
     assert validation["semantic_correct"] is True
     assert validation["recommendation"] == "accept"
-    assert validation["needs_tighter_edit_mask"] is True
+    assert validation["needs_tighter_edit_mask"] is False
     assert validation["semantic_correct_overridden_from_sound_effect_context"] is True
     assert validation["failure_reason"] is None
 
@@ -2143,7 +2155,7 @@ def test_run_phase6_nonbubble_cleanup_fallback_recovers_after_retry_validation_r
     assert row["gpt_image2_edit"]["status"] == "dry_run"
 
 
-def test_run_phase6_nonbubble_cleanup_recovers_accepted_tight_bbox_that_is_below_anchor(tmp_path: Path):
+def test_run_phase6_nonbubble_cleanup_keeps_accepted_bbox_even_when_below_anchor(tmp_path: Path):
     image_path = _write_light_sound_effect_panel_with_right_panel_divider(tmp_path / "page.png")
     detection_run = tmp_path / "phase2"
     detection_run.mkdir()
@@ -2171,26 +2183,20 @@ def test_run_phase6_nonbubble_cleanup_recovers_accepted_tight_bbox_that_is_below
     run_dir = run_phase6_nonbubble_cleanup(
         detection_run_dir=detection_run,
         output_root=tmp_path / "outputs",
-        run_id="phase6-fallback-accepted-tight-below-anchor-recovery",
+        run_id="phase6-fallback-accepted-below-anchor-kept",
         sample_limit=1,
         mimo_client=mimo,
     )
 
     row = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]
-    assert row["fallback_locator"]["anchor_recovery_of_validation"] == "accepted_bbox_not_tight"
-    assert row["fallback_locator"]["local_bbox_xyxy"][1] < 430
-    assert row["fallback_locator"]["local_bbox_xyxy"][3] < 520
-    assert row["fallback_locator"]["refinement"]["method"] == "recover_light_text_ink_band_near_labelplus_anchor"
+    assert mimo.kinds == [
+        "phase6_fallback_text_locator",
+        "phase6_fallback_text_locator_validation",
+    ]
+    assert "anchor_recovery_of_validation" not in row["fallback_locator"]
+    assert row["fallback_locator"]["local_bbox_xyxy"] == [0, 455, 652, 570]
     assert row["fallback_locator_validation"]["status"] == "accepted"
     assert row["gpt_image2_edit"]["status"] == "dry_run"
-
-
-def test_accepted_vertical_locator_near_anchor_is_not_recovered_as_below_anchor():
-    locator = {"local_bbox_xyxy": [185, 280, 262, 397]}
-    validation = {"status": "accepted", "tight_enough": True}
-    detection = {"fallback": {"context_labelplus_point_xy": [230, 279]}}
-
-    assert _accepted_locator_is_suspiciously_below_anchor(locator, validation, detection) is False
 
 
 def test_run_phase6_nonbubble_cleanup_records_rejected_anchor_recovery_attempt(tmp_path: Path):
@@ -2854,21 +2860,6 @@ class _FakeMimoLocatorTightnessRetry:
                     "response": {"status": "ok"},
                 }
             return _mimo_validation_response(kind, image_path, accepted=True)
-        if kind == "phase6_fallback_text_locator_tightness_retry":
-            assert "semantically correct but too loose" in prompt
-            assert "too much surrounding blank space" in prompt
-            return {
-                "raw_text": json.dumps(
-                    {
-                        "bbox_xyxy": [25, 15, 52, 45],
-                        "confidence": 0.84,
-                        "reasoning_summary": "tightened around the visible original text only",
-                    },
-                    ensure_ascii=False,
-                ),
-                "request": {"kind": kind, "image_path": str(image_path)},
-                "response": {"status": "ok"},
-            }
         raise AssertionError(f"unexpected kind {kind}")
 
 
@@ -2908,13 +2899,39 @@ class _FakeMimoLocatorLooseAcceptedStillLoose:
                 "request": {"kind": kind, "image_path": str(image_path)},
                 "response": {"status": "ok"},
             }
-        if kind == "phase6_fallback_text_locator_tightness_retry":
+        raise AssertionError(f"unexpected kind {kind}")
+
+
+class _FakeMimoLocatorLooseAcceptedWideInkBand:
+    def __init__(self):
+        self.kinds = []
+
+    def analyze_image(self, image_path: str, prompt: str, kind: str = "image_analysis", max_completion_tokens: int | None = None):
+        self.kinds.append(kind)
+        if kind == "phase6_fallback_text_locator":
             return {
                 "raw_text": json.dumps(
                     {
-                        "bbox_xyxy": [7, 9, 82, 61],
-                        "confidence": 0.8,
-                        "reasoning_summary": "still too loose",
+                        "bbox_xyxy": [20, 30, 130, 130],
+                        "confidence": 0.9,
+                        "reasoning_summary": "loose bbox contains target text and non-text context",
+                    },
+                    ensure_ascii=False,
+                ),
+                "request": {"kind": kind, "image_path": str(image_path)},
+                "response": {"status": "ok"},
+            }
+        if kind == "phase6_fallback_text_locator_validation":
+            return {
+                "raw_text": json.dumps(
+                    {
+                        "semantic_correct": True,
+                        "tight_enough": False,
+                        "bbox_on_blank_area": False,
+                        "bbox_targets_unrelated_text": False,
+                        "visible_original_text": "背景文字",
+                        "recommendation": "accept",
+                        "reasoning_summary": "The bbox contains the target text and some nearby background.",
                     },
                     ensure_ascii=False,
                 ),

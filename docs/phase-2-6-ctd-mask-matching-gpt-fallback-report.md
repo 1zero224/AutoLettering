@@ -497,13 +497,13 @@ Important v3 artifacts:
 - Locator grid: `outputs/runs/phase6-gbc06-02-14-fallback-context-mimo-v3-semantic-retry/visuals/fallback-locator-grid.png`
 - Replacement grid: `outputs/runs/phase6-gbc06-02-14-fallback-context-mimo-v3-semantic-retry/visuals/fallback-replacement-grid.png`
 
-Current conclusion:
+Historical conclusion for the v1-v7 locator runs:
 
 - This is now a partially usable fallback locator path for this previously failing sound-effect record: Phase 6 can sometimes reach `fallback_locator_validation.status=accepted`, but repeated MIMO calls still vary.
-- The bbox remains too loose whenever accepted, and MIMO explicitly reports `tight_enough=false`; Phase 6 now refuses real GPT calls in that state with `gpt_image2_edit.status=not_called` / `reason=fallback_locator_bbox_not_tight`.
+- At this historical point, loose accepted bboxes were still treated conservatively and could block real GPT calls. That policy has since been replaced: a fallback bbox only needs to contain the intended original text, while `gpt-image-2` receives a `text_pixels` mask and prompt constraints to preserve passerby/background/non-text art.
 - MIMO pixel bbox parsing now falls back to `bbox_percent_xyxy` when the pixel bbox is out of bounds.
-- One tightness retry is attempted for semantically accepted but loose bboxes, but the retry is only adopted when the second validation is also accepted and `tight_enough=true`; otherwise the original accepted bbox is retained and the failed tightening attempt is recorded.
-- The conservative safety behavior is preserved: rejected or loose locator attempts block GPT rather than risking a broad masked edit over hair/background.
+- The older MIMO tightness retry path has been removed from current code; `tight_enough=false` remains diagnostic metadata rather than a reason to chase a cleaner box that excludes non-text context.
+- Rejected locators are still blocked when they miss the target text, point to blank area, or point to a different text string.
 
 ## 2026-06-26 Update: Light-background Ink Trim And Anchor Recovery
 
@@ -535,13 +535,13 @@ Important behavior:
 - The best current evidence is a usable locator candidate, not a successful GPT replacement. The remaining blocker is locator stability under repeated MIMO calls, especially when MIMO returns a valid but too-low retry bbox.
 - MIMO validation is helpful but not sufficient as the sole gate: v10 visually targeted the wrong upper panel while MIMO marked it tight. Programmatic anchor/window guards are required before trusting `accepted + tight_enough=true`.
 
-### 2026-06-26 Follow-up: Right-edge Cap, Accepted-below-anchor Guard, And GPT Replacement Trials
+### 2026-06-26 Follow-up: Right-edge Cap, Historical Accepted-below-anchor Guard, And GPT Replacement Trials
 
-Additional real runs for `GBC06_02.png#14` targeted the same bottom-panel sound effect after the earlier anchor recovery work. The implemented changes are:
+Additional real runs for `GBC06_02.png#14` targeted the same bottom-panel sound effect after the earlier anchor recovery work. The then-current implemented changes were:
 
 - Persist rejected recovery candidates under `fallback_locator.anchor_recovery_attempt` / `fallback_locator.tightness_retry`, including candidate bbox, refinement metadata, validation status, reasoning, and validation image path. This keeps failed candidate evidence visible in later grids and JSONL.
 - Add a right-edge cap for anchor-recovered light-background sound effects. It trims sparse right-side screentone or a strong panel-divider column after the target text, without changing the left/top/bottom bounds.
-- Add an accepted-below-anchor guard: even when MIMO marks a bbox as `accepted` and `tight_enough=true`, Phase 6 retries deterministic anchor recovery if the bbox extends far below the LabelPlus anchor and horizontally covers the anchor. This prevents low hair/blank-region boxes from reaching GPT.
+- Add an accepted-below-anchor guard: even when MIMO marks a bbox as `accepted` and `tight_enough=true`, Phase 6 retries deterministic anchor recovery if the bbox extends far below the LabelPlus anchor and horizontally covers the anchor. This was a historical guard for earlier locator instability and has since been removed from the accepted-bbox path; current code keeps a semantically accepted bbox even if it includes nearby artwork, and only uses anchor recovery after a semantic rejection.
 - Strengthen the GPT image prompt with an explicit character sequence and exact character count, e.g. `啪 | 嗒 | 啪 | 嗒 | 啪 | 嗒`, plus warnings not to substitute `啪` or `嗒`.
 
 Locator and GPT replacement runs:
@@ -714,9 +714,11 @@ to avoid losing a visually usable crop to structured-output variance:
 - If MIMO returns `semantic_correct=false` but its reasoning explicitly says
   the bbox corresponds to the Chinese translation, Phase 6 retries semantic
   validation instead of treating the first JSON boolean as final.
-- If MIMO accepts the text semantically but rejects tightness, a local CV
-  tightness override is allowed only for known CV-refined locator bboxes whose
-  area and side ratios remain small enough. Large loose boxes still fail.
+- Historical note: this run predated the current loose-bbox policy. At that
+  point, a local CV tightness override was allowed for known CV-refined locator
+  bboxes whose area and side ratios were small enough. Current code has removed
+  that tightness override path; `tight_enough=false` is diagnostic metadata and
+  does not block GPT when the target original text is visible.
 
 Real Phase 6 command:
 
@@ -855,11 +857,94 @@ sample, but prior v4 showed a false-positive MIMO score. The compact quality
 sheet and evidence grid should remain part of manual review before treating the
 style/readability as final.
 
+### 2026-06-27 Follow-up: `GBC06_03.png#5` Loose Bbox With Text-pixel Mask Accepted
+
+The latest user policy is now the active fallback contract: for non-bubble GPT
+fallback, the MIMO locator bbox only needs to contain the intended original
+text. It may include nearby people, hair, props, background, or other non-text
+manga art. Phase 6 should not retry, relocate, or reject solely to make that
+bbox visually cleaner. The edit scope is controlled by the generated
+`text_pixels` mask and the `gpt-image-2` prompt, which instructs the model to
+replace only the original Japanese lettering.
+
+Code-level effects in the current implementation:
+
+- The MIMO tightness retry prompt/path was removed.
+- Semantically accepted fallback locator bboxes are no longer automatically
+  refined by CV before GPT.
+- Accepted-below-anchor recovery is no longer run for accepted bboxes.
+- `needs_tighter_edit_mask=false` is always recorded; `tight_enough=false`
+  remains diagnostic metadata.
+- If MIMO's structured JSON rejects only because the bbox is loose or includes
+  non-text artwork while its reasoning says the target text is visible, Phase 6
+  normalizes that validation to accepted.
+
+Real Phase 6 command:
+
+```powershell
+python experiments/phase6_nonbubble_cleanup.py --detection-run-dir outputs/runs/phase2-gbc06-03-batch-4-6-cta-detection-v3-threshold40-merged --output-root outputs/runs --run-id phase6-gbc06-03-5-fallback-gpt-image2-v18-accepted-bbox-no-refine --sample-limit 1 --record-id "GBC06_03.png#5" --call-gpt-image --fallback-edit-padding-px 16 --fallback-mask-expand-px 0
+```
+
+Output:
+
+- Run directory: `outputs/runs/phase6-gbc06-03-5-fallback-gpt-image2-v18-accepted-bbox-no-refine`
+- Locator grid: `visuals/fallback-locator-grid.png`
+- Replacement grid: `visuals/fallback-replacement-grid.png`
+- GPT mask: `fallback_edit_gpt_mask/GBC06-03-png-5.png`
+- Mask preview: `debug/fallback_replacement_mask_previews/GBC06-03-png-5.png`
+- Replacement crop: `fallback_replacement_crop/GBC06-03-png-5.png`
+
+Key result:
+
+- `status=cleaned`
+- `fallback_locator.local_bbox_xyxy=[194,103,243,395]`
+- `fallback_locator.refinement.method=recover_dark_text_ink_column_near_labelplus_anchor`
+- `fallback_locator.anchor_recovery_of_validation=fallback_locator_semantic_rejected`
+- `fallback_locator_validation.status=accepted`
+- `fallback_locator_validation.tight_enough=false`
+- `fallback_locator_validation.needs_tighter_edit_mask=false`
+- `gpt_image2_edit.status=ok`
+- `gpt_image2_edit.edit_context.mask_strategy=text_pixels_within_bbox`
+- `cleanup.replacement_method=gpt_image2_masked_edit`
+- `text_overlay_required=false`
+
+Manual inspection of the replacement grid shows the accepted locator region
+includes non-text manga art, but the transparent edit mask follows the original
+Japanese glyph pixels rather than a full rectangle. The final replacement writes
+the Chinese text `好孩子不要看…` into the target vertical text region without
+turning the whole locator bbox into a white block.
+
+MIMO replacement-quality command:
+
+```powershell
+python experiments/phase6_replacement_quality.py --cleanup-run-dir outputs/runs/phase6-gbc06-03-5-fallback-gpt-image2-v18-accepted-bbox-no-refine --output-root outputs/runs --run-id phase6-gbc06-03-5-fallback-gpt-image2-v18-quality --sample-limit 1 --record-id "GBC06_03.png#5"
+```
+
+MIMO result:
+
+- Run directory: `outputs/runs/phase6-gbc06-03-5-fallback-gpt-image2-v18-quality`
+- Quality sheet: `debug/replacement_quality_sheets/GBC06-03-png-5.png`
+- `score=9`
+- `usable=true`
+- `exact_text_correct=true`
+- `simplified_chinese_correct=true`
+- `no_japanese_remaining=true`
+- `region_correct=true`
+- `style_consistent=true`
+- `outside_mask_preserved=true`
+- `issues=[]`
+
+Manual-review caveat: MIMO accepted this result and the quality sheet is
+visually consistent with the new loose-bbox contract, but previous GPT fallback
+runs have shown false-positive model scoring. Keep the replacement grid and
+quality sheet in the manual review package before treating GPT-direct
+replacement as final.
+
 ## Current Recommendation
 
-Use the CTD matched path with `lama_large_512px` for non-bubble text when CTD detects the original text. This is the currently usable route.
+Use the CTD matched path with `lama_large_512px` for non-bubble text when CTD detects the original text. This remains the most deterministic route.
 
-Keep the GPT fallback route behind the CTA miss path rather than using it for all non-bubble text. Remaining blockers are:
+Keep the GPT fallback route behind the CTA miss path rather than using it for all non-bubble text. For GPT fallback, prefer `text_pixels` masks and allow loose bboxes that contain the intended original text; do not chase bbox purity just to exclude passerby/background artwork. Remaining blockers are:
 
 - MIMO bbox coordinates are still unstable on some crops and can return coordinates outside the crop dimensions.
 - `gpt-image-2` can still introduce gray/dark rectangular artifacts on harder regions.
@@ -869,7 +954,7 @@ Next experiments should focus on fallback locator stability:
 
 - Add a coordinate-ruler or numbered-grid locator image for MIMO, while keeping the GPT edit input clean.
 - Ask MIMO for percentage coordinates and convert to pixels as a fallback.
-- Run GPT on a mask shaped from detected original glyph pixels rather than a broad rectangle.
+- Keep GPT edits on masks shaped from detected original glyph pixels rather than a broad rectangle.
 - Reject GPT outputs with gray-box artifacts before Phase 7/8 consumption.
 
 ## Verification

@@ -22,18 +22,6 @@ from .text_bbox import matched_text_mask_bbox, selected_text_polarity
 from .text_body_bbox import selected_text_body_bbox
 
 
-CV_TIGHTNESS_REFINEMENT_METHODS = {
-    "trim_to_light_text_ink_support",
-    "trim_to_dark_background_support",
-    "trim_to_dark_vertical_text_column_support",
-    "recover_light_text_ink_band_near_labelplus_anchor",
-    "recover_dark_text_ink_column_near_labelplus_anchor",
-}
-CV_TIGHTNESS_MAX_AREA_RATIO = 0.16
-CV_TIGHTNESS_MAX_SHORT_SIDE_RATIO = 0.35
-CV_TIGHTNESS_MAX_LONG_SIDE_RATIO = 0.9
-
-
 def run_phase6_nonbubble_cleanup(
     detection_run_dir: str | Path,
     output_root: str | Path = "outputs/runs",
@@ -210,7 +198,6 @@ def _fallback_gpt_cleanup_one(
                 "fallback_locator_validation": {"status": "not_called", "reason": "fallback_locator_failed"},
                 "gpt_image2_edit": {"status": "not_called", "reason": "fallback_locator_failed"},
             }
-    locator = _refine_fallback_locator_bbox(locator, context["input_path"], context_bbox)
     validation = _validate_fallback_locator_semantics(run_dir, detection, locator, context["locator_path"], mimo_client)
     if validation.get("status") != "accepted":
         retry_locator = _recover_locator_from_labelplus_anchor(
@@ -250,7 +237,7 @@ def _fallback_gpt_cleanup_one(
                 locator = retry_locator
                 validation = retry_validation
             else:
-                if retry_locator.get("refinement", {}).get("method") in CV_TIGHTNESS_REFINEMENT_METHODS:
+                if retry_locator.get("refinement"):
                     locator = _with_rejected_locator_attempt(locator, "anchor_recovery_attempt", retry_locator, retry_validation)
                 anchor_locator = _recover_locator_from_labelplus_anchor(
                     detection,
@@ -289,28 +276,6 @@ def _fallback_gpt_cleanup_one(
             "fallback_locator_validation": validation,
             "gpt_image2_edit": {"status": "not_called", "reason": "fallback_locator_semantic_rejected"},
         }
-    if _accepted_locator_is_suspiciously_below_anchor(locator, validation, detection):
-        anchor_locator = _recover_locator_from_labelplus_anchor(
-            detection,
-            context["input_path"],
-            context_bbox,
-            locator,
-            {"status": "accepted", "tight_enough": False, "anchor_recovery_allowed": True},
-        )
-        if anchor_locator.get("status") == "ok":
-            anchor_locator = _refine_fallback_locator_bbox(anchor_locator, context["input_path"], context_bbox)
-            anchor_validation = _validate_fallback_locator_semantics(
-                run_dir,
-                detection,
-                anchor_locator,
-                context["locator_path"],
-                mimo_client,
-            )
-            if anchor_validation.get("status") == "accepted":
-                locator = anchor_locator
-                validation = anchor_validation
-            else:
-                locator = _with_rejected_locator_attempt(locator, "anchor_recovery_attempt", anchor_locator, anchor_validation)
     local_bbox = tuple(locator.get("local_bbox_xyxy") or (0, 0, context["size"][0], context["size"][1]))
     mask_local_bbox = _fallback_mask_bbox(local_bbox, context["size"], validation)
     if mask_expand_px > 0:
@@ -783,7 +748,7 @@ def _recover_locator_from_labelplus_anchor(
     result.pop("retry_failure_reason", None)
     result["local_bbox_xyxy"] = list(recovered)
     result["global_bbox_xyxy"] = list(_global_bbox(context_bbox, recovered))
-    result["anchor_recovery_of_validation"] = validation.get("failure_reason") or "accepted_bbox_not_tight"
+    result["anchor_recovery_of_validation"] = validation.get("failure_reason") or "fallback_locator_semantic_rejected"
     refinement = {
         "method": recovery_method,
         "original_local_bbox_xyxy": [int(value) for value in local_bbox],
@@ -850,25 +815,6 @@ def _recover_dark_text_locator_from_labelplus_anchor(
     return result
 
 
-def _accepted_locator_is_suspiciously_below_anchor(locator: dict, validation: dict, detection: dict) -> bool:
-    if validation.get("status") != "accepted" or validation.get("tight_enough") is not True:
-        return False
-    anchor = _context_labelplus_point(detection)
-    local_bbox = locator.get("local_bbox_xyxy")
-    if anchor is None or not isinstance(local_bbox, list) or len(local_bbox) != 4:
-        return False
-    ax, ay = anchor
-    x1, y1, x2, y2 = [int(value) for value in local_bbox]
-    bbox_width = x2 - x1
-    bbox_height = y2 - y1
-    is_vertical_target = bbox_height >= max(bbox_width * 1.25, bbox_width + 24)
-    if is_vertical_target and y1 <= ay + 24:
-        return False
-    if y2 <= ay + 48:
-        return False
-    return x1 <= ax + 40 and x2 >= ax - 40
-
-
 def _with_rejected_locator_attempt(locator: dict, key: str, attempt: dict, validation: dict) -> dict:
     result = dict(locator)
     result[key] = {
@@ -885,49 +831,6 @@ def _with_rejected_locator_attempt(locator: dict, key: str, attempt: dict, valid
         },
     }
     return result
-
-
-def _cv_tightness_override(locator: dict, validation: dict, context_size: tuple[int, int]) -> dict | None:
-    if not _semantically_accepted_loose_validation(validation):
-        return None
-    refinement = locator.get("refinement") or {}
-    if refinement.get("method") not in CV_TIGHTNESS_REFINEMENT_METHODS:
-        return None
-    local_bbox = locator.get("local_bbox_xyxy")
-    if not isinstance(local_bbox, list) or len(local_bbox) != 4:
-        return None
-    width, height = context_size
-    x1, y1, x2, y2 = [int(value) for value in local_bbox]
-    if width <= 0 or height <= 0 or x2 <= x1 or y2 <= y1:
-        return None
-    bbox_width = x2 - x1
-    bbox_height = y2 - y1
-    width_ratio = bbox_width / width
-    height_ratio = bbox_height / height
-    area_ratio = (bbox_width * bbox_height) / (width * height)
-    if (
-        area_ratio > CV_TIGHTNESS_MAX_AREA_RATIO
-        or min(width_ratio, height_ratio) > CV_TIGHTNESS_MAX_SHORT_SIDE_RATIO
-        or max(width_ratio, height_ratio) > CV_TIGHTNESS_MAX_LONG_SIDE_RATIO
-    ):
-        return None
-    return {
-        "status": "accepted",
-        "reason": "semantic_correct_after_cv_refinement",
-        "refinement_method": refinement.get("method"),
-        "bbox_area_ratio": round(area_ratio, 4),
-        "bbox_width_ratio": round(width_ratio, 4),
-        "bbox_height_ratio": round(height_ratio, 4),
-    }
-
-
-def _semantically_accepted_loose_validation(validation: dict) -> bool:
-    return (
-        validation.get("status") == "accepted"
-        and validation.get("semantic_correct") is True
-        and validation.get("tight_enough") is not True
-        and validation.get("bbox_on_blank_area") is False
-    )
 
 
 def _locator_bbox_for_anchor_recovery(locator: dict, context_size: tuple[int, int]) -> list[int] | None:
@@ -960,10 +863,7 @@ def _clamped_bbox_for_anchor_recovery(values: list[float], context_size: tuple[i
 
 
 def _can_try_anchor_recovery(validation: dict) -> bool:
-    return (
-        validation.get("failure_reason") == "fallback_locator_semantic_rejected"
-        or validation.get("anchor_recovery_allowed") is True
-    )
+    return validation.get("failure_reason") == "fallback_locator_semantic_rejected"
 
 
 def _recover_light_text_ink_band_near_anchor(
@@ -1271,58 +1171,6 @@ def _relocate_after_semantic_rejection(
     return result
 
 
-def _tighten_accepted_locator_bbox(
-    detection: dict,
-    context_path: Path,
-    context_bbox: tuple[int, int, int, int],
-    locator: dict,
-    validation: dict,
-    mimo_client,
-) -> dict:
-    if mimo_client is None:
-        return {"status": "failed", "failure_reason": "mimo_client_required_for_tightness_retry"}
-    width = context_bbox[2] - context_bbox[0]
-    height = context_bbox[3] - context_bbox[1]
-    prompt = "\n".join(
-        [
-            "The previous bbox was semantically correct but too loose.",
-            f"Crop dimensions are width={width} and height={height} pixels.",
-            f"Chinese translation: {detection.get('translated_text', '')}",
-            f"Previous bbox_xyxy: {locator.get('local_bbox_xyxy')}",
-            f"Validation feedback: {validation.get('reasoning_summary', '')}",
-            "Return a tighter crop-local bbox around only the visible original Japanese text.",
-            "Keep all visible target characters, but remove surrounding blank space, characters' hair, panel background, unrelated text, and UI/grid marks.",
-            "Return only JSON with bbox_xyxy, confidence, and reasoning_summary.",
-        ]
-    )
-    response = mimo_client.analyze_image(
-        context_path,
-        prompt,
-        kind="phase6_fallback_text_locator_tightness_retry",
-        max_completion_tokens=800,
-    )
-    try:
-        payload, local_bbox = _parse_mimo_locator_response(response, context_bbox)
-    except Exception as exc:
-        return {
-            "status": "failed",
-            "failure_reason": f"invalid_mimo_bbox_tightness_retry:{type(exc).__name__}",
-            "raw_text": response.get("raw_text", ""),
-            "locator_image_path": str(context_path),
-            "request": response.get("request"),
-            "response": response.get("response"),
-            "first_raw_text": locator.get("raw_text", ""),
-            "first_validation_raw_text": validation.get("raw_text", ""),
-        }
-    result = _fallback_locator_payload(payload, local_bbox, response, context_bbox, context_path)
-    result["first_raw_text"] = locator.get("raw_text", "")
-    result["first_request"] = locator.get("request")
-    result["first_response"] = locator.get("response")
-    result["first_validation_raw_text"] = validation.get("raw_text", "")
-    result["tightness_retry_of_validation"] = "accepted_bbox_not_tight"
-    return result
-
-
 def _fallback_locator_payload(
     payload: dict,
     local_bbox: list[int],
@@ -1374,7 +1222,7 @@ def _validate_fallback_locator_semantics(
             "Reject if the yellow bbox is on blank background, unrelated text, English lettering, UI marks, or only a partial phrase.",
             "Do not reject merely because the loose bbox also includes nearby people, hair, props, background, or other non-text manga artwork.",
             "In other words, do not reject or relocate only because it also includes passerby figures or background around the target text.",
-            "A loose bbox is acceptable when it still contains the full intended original Japanese text; mark tight_enough=false so a tighter edit mask can be used.",
+            "A loose bbox is acceptable when it still contains the full intended original Japanese text; tight_enough is diagnostic only and should not reject the bbox.",
             "Set bbox_targets_unrelated_text=true only when it targets a different text string; do not set it true for nearby people, hair, props, background, or other non-text artwork.",
             f"Chinese translation: {detection.get('translated_text', '')}",
             "Return only JSON with keys: semantic_correct, tight_enough, bbox_on_blank_area, bbox_targets_unrelated_text, visible_original_text, recommendation, reasoning_summary.",
@@ -1466,6 +1314,13 @@ def _fallback_validation_payload(payload: dict, response: dict, validation_image
         visible_original_text=visible_original_text,
         reasoning_summary=reasoning_summary,
     )
+    tightness_overridden = _tightness_only_rejection_mentions_visible_target(
+        semantic_correct=semantic_correct,
+        bbox_on_blank_area=bbox_on_blank_area,
+        bbox_targets_unrelated_text=bbox_targets_unrelated_text,
+        visible_original_text=visible_original_text,
+        reasoning_summary=reasoning_summary,
+    )
     sound_effect_overridden = _sound_effect_rejection_mentions_visible_target(
         semantic_correct=semantic_correct,
         bbox_on_blank_area=bbox_on_blank_area,
@@ -1473,12 +1328,11 @@ def _fallback_validation_payload(payload: dict, response: dict, validation_image
         visible_original_text=visible_original_text,
         reasoning_summary=reasoning_summary,
     )
-    if semantic_overridden or sound_effect_overridden:
+    if semantic_overridden or tightness_overridden or sound_effect_overridden:
         semantic_correct = True
         recommendation = "accept"
     hard_reject = semantic_correct is False or bbox_on_blank_area is True
     accepted = semantic_correct is True and not hard_reject
-    needs_tighter_edit_mask = accepted and (tight_enough is not True or bbox_targets_unrelated_text is True)
     validation = {
         "status": "accepted" if accepted else "rejected",
         "semantic_correct": semantic_correct,
@@ -1488,7 +1342,7 @@ def _fallback_validation_payload(payload: dict, response: dict, validation_image
         "visible_original_text": visible_original_text,
         "recommendation": recommendation or None,
         "reasoning_summary": reasoning_summary,
-        "needs_tighter_edit_mask": needs_tighter_edit_mask,
+        "needs_tighter_edit_mask": False,
         "bbox_padding_px": 0,
         "failure_reason": None if accepted else "fallback_locator_semantic_rejected",
         "validation_image_path": str(validation_image_path),
@@ -1498,6 +1352,8 @@ def _fallback_validation_payload(payload: dict, response: dict, validation_image
     }
     if semantic_overridden:
         validation["semantic_correct_overridden_from_non_text_context"] = True
+    if tightness_overridden:
+        validation["semantic_correct_overridden_from_tightness_only_rejection"] = True
     if sound_effect_overridden:
         validation["semantic_correct_overridden_from_sound_effect_context"] = True
     return validation
@@ -1521,6 +1377,26 @@ def _non_text_context_rejection_mentions_visible_target(
     return _mentions_target_text_inside(summary) and _mentions_only_non_text_context(summary)
 
 
+def _tightness_only_rejection_mentions_visible_target(
+    semantic_correct: bool | None,
+    bbox_on_blank_area: bool | None,
+    bbox_targets_unrelated_text: bool | None,
+    visible_original_text: str | None,
+    reasoning_summary: object,
+) -> bool:
+    if (
+        semantic_correct is not False
+        or bbox_on_blank_area is True
+        or bbox_targets_unrelated_text is True
+        or not visible_original_text
+    ):
+        return False
+    summary = str(reasoning_summary or "").lower()
+    return _mentions_target_text_inside(summary) and (
+        _mentions_only_non_text_context(summary) or _mentions_tightness_only_rejection(summary)
+    )
+
+
 def _mentions_target_text_inside(summary: str) -> bool:
     target_markers = (
         "contains the target text",
@@ -1532,10 +1408,32 @@ def _mentions_target_text_inside(summary: str) -> bool:
         "covers the target text",
         "covers target text",
         "covers the intended target",
+        "encloses the correct",
+        "encloses the target",
+        "encloses target",
+        "encloses the intended target",
+        "encloses the correct vertical japanese text",
+        "encloses the correct japanese text",
+        "encloses the correct text",
+        "box encloses the correct",
         "target text is inside",
         "visible target text is inside",
     )
     return any(marker in summary for marker in target_markers)
+
+
+def _mentions_tightness_only_rejection(summary: str) -> bool:
+    tightness_markers = (
+        "too loose",
+        "extremely loose",
+        "quite loose",
+        "not tight enough",
+        "violates the tightness requirement",
+        "tightness requirement",
+        "large amount of surrounding",
+        "surrounding manga artwork",
+    )
+    return any(marker in summary for marker in tightness_markers)
 
 
 def _mentions_only_non_text_context(summary: str) -> bool:

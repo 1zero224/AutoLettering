@@ -197,7 +197,11 @@ def _write_evidence_grid(run_dir: Path, summary: dict, detections: dict[str, dic
         original_crop = _write_original_crop_tile(tile_dir, record_id, detection.get("image_path"), bbox)
         if original_crop is not None:
             tile_paths.append((f"{record_id} original bbox", original_crop))
-        _append_existing_tile(tile_paths, f"{record_id} rejected GPT crop", record.get("gpt_replacement_crop_path"))
+        _append_existing_tile(
+            tile_paths,
+            _gpt_replacement_crop_label(record_id, record.get("gpt_quality_accepted")),
+            record.get("gpt_replacement_crop_path"),
+        )
         _append_existing_tile(tile_paths, f"{record_id} gated cleaned crop", record.get("phase7_cleanup_crop_path"))
         _append_existing_tile(tile_paths, f"{record_id} Phase7 before|after", record.get("phase7_before_after_path"))
 
@@ -222,6 +226,16 @@ def _write_original_crop_tile(tile_dir: Path, record_id: str, image_path: str | 
 def _append_existing_tile(tile_paths: list[tuple[str, Path]], label: str, path: str | None) -> None:
     if path and Path(path).exists():
         tile_paths.append((label, Path(path)))
+
+
+def _gpt_replacement_crop_label(record_id: str, accepted: bool | None) -> str:
+    if accepted is True:
+        status = "accepted"
+    elif accepted is False:
+        status = "rejected"
+    else:
+        status = "ungated"
+    return f"{record_id} {status} GPT crop"
 
 
 def _write_blank_image(path: Path) -> None:
