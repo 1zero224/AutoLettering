@@ -8,6 +8,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from .experiment_grid import near_square_columns, write_grid
+from .gpt_text_mask import build_text_pixel_gpt_mask
 from .inpaint.nonbubble import inpaint_nonbubble_text
 from .inpaint.nonbubble import build_gpt_edit_mask, build_text_mask
 from .models.gpt_image import (
@@ -46,7 +47,7 @@ def run_phase6_nonbubble_cleanup(
     allow_cta_method_override: bool = False,
     fallback_edit_padding_px: int = 16,
     fallback_mask_expand_px: int = 0,
-    fallback_gpt_mask_shape: str = "rect",
+    fallback_gpt_mask_shape: str = "text_pixels",
 ) -> Path:
     run_dir = Path(output_root) / (run_id or "phase6-nonbubble-cleanup")
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -324,13 +325,17 @@ def _fallback_gpt_cleanup_one(
     edit_context = _write_fallback_edit_context(run_dir, detection, context, mask_local_bbox, padding_px=edit_padding_px)
     edit_mask_bbox = _rebase_bbox(mask_local_bbox, edit_context["local_context_bbox"])
     edit_context["gpt_mask_shape"] = gpt_mask_shape
-    mask_path = _write_fallback_gpt_edit_mask(
+    mask_payload = _write_fallback_gpt_edit_mask(
         edit_context["input_path"],
         edit_context["size"],
         edit_mask_bbox,
         edit_context["mask_path"],
         gpt_mask_shape,
     )
+    mask_path = mask_payload["mask_path"]
+    edit_context["gpt_mask_shape"] = mask_payload["mask_shape"]
+    edit_context["mask_strategy"] = mask_payload["mask_strategy"]
+    edit_context["editable_pixel_count"] = mask_payload["editable_pixel_count"]
     prompt = gpt_image_edit_prompt(detection.get("translated_text", ""))
     gpt_payload = _gpt_image_payload_for_paths(
         run_dir,
@@ -400,7 +405,9 @@ def _edit_context_payload(edit_context: dict) -> dict:
         "mask_path": str(edit_context["mask_path"]),
         "local_context_bbox": list(edit_context["local_context_bbox"]),
         "size": list(edit_context["size"]),
-        "gpt_mask_shape": edit_context.get("gpt_mask_shape", "rect"),
+        "gpt_mask_shape": edit_context.get("gpt_mask_shape", "text_pixels"),
+        "mask_strategy": edit_context.get("mask_strategy"),
+        "editable_pixel_count": edit_context.get("editable_pixel_count"),
     }
 
 
@@ -896,7 +903,6 @@ def _semantically_accepted_loose_validation(validation: dict) -> bool:
         and validation.get("semantic_correct") is True
         and validation.get("tight_enough") is not True
         and validation.get("bbox_on_blank_area") is False
-        and validation.get("bbox_targets_unrelated_text") is False
     )
 
 
@@ -1340,8 +1346,9 @@ def _validate_fallback_locator_semantics(
         [
             "Validate the yellow bbox on this manga crop.",
             "The yellow bbox must cover the visible original Japanese text region that corresponds to the Chinese translation.",
-            "Reject if the yellow bbox is on blank background, unrelated text, English lettering, UI marks, only a partial phrase, or includes large unrelated artwork.",
-            "A slightly loose bbox is acceptable only when it still clearly targets the same original Japanese text.",
+            "Reject if the yellow bbox is on blank background, unrelated text, English lettering, UI marks, or only a partial phrase.",
+            "Do not reject merely because the loose bbox also includes nearby people, hair, props, background, or other non-text manga artwork.",
+            "A loose bbox is acceptable when it still contains the full intended original Japanese text; mark tight_enough=false so a tighter edit mask can be used.",
             f"Chinese translation: {detection.get('translated_text', '')}",
             "Return only JSON with keys: semantic_correct, tight_enough, bbox_on_blank_area, bbox_targets_unrelated_text, visible_original_text, recommendation, reasoning_summary.",
             "recommendation must be either accept or reject.",
@@ -1381,7 +1388,8 @@ def _retry_validate_fallback_locator_semantics(
             "Re-check the yellow bbox only for target correctness.",
             "Do not reject because you cannot confidently transcribe the Japanese characters.",
             "Accept if the yellow bbox covers the visible Japanese manga sound effect, interjection, title, or caption that naturally corresponds to the Chinese translation.",
-            "Reject only if the bbox is on blank background, a non-text object, unrelated text, English-only text, or misses important visible characters.",
+            "Reject only if the bbox is on blank background, contains no target text, targets unrelated text, English-only text, or misses important visible characters.",
+            "Do not reject only because the bbox includes non-text people, hair, props, or background around the target text.",
             f"Chinese translation: {detection.get('translated_text', '')}",
             "Return only JSON with keys: semantic_correct, tight_enough, bbox_on_blank_area, bbox_targets_unrelated_text, visible_original_text, recommendation, reasoning_summary.",
             "recommendation must be either accept or reject.",
@@ -1421,9 +1429,9 @@ def _fallback_validation_payload(payload: dict, response: dict, validation_image
     bbox_on_blank_area = _mimo_bool(payload.get("bbox_on_blank_area"))
     bbox_targets_unrelated_text = _mimo_bool(payload.get("bbox_targets_unrelated_text"))
     recommendation = str(payload.get("recommendation", "")).strip().lower()
-    hard_reject = semantic_correct is False or bbox_on_blank_area is True or bbox_targets_unrelated_text is True
+    hard_reject = semantic_correct is False or bbox_on_blank_area is True
     accepted = semantic_correct is True and not hard_reject
-    needs_tighter_edit_mask = accepted and tight_enough is not True
+    needs_tighter_edit_mask = accepted and (tight_enough is not True or bbox_targets_unrelated_text is True)
     status = "accepted" if accepted else "rejected"
     return {
         "status": status,
@@ -1652,12 +1660,17 @@ def _write_local_gpt_mask(
     size: tuple[int, int],
     local_bbox: tuple[int, int, int, int],
     output_path: Path,
-) -> Path:
+) -> dict:
     mask = Image.new("RGBA", size, (0, 0, 0, 255))
     alpha = Image.new("L", size, 255)
     ImageDraw.Draw(alpha).rectangle(local_bbox, fill=0)
     Image.merge("RGBA", [Image.new("L", size, 0)] * 3 + [alpha]).save(output_path)
-    return output_path
+    return {
+        "mask_path": output_path,
+        "mask_shape": "rect",
+        "mask_strategy": "rect_fallback_requested",
+        "editable_pixel_count": (local_bbox[2] - local_bbox[0] + 1) * (local_bbox[3] - local_bbox[1] + 1),
+    }
 
 
 def _write_fallback_gpt_edit_mask(
@@ -1666,19 +1679,35 @@ def _write_fallback_gpt_edit_mask(
     local_bbox: tuple[int, int, int, int],
     output_path: Path,
     mask_shape: str,
-) -> Path:
+) -> dict:
     if mask_shape == "rect":
         return _write_local_gpt_mask(size, local_bbox, output_path)
-    if mask_shape != "text_ink":
+    if mask_shape not in {"text_ink", "text_pixels"}:
         raise ValueError(f"unsupported_fallback_gpt_mask_shape:{mask_shape}")
 
     with Image.open(image_path) as image:
-        crop = image.convert("RGB").resize(size).crop(local_bbox)
-    text_mask = build_text_mask(crop, dark_threshold=170, dilate_px=5, polarity="dark_on_light")
-    full_mask = Image.new("L", size, 0)
-    full_mask.paste(text_mask, local_bbox[:2])
-    build_gpt_edit_mask(full_mask).save(output_path)
-    return output_path
+        source = image.convert("RGB").resize(size)
+    if mask_shape == "text_ink":
+        crop = source.crop(local_bbox)
+        text_mask = build_text_mask(crop, dark_threshold=170, dilate_px=5, polarity="dark_on_light")
+        full_mask = Image.new("L", size, 0)
+        full_mask.paste(text_mask, local_bbox[:2])
+        build_gpt_edit_mask(full_mask).save(output_path)
+        editable_pixel_count = int(np.array(full_mask, dtype=np.uint8).sum() // 255)
+        return {
+            "mask_path": output_path,
+            "mask_shape": "text_ink",
+            "mask_strategy": "legacy_text_ink",
+            "editable_pixel_count": editable_pixel_count,
+        }
+    mask_result = build_text_pixel_gpt_mask(source, local_bbox, expand_px=2)
+    mask_result.gpt_mask.save(output_path)
+    return {
+        "mask_path": output_path,
+        "mask_shape": "text_pixels",
+        "mask_strategy": mask_result.strategy,
+        "editable_pixel_count": mask_result.editable_pixel_count,
+    }
 
 
 def _expanded_local_bbox(

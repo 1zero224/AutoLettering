@@ -7,6 +7,7 @@ import re
 from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageOps
 
 from .experiment_grid import near_square_columns
+from .gpt_text_mask import build_text_pixel_gpt_mask
 from .models.gpt_image import (
     GptImageConfig,
     GptImageEditClient,
@@ -258,7 +259,8 @@ def _run_segment(
     with Image.open(context["input_path"]) as image:
         segment_input = image.convert("RGB").crop(segment_bbox)
     local_edit_bbox = _offset_bbox(local_bbox, segment_bbox)
-    mask = _transparent_rect_mask(segment_input.size, local_edit_bbox)
+    mask_result = build_text_pixel_gpt_mask(segment_input, local_edit_bbox, expand_px=rect_mask_expand_px)
+    mask = mask_result.gpt_mask
     segment_input.save(input_path)
     mask.save(mask_path)
     _mask_overlay(segment_input, mask).save(overlay_path)
@@ -274,6 +276,8 @@ def _run_segment(
         "input_path": str(input_path),
         "mask_path": str(mask_path),
         "mask_overlay_path": str(overlay_path),
+        "mask_strategy": mask_result.strategy,
+        "editable_pixel_count": mask_result.editable_pixel_count,
         "gpt_image2": gpt,
     }
 

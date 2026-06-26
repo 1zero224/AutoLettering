@@ -58,8 +58,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--fallback-gpt-mask-shape",
-        choices=["rect", "text_ink"],
-        default="rect",
+        choices=["text_pixels", "rect", "text_ink"],
+        default="text_pixels",
         help="Shape of the transparent gpt-image-2 edit mask for fallback records.",
     )
     return parser

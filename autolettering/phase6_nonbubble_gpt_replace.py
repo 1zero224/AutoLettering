@@ -7,6 +7,7 @@ from pathlib import Path
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 from .experiment_grid import near_square_columns
+from .gpt_text_mask import build_text_pixel_gpt_mask
 from .inpaint.nonbubble import inpaint_nonbubble_text
 from .models.gpt_image import (
     GptImageConfig,
@@ -92,6 +93,7 @@ def _process_one(
         run_dir,
         detection,
         bbox,
+        polarity=polarity,
         context_padding=context_padding,
         rect_mask_expand_px=rect_mask_expand_px,
     )
@@ -118,6 +120,7 @@ def _write_gpt_context_package(
     run_dir: Path,
     detection: dict,
     bbox: tuple[int, int, int, int],
+    polarity: str,
     context_padding: int,
     rect_mask_expand_px: int,
 ) -> dict:
@@ -126,25 +129,32 @@ def _write_gpt_context_package(
     context_bbox = _expand_bbox(bbox, source.size, context_padding)
     local_target = _offset_bbox(_expand_bbox(bbox, source.size, rect_mask_expand_px), context_bbox)
     context_crop = source.crop(context_bbox)
-    mask = _transparent_rect_mask(context_crop.size, local_target)
+    mask_result = build_text_pixel_gpt_mask(context_crop, local_target, polarity=polarity, expand_px=rect_mask_expand_px)
+    mask = mask_result.gpt_mask
     mask_overlay = _mask_overlay(context_crop, mask)
 
     safe_id = _safe_name(detection["record_id"])
     input_path = run_dir / "gpt_replace_input" / f"{safe_id}.png"
+    text_mask_path = run_dir / "gpt_replace_text_mask" / f"{safe_id}.png"
     mask_path = run_dir / "gpt_replace_mask" / f"{safe_id}.png"
     overlay_path = run_dir / "gpt_replace_mask_overlay" / f"{safe_id}.png"
     input_path.parent.mkdir(parents=True, exist_ok=True)
+    text_mask_path.parent.mkdir(parents=True, exist_ok=True)
     mask_path.parent.mkdir(parents=True, exist_ok=True)
     overlay_path.parent.mkdir(parents=True, exist_ok=True)
     context_crop.save(input_path)
+    mask_result.text_mask.save(text_mask_path)
     mask.save(mask_path)
     mask_overlay.save(overlay_path)
     return {
         "input_path": input_path,
+        "text_mask_path": text_mask_path,
         "mask_path": mask_path,
         "mask_overlay_path": overlay_path,
         "context_bbox": context_bbox,
         "local_target_bbox": local_target,
+        "mask_strategy": mask_result.strategy,
+        "editable_pixel_count": mask_result.editable_pixel_count,
     }
 
 
@@ -233,6 +243,8 @@ def _write_mimo_evaluation(run_dir: Path, grid_path: Path, rows: list[dict], cli
         [
             "Evaluate this near-square manga non-bubble text experiment grid.",
             "For each record, original shows the context crop, mask shows the transparent edit area overlay, gpt-image-2 cn should replace the Japanese text with the exact Chinese translation in the same masked region.",
+            "The detected bbox/context crop may include people, hair, props, panel texture, or background; do not penalize that alone when the target original text is included.",
+            "Judge whether gpt-image-2 changed only the intended lettering and preserved non-text artwork inside and outside the loose bbox.",
             "The BT method tiles are background-repair-only comparisons; do not expect Chinese text in BT tiles.",
             "Score gpt-image-2 by: exact simplified Chinese text correctness, no Japanese text remaining, typography/layout fits the original region, style/angle consistency, and preservation outside the mask.",
             "Be strict about Chinese glyph variants: for example 暂 is correct when requested, but 暫 is incorrect.",

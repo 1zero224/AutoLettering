@@ -162,7 +162,7 @@ def test_phase6_nonbubble_cli_can_disable_mimo_locator():
     assert args.skip_mimo is True
     assert args.fallback_edit_padding_px == 16
     assert args.fallback_mask_expand_px == 0
-    assert args.fallback_gpt_mask_shape == "rect"
+    assert args.fallback_gpt_mask_shape == "text_pixels"
 
 
 def test_phase6_nonbubble_cli_accepts_fallback_gpt_mask_geometry():
@@ -175,13 +175,13 @@ def test_phase6_nonbubble_cli_accepts_fallback_gpt_mask_geometry():
             "--fallback-mask-expand-px",
             "10",
             "--fallback-gpt-mask-shape",
-            "text_ink",
+            "text_pixels",
         ]
     )
 
     assert args.fallback_edit_padding_px == 32
     assert args.fallback_mask_expand_px == 10
-    assert args.fallback_gpt_mask_shape == "text_ink"
+    assert args.fallback_gpt_mask_shape == "text_pixels"
 
 
 def test_phase6_nonbubble_cli_builds_mimo_config_from_env(monkeypatch):

@@ -170,6 +170,8 @@ def test_build_replacement_quality_prompt_is_strict_about_gpt_text():
     assert "Do not select a different text region" in prompt
     assert "新川崎（仮）" in prompt
     assert "If the replacement appears in a different bubble" in prompt
+    assert "may legitimately include nearby non-text context" in prompt
+    assert "Do not set region_correct=false for extra non-text context alone" in prompt
     assert "observed_text" in prompt
 
 

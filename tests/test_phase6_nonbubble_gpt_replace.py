@@ -3,6 +3,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
+from autolettering.gpt_text_mask import build_target_text_mask
 from autolettering.models.gpt_image import GptImageConfig
 from autolettering.phase6_nonbubble_gpt_replace import run_phase6_nonbubble_gpt_replace
 
@@ -37,11 +38,61 @@ def test_run_phase6_nonbubble_gpt_replace_uses_context_mask_and_target_text(tmp_
     assert row["gpt_image2_replace"]["request"]["mode"] == "masked_chinese_replacement"
     assert row["gpt_image2_replace"]["request"]["target_text"] == "背景文字"
     assert Path(row["gpt_context"]["input_path"]).exists()
+    assert Path(row["gpt_context"]["text_mask_path"]).exists()
+    assert row["gpt_context"]["mask_strategy"] == "text_pixels_within_bbox"
+    assert row["gpt_context"]["editable_pixel_count"] > 0
     with Image.open(row["gpt_context"]["mask_path"]) as mask:
-        local = row["local_target_bbox"]
-        assert mask.getpixel((local[0], local[1]))[3] == 0
+        assert any(value == 0 for value in mask.getchannel("A").getdata())
         assert mask.getpixel((0, 0))[3] == 255
     assert (run_dir / "visuals" / "gpt-replace-bt-grid.png").exists()
+
+
+def test_run_phase6_nonbubble_gpt_replace_masks_text_pixels_inside_large_bbox(tmp_path: Path, monkeypatch):
+    image_path = _write_large_bbox_image(tmp_path / "page-large.png")
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_large_bbox_detection(detection_run / "detections.jsonl", image_path)
+    monkeypatch.setattr(
+        "autolettering.inpaint.nonbubble.balloons_patchmatch_inpaint",
+        lambda crop_arg, mask_arg: Image.new("RGB", crop_arg.size, "white"),
+    )
+
+    run_dir = run_phase6_nonbubble_gpt_replace(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-gpt-replace-large-bbox-mask-test",
+        sample_limit=1,
+        bt_methods=["bt_patchmatch"],
+        context_padding=4,
+        rect_mask_expand_px=1,
+    )
+
+    rows = _read_jsonl(run_dir / "gpt-replace-results.jsonl")
+    row = rows[0]
+    local = row["local_target_bbox"]
+    with Image.open(row["gpt_context"]["mask_path"]) as mask_image:
+        alpha = mask_image.getchannel("A")
+        editable_pixels = sum(1 for value in alpha.getdata() if value == 0)
+        target_area = (local[2] - local[0] + 1) * (local[3] - local[1] + 1)
+        assert editable_pixels < target_area * 0.45
+        # The non-text solid figure is inside the broad bbox, but must remain protected.
+        assert alpha.getpixel((local[0] + 12, local[1] + 12)) == 255
+        # The text strokes inside the same bbox are editable.
+        assert alpha.getpixel((local[0] + 73, local[1] + 14)) == 0
+    assert row["gpt_context"]["mask_strategy"] == "text_pixels_within_bbox"
+
+
+def test_light_on_dark_text_pixel_mask_excludes_bright_crop_edge():
+    crop = Image.new("RGB", (120, 60), "black")
+    draw = ImageDraw.Draw(crop)
+    for x in range(20, 84, 12):
+        draw.rectangle((x, 20, x + 7, 34), fill="white")
+    draw.rectangle((112, 0, 119, 59), fill="white")
+
+    mask = build_target_text_mask(crop, polarity="light_on_dark", expand_px=2)
+
+    assert mask.getpixel((24, 24)) == 255
+    assert mask.getpixel((116, 30)) == 0
 
 
 def test_run_phase6_nonbubble_gpt_replace_records_bt_method_failures(tmp_path: Path, monkeypatch):
@@ -143,6 +194,17 @@ def _write_nonbubble_image(path: Path) -> Path:
     return path
 
 
+def _write_large_bbox_image(path: Path) -> Path:
+    image = Image.new("RGB", (160, 120), (235, 232, 224))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((15, 20, 45, 84), fill=(36, 36, 36))
+    for y in range(28, 82, 18):
+        draw.rectangle((82, y, 104, y + 8), fill=(20, 20, 20))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(path)
+    return path
+
+
 def _write_detection(path: Path, image_path: Path) -> None:
     row = {
         "status": "ok",
@@ -152,6 +214,20 @@ def _write_detection(path: Path, image_path: Path) -> None:
         "group_name": "框外",
         "translated_text": "背景文字",
         "selected_text_box_xyxy": [20, 15, 90, 75],
+    }
+    path.write_text(json.dumps(row, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _write_large_bbox_detection(path: Path, image_path: Path) -> None:
+    row = {
+        "status": "ok",
+        "image_name": "page-large.png",
+        "image_path": str(image_path),
+        "record_id": "page-large.png#1",
+        "group_name": "框外",
+        "translated_text": "只改文字",
+        "selected_text_box_xyxy": [10, 15, 120, 90],
+        "candidate_boxes": [{"xyxy": [10, 15, 120, 90], "score": 1.0, "polarity": "dark_on_light"}],
     }
     path.write_text(json.dumps(row, ensure_ascii=False) + "\n", encoding="utf-8")
 

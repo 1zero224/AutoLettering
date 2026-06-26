@@ -71,7 +71,9 @@ def test_gpt_image_prompt_spells_out_repeated_sound_effect_characters():
 def test_gpt_image_prompt_preserves_non_text_art_inside_wide_mask():
     prompt = gpt_image_edit_prompt("好孩子不要看…")
 
-    assert "The transparent masked area may include non-text manga artwork" in prompt
+    assert "detected bbox is only a loose container" in prompt
+    assert "If the bbox contains passerby figures" in prompt
+    assert "transparent mask indicates candidate original text glyph pixels" in prompt
     assert "Only replace the original Japanese text glyphs" in prompt
     assert "person, face, hair, clothing, hands, body" in prompt
     assert "background line art, screentone, panel borders, texture, and motion lines" in prompt
@@ -1728,6 +1730,30 @@ def test_should_not_retry_validation_for_clear_unrelated_rejection():
     }
 
     assert _should_retry_fallback_validation(validation) is False
+
+
+def test_fallback_validation_accepts_target_text_with_extra_non_text_artwork(tmp_path: Path):
+    response = {
+        "raw_text": "{}",
+        "request": {"kind": "phase6_fallback_text_locator_validation"},
+        "response": {"status": "ok"},
+    }
+    payload = {
+        "semantic_correct": True,
+        "tight_enough": False,
+        "bbox_on_blank_area": False,
+        "bbox_targets_unrelated_text": True,
+        "visible_original_text": "スッ スッ スッ スッ",
+        "recommendation": "accept",
+        "reasoning_summary": "The bbox contains the target text and also covers nearby hair/background.",
+    }
+
+    validation = _fallback_validation_payload(payload, response, tmp_path / "validation.png")
+
+    assert validation["status"] == "accepted"
+    assert validation["failure_reason"] is None
+    assert validation["needs_tighter_edit_mask"] is True
+    assert validation["bbox_targets_unrelated_text"] is True
 
 
 def test_run_phase6_nonbubble_cleanup_fallback_does_not_call_gpt_when_semantic_validation_rejects(
