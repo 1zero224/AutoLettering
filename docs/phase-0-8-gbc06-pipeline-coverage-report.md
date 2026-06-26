@@ -556,6 +556,67 @@ next_experiments[0]=GBC06_02.png#14
 next_experiments[1]=GBC06_03.png#7
 ```
 
+The v27 report supersedes the v26 `GBC06_03.png#5` direct replacement evidence
+with the latest v18 loose-bbox/text-pixel-mask GPT result. The coverage entry
+keeps v26 history and appends the v18 Phase 6 cleanup, Phase 6 replacement
+quality, integrated Phase 7/8 smoke, MIMO Phase 7 evaluation, and Phase 8 export
+audit:
+
+```text
+phase6-gbc06-03-5-fallback-gpt-image2-v18-accepted-bbox-no-refine
+phase6-gbc06-03-5-fallback-gpt-image2-v18-quality
+phase7-8-gbc06-03-batch-4-6-with-5-gpt-v18-preview-v1
+phase8-gbc06-03-batch-4-6-with-5-gpt-v18-audit-v1
+phase0-8-gbc06-pipeline-coverage-v27-gbc06-03-4-6-gpt-v18
+```
+
+The v18 integrated Phase 7/8 smoke uses:
+
+```text
+phase2-gbc06-03-batch-4-6-cta-detection-v3-threshold40-merged
+phase3-gbc06-03-batch-4-6-mimo-font-selection
+phase4-gbc06-03-batch-4-6-layout-v1
+phase5-gbc06-03-batch-4-6-angle
+phase6-gbc06-03-batch-4-6-text-mask-inpaint-v1
+phase6-gbc06-03-5-fallback-gpt-image2-v18-accepted-bbox-no-refine
+phase6-gbc06-03-5-fallback-gpt-image2-v18-quality
+```
+
+MIMO evaluated the v18 full `GBC06_03.png#4-#6` page preview at `score=9`,
+`usable=true`, `original_text_removed=true`, `art_preserved=true`, and
+`lettering_readable=true`, with `issues=[]`. The Phase 8 manifest exports two
+editable Photoshop text layers for `#4` and `#6`, and keeps `#5` only as a
+quality-accepted `gpt_image2_masked_edit` repair source in the page-level
+`修复图像`. The `#5` repair source stores the loose locator validation:
+`tight_enough=false`, `needs_tighter_edit_mask=false`, and reasoning that the
+bbox includes a character head/background while fully containing the intended
+Japanese text. The Phase 8 export audit passed with two vertical top anchors and
+no record issues.
+
+Observed v27 coverage result:
+
+```text
+base_record_count=41
+complete_record_count=41
+incomplete_record_count=0
+phase1_labelplus covered=41 missing=0
+phase2_detection covered=41 missing=0
+phase3_font_selection covered=40 missing=1
+phase4_layout covered=40 missing=1
+phase5_angle covered=40 missing=1
+phase6_cleanup covered=41 missing=0
+phase7_preview covered=41 missing=0
+phase8_export covered=41 missing=0
+GBC06_03.png#5 route_skipped_stages=phase3_font_selection,phase4_layout,phase5_angle
+phase6_gpt_replacement checked=2 failures=0 record_issues=0
+phase7_preview evaluations=18 usable=18/18 failed=0 low_score=0 records=41 record_issues=0
+phase8_export audits=8 passed=8/8 records=11 record_issues=0
+phase1_pending_detection_count=139
+next_records=[]
+next_experiments[0]=GBC06_02.png#14
+next_experiments[1]=GBC06_03.png#7
+```
+
 The first `next-limit=12` Phase 1 records missing detection in v17 are:
 
 ```text
