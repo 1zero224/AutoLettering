@@ -199,6 +199,15 @@ Current v23 extends v22 with the real MIMO Phase 3 font-selection run for
 python experiments/pipeline_coverage_report.py --registry-file docs/pipeline-runs.gbc06.json --registry-entry phase0-8-gbc06-v23-gbc06-03-font-selection --output-root outputs/runs --next-limit 12
 ```
 
+Current v26 extends the accepted v25 `GBC06_03.png#1-#3` chain with
+`GBC06_03.png#4-#6`. The key change is that `#5` now uses the validated
+`phase6-gbc06-03-5-fallback-gpt-image2-v14-text-pixels-prompt-only` result
+instead of the older v4 GPT crop:
+
+```powershell
+python experiments/pipeline_coverage_report.py --registry-file docs/pipeline-runs.gbc06.json --registry-entry phase0-8-gbc06-v26-gbc06-03-4-6-gpt-v14 --output-root outputs/runs --next-limit 12
+```
+
 ## Generated Artifacts
 
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage/pipeline-coverage.json`
@@ -241,6 +250,8 @@ python experiments/pipeline_coverage_report.py --registry-file docs/pipeline-run
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v20-gbc06-33-complete/reports/pipeline-coverage-report.md`
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v21-next-experiments/pipeline-coverage.json`
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v21-next-experiments/reports/pipeline-coverage-report.md`
+- `outputs/runs/phase0-8-gbc06-pipeline-coverage-v26-gbc06-03-4-6-gpt-v14/pipeline-coverage.json`
+- `outputs/runs/phase0-8-gbc06-pipeline-coverage-v26-gbc06-03-4-6-gpt-v14/reports/pipeline-coverage-report.md`
 - `outputs/runs/phase2-gbc06-03-batch-1-3-cta-detection-v1/detections.jsonl`
 - `outputs/runs/phase2-gbc06-03-batch-1-3-cta-detection-v1/debug/detection/GBC06_03-1.png`
 - `outputs/runs/phase2-gbc06-03-batch-1-3-cta-detection-v1/debug/detection/GBC06_03-2.png`
@@ -473,6 +484,76 @@ phase1_pending_detection_count=142
 next_records=[]
 next_experiments[0]=GBC06_02.png#14
 next_experiments[1]=GBC06_03.png#4
+```
+
+The v26 report promotes the next `GBC06_03.png#4-#6` batch through Phase 8.
+`#4` and `#6` use the existing text-mask inpaint cleanup followed by normal
+editable text overlays. `#5` is the non-bubble fallback case and now uses the
+accepted v14 `gpt-image-2` text-pixel masked replacement:
+
+```text
+phase2-gbc06-03-batch-4-6-cta-detection-v3-threshold40-merged
+phase3-gbc06-03-batch-4-6-mimo-font-selection
+phase4-gbc06-03-batch-4-6-layout-v1
+phase5-gbc06-03-batch-4-6-angle
+phase6-gbc06-03-batch-4-6-text-mask-inpaint-v1
+phase6-gbc06-03-5-fallback-gpt-image2-v14-text-pixels-prompt-only
+phase7-gbc06-03-batch-4-6-with-5-gpt-v14-preview-v1
+phase8-gbc06-03-batch-4-6-with-5-gpt-v14-export-v1
+phase7-gbc06-03-batch-4-6-with-5-gpt-v14-eval-v1
+phase8-gbc06-03-batch-4-6-with-5-gpt-v14-audit-v1
+```
+
+The v26 Phase 7 manifest confirms that `GBC06_03.png#5` uses:
+
+```text
+cleanup_method=gpt_image2_masked_edit
+cleanup_crop_path=outputs/runs/phase6-gbc06-03-5-fallback-gpt-image2-v14-text-pixels-prompt-only/fallback_replacement_crop/GBC06-03-png-5.png
+text_overlay_required=false
+gpt_replacement_quality.accepted=true
+```
+
+MIMO evaluated the full `#4-#6` preview at `score=8`, `usable=true`,
+`original_text_removed=true`, `art_preserved=true`, and
+`lettering_readable=true`. It reported two minor issues: simplified Chinese in
+the translated text, and `#5` slightly obscuring the speech-bubble tail, while
+still judging the page usable. The Phase 8 manifest exports two editable text
+layers for `#4` and `#6`; `#5` appears only in `repair_sources[]` and the
+page-level `修复图像`, because its translated text is already baked into the
+quality-accepted GPT replacement crop. The Phase 8 audit passed with two
+vertical top anchors and no record issues.
+
+For this direct GPT replacement route, the fallback visual locator bbox is
+treated as a text-containing locator hint rather than a clean inpainting
+boundary. It may include non-target art or nearby characters as long as it
+contains the intended source text; the `gpt-image-2` masked-edit prompt and text
+pixel mask carry the constraint that only text content should be changed.
+Coverage therefore marks `GBC06_03.png#5` complete without Phase 3 font
+selection, Phase 4 layout, or Phase 5 angle records only when Phase 6 cleanup,
+Phase 7 preview, and Phase 8 export evidence all exist.
+
+Observed v26 coverage result:
+
+```text
+base_record_count=41
+complete_record_count=41
+incomplete_record_count=0
+phase1_labelplus covered=41 missing=0
+phase2_detection covered=41 missing=0
+phase3_font_selection covered=40 missing=1
+phase4_layout covered=40 missing=1
+phase5_angle covered=40 missing=1
+phase6_cleanup covered=41 missing=0
+phase7_preview covered=41 missing=0
+phase8_export covered=41 missing=0
+GBC06_03.png#5 route_skipped_stages=phase3_font_selection,phase4_layout,phase5_angle
+phase6_gpt_replacement checked=1 failures=0 record_issues=0
+phase7_preview evaluations=17 usable=17/17 failed=0 low_score=0 records=41 record_issues=0
+phase8_export audits=7 passed=7/7 records=11 record_issues=0
+phase1_pending_detection_count=139
+next_records=[]
+next_experiments[0]=GBC06_02.png#14
+next_experiments[1]=GBC06_03.png#7
 ```
 
 The first `next-limit=12` Phase 1 records missing detection in v17 are:

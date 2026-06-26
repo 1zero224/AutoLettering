@@ -41,7 +41,7 @@ def build_pipeline_coverage(
     meta, phase1_ids = _phase1_records(phase1_run_dir)
     detection_rows = _jsonl_at_many(detection_run_dir, "detections.jsonl")
     detection_all = _row_ids(detection_rows)
-    detection_ok = _status_ids(detection_rows, "ok")
+    detection_ok = _detection_stage_ids(detection_rows)
     _merge_row_meta(meta, detection_rows)
     stages = _stage_records(
         phase1_ids,
@@ -60,7 +60,7 @@ def build_pipeline_coverage(
         phase6_gpt_quality_run_dir=phase6_gpt_quality_run_dir,
         phase6_cleanup_quality_run_dir=phase6_cleanup_quality_run_dir,
     )
-    records = _record_coverage(base_ids, meta, stages, quality_issues_by_record(quality))
+    records = _record_coverage(base_ids, meta, stages, quality_issues_by_record(quality), detection_rows)
     phase1_pending_detection = _phase1_pending_detection_records(phase1_ids, detection_all, meta, next_limit)
     return {
         "summary": _summary(base_stage, base_ids, records),
@@ -115,11 +115,18 @@ def _record_coverage(
     meta: dict[str, dict],
     stages: dict[str, list[str]],
     quality_issues: dict[str, list[str]],
+    detection_rows: list[dict],
 ) -> dict[str, dict]:
     result: dict[str, dict] = {}
     stage_sets = {name: set(ids) for name, ids in stages.items() if ids}
+    route_skips = _stage_skips_by_record(detection_rows, stage_sets)
     for record_id in base_ids:
-        missing = [name for name in STAGE_ORDER if name in stage_sets and record_id not in stage_sets[name]]
+        skipped_stages = route_skips.get(record_id, set())
+        missing = [
+            name
+            for name in STAGE_ORDER
+            if name in stage_sets and name not in skipped_stages and record_id not in stage_sets[name]
+        ]
         result[record_id] = {
             "record_id": record_id,
             "group_name": meta.get(record_id, {}).get("group_name"),
@@ -128,7 +135,31 @@ def _record_coverage(
             "missing_stages": missing,
             "quality_issues": quality_issues.get(record_id, []),
         }
+        if skipped_stages:
+            result[record_id]["route_skipped_stages"] = [name for name in STAGE_ORDER if name in skipped_stages]
     return result
+
+
+def _stage_skips_by_record(detection_rows: list[dict], stage_sets: dict[str, set[str]]) -> dict[str, set[str]]:
+    skips: dict[str, set[str]] = {}
+    for row in detection_rows:
+        record_id = row.get("record_id")
+        if not record_id or not _is_gpt_direct_replacement_route(row):
+            continue
+        record_id = str(record_id)
+        if not _has_gpt_direct_replacement_outputs(record_id, stage_sets):
+            continue
+        skips[record_id] = {"phase3_font_selection", "phase4_layout", "phase5_angle"}
+    return skips
+
+
+def _is_gpt_direct_replacement_route(row: dict) -> bool:
+    route = row.get("lettering_route") or {}
+    return isinstance(route, dict) and route.get("route") == "mimo_locator_gpt_image2_masked_edit"
+
+
+def _has_gpt_direct_replacement_outputs(record_id: str, stage_sets: dict[str, set[str]]) -> bool:
+    return all(record_id in stage_sets.get(stage, set()) for stage in ("phase6_cleanup", "phase7_preview", "phase8_export"))
 
 
 def _phase1_records(run_dir: str | Path | None) -> tuple[dict[str, dict], list[str]]:
@@ -326,6 +357,15 @@ def _cleanup_ids(run_dirs: Iterable[str | Path] | None) -> list[str]:
     ids: list[str] = []
     for run_dir in run_dirs or []:
         ids.extend(_status_ids(_jsonl_at(run_dir, "cleanup-results.jsonl"), "cleaned"))
+    return _unique(ids)
+
+
+def _detection_stage_ids(rows: list[dict]) -> list[str]:
+    ids = [
+        str(row["record_id"])
+        for row in rows
+        if row.get("record_id") and row.get("status") in {"ok", "fallback_required"}
+    ]
     return _unique(ids)
 
 

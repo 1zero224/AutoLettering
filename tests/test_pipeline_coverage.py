@@ -159,6 +159,80 @@ def test_build_pipeline_coverage_counts_phase8_repair_sources_as_exported_record
     assert report["stages"]["phase8_export"]["covered_record_ids"] == ["r1"]
 
 
+def test_build_pipeline_coverage_treats_gpt_direct_replacement_route_as_complete(tmp_path: Path):
+    phase1 = tmp_path / "phase1"
+    phase2 = tmp_path / "phase2"
+    phase6 = tmp_path / "phase6"
+    phase7 = tmp_path / "phase7"
+    phase8 = tmp_path / "phase8"
+    _write_phase1_manifest(phase1 / "manifest.json")
+    _write_jsonl(
+        phase2 / "detections.jsonl",
+        [
+            {
+                "record_id": "r2",
+                "status": "fallback_required",
+                "group_name": "框外",
+                "image_name": "page1.png",
+                "lettering_route": {"route": "mimo_locator_gpt_image2_masked_edit"},
+            }
+        ],
+    )
+    _write_jsonl(
+        phase6 / "cleanup-results.jsonl",
+        [
+            {
+                "record_id": "r2",
+                "status": "cleaned",
+                "cleanup": {
+                    "method": "bt_lama_large_inpaint",
+                    "replacement_method": "gpt_image2_masked_edit",
+                    "replacement_crop_path": "replacement.png",
+                    "gpt_replacement_quality": {"accepted": True},
+                },
+            }
+        ],
+    )
+    _write_phase7_preview(phase7 / "preview-results.jsonl", ["r2"])
+    _write_phase8_manifest(phase8 / "photoshop-manifest.json", [])
+    payload = json.loads((phase8 / "photoshop-manifest.json").read_text(encoding="utf-8"))
+    payload["pages"][0]["repair_sources"] = [
+        {
+            "record_id": "r2",
+            "replacement_method": "gpt_image2_masked_edit",
+            "text_overlay_required": False,
+        }
+    ]
+    (phase8 / "photoshop-manifest.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    report = build_pipeline_coverage(
+        phase1_run_dir=phase1,
+        detection_run_dir=phase2,
+        cleanup_run_dirs=[phase6],
+        preview_run_dir=phase7,
+        export_run_dir=phase8,
+        next_limit=3,
+    )
+
+    assert report["summary"]["complete_record_count"] == 1
+    assert report["summary"]["incomplete_record_count"] == 0
+    assert report["stages"]["phase2_detection"]["covered_record_ids"] == ["r2"]
+    assert report["records"]["r2"]["covered_stages"] == [
+        "phase1_labelplus",
+        "phase2_detection",
+        "phase6_cleanup",
+        "phase7_preview",
+        "phase8_export",
+    ]
+    assert report["records"]["r2"]["missing_stages"] == []
+    assert report["records"]["r2"]["route_skipped_stages"] == [
+        "phase3_font_selection",
+        "phase4_layout",
+        "phase5_angle",
+    ]
+    assert report["next_records"] == []
+
+
 def test_build_pipeline_coverage_merges_multiple_detection_runs(tmp_path: Path):
     phase1 = tmp_path / "phase1"
     phase2a = tmp_path / "phase2a"
