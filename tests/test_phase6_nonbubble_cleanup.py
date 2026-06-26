@@ -1,5 +1,6 @@
 import json
 import importlib.util
+import inspect
 from pathlib import Path
 
 import numpy as np
@@ -26,6 +27,7 @@ from autolettering.phase6_nonbubble import _should_retry_fallback_validation
 from autolettering.phase6_nonbubble import _fallback_mask_bbox
 from autolettering.phase6_nonbubble import _fallback_validation_payload
 from autolettering.phase6_nonbubble import _can_try_anchor_recovery
+from autolettering.phase6_nonbubble import _fallback_gpt_cleanup_one
 
 
 def test_build_text_mask_and_gpt_mask_use_expected_alpha_convention():
@@ -73,9 +75,12 @@ def test_gpt_image_prompt_preserves_non_text_art_inside_wide_mask():
     prompt = gpt_image_edit_prompt("好孩子不要看…")
 
     assert "detected bbox is only a loose container" in prompt
+    assert "Use the bbox only to locate the intended original lettering" in prompt
     assert "If the bbox contains passerby figures" in prompt
     assert "transparent mask indicates candidate original text glyph pixels" in prompt
+    assert "If the transparent mask accidentally touches non-text art" in prompt
     assert "Only replace the original Japanese text glyphs" in prompt
+    assert "Do not modify any character, passerby, face, body, clothing, hair" in prompt
     assert "person, face, hair, clothing, hands, body" in prompt
     assert "background line art, screentone, panel borders, texture, and motion lines" in prompt
     assert "Do not repaint, erase, blur, white out, or simplify any non-text artwork" in prompt
@@ -120,6 +125,12 @@ def test_fallback_locator_prompts_allow_loose_bbox_when_it_contains_target_text(
     assert "must include all visible target text" in locator_prompt
     assert "do not reject or relocate only because it also includes passerby" in validation_prompt
     assert "bbox_targets_unrelated_text=true only when it targets a different text string" in validation_prompt
+
+
+def test_internal_fallback_gpt_cleanup_defaults_to_text_pixel_mask():
+    signature = inspect.signature(_fallback_gpt_cleanup_one)
+
+    assert signature.parameters["gpt_mask_shape"].default == "text_pixels"
 
 
 def test_semantically_accepted_loose_fallback_bbox_does_not_expand_editable_mask(tmp_path: Path):
@@ -1676,6 +1687,7 @@ def test_run_phase6_nonbubble_cleanup_fallback_calls_gpt_when_accepted_bbox_stay
 
     monkeypatch.setattr("autolettering.phase6_nonbubble.GptImageEditClient", lambda config: FakeGptClient())
 
+    mimo = _FakeMimoLocatorLooseAcceptedStillLoose()
     run_dir = run_phase6_nonbubble_cleanup(
         detection_run_dir=detection_run,
         output_root=tmp_path / "outputs",
@@ -1683,16 +1695,20 @@ def test_run_phase6_nonbubble_cleanup_fallback_calls_gpt_when_accepted_bbox_stay
         sample_limit=1,
         gpt_config=GptImageConfig(base_url="https://example.test/v1/images", api_key="test", model="gpt-image-2"),
         call_gpt_image=True,
-        mimo_client=_FakeMimoLocatorLooseAcceptedStillLoose(),
+        mimo_client=mimo,
     )
 
     row = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]
     assert calls["gpt"] == 1
+    assert "phase6_fallback_text_locator_tightness_retry" not in mimo.kinds
     assert row["status"] == "cleaned"
     assert row["cleanup"]["replacement_method"] == "gpt_image2_masked_edit"
+    assert row["cleanup"]["gpt_mask_shape"] == "text_pixels"
     assert row["fallback_locator_validation"]["status"] == "accepted"
     assert row["fallback_locator_validation"]["tight_enough"] is False
     assert row["gpt_image2_edit"]["status"] == "ok"
+    assert row["gpt_image2_edit"]["edit_context"]["gpt_mask_shape"] == "text_pixels"
+    assert row["gpt_image2_edit"]["edit_context"]["mask_strategy"] == "text_pixels_within_bbox"
 
 
 def test_cv_tightness_override_accepts_long_cv_refined_sound_effect_bbox():
@@ -2739,7 +2755,11 @@ class _FakeMimoLocatorTightnessRetry:
 
 
 class _FakeMimoLocatorLooseAcceptedStillLoose:
+    def __init__(self):
+        self.kinds = []
+
     def analyze_image(self, image_path: str, prompt: str, kind: str = "image_analysis", max_completion_tokens: int | None = None):
+        self.kinds.append(kind)
         if kind == "phase6_fallback_text_locator":
             return {
                 "raw_text": json.dumps(

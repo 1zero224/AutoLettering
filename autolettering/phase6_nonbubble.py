@@ -166,7 +166,7 @@ def _fallback_gpt_cleanup_one(
     mimo_client,
     edit_padding_px: int = 16,
     mask_expand_px: int = 0,
-    gpt_mask_shape: str = "rect",
+    gpt_mask_shape: str = "text_pixels",
 ) -> dict:
     fallback = detection.get("fallback") or {}
     context_bbox = tuple(int(value) for value in fallback.get("context_bbox_xyxy") or detection.get("search_region_xyxy"))

@@ -47,9 +47,12 @@ def gpt_image_edit_prompt(translated_text: str) -> str:
     lines = [
         "Edit only the transparent masked original-text pixels.",
         "The detected bbox is only a loose container for the target text; it may include people, props, background, or other manga artwork.",
+        "Use the bbox only to locate the intended original lettering; do not treat the whole bbox as an editable object.",
         "The transparent mask indicates candidate original text glyph pixels, not permission to repaint every object inside the bbox.",
+        "If the transparent mask accidentally touches non-text art, still change only the original Japanese lettering and preserve those non-text pixels.",
         "If the bbox contains passerby figures or other non-text artwork, leave them unchanged.",
         "Only replace the original Japanese text glyphs that correspond to the target Chinese text.",
+        "Do not modify any character, passerby, face, body, clothing, hair, background texture, or panel art just because it is inside the bbox or mask.",
         "Remove the original Japanese manga text and preserve the surrounding artwork.",
         "Inside and outside the mask, preserve every non-text element: person, face, hair, clothing, hands, body, props, background line art, screentone, panel borders, texture, and motion lines.",
         "Do not repaint, erase, blur, white out, or simplify any non-text artwork, even when it is inside the transparent masked area.",

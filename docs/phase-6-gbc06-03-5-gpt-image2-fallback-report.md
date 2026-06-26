@@ -2,6 +2,8 @@
 
 Date: 2026-06-26
 
+Updated: 2026-06-27
+
 Target record: `GBC06_03.png#5`
 
 Target translation: `好孩子不要看…`
@@ -22,11 +24,13 @@ The fallback locator should not keep chasing a bbox only because it includes a p
   - `fallback_edit_padding_px`
   - `fallback_mask_expand_px`
   - `fallback_gpt_mask_shape`
+- Changed the internal fallback default from `rect` to `text_pixels`, so direct calls and the CLI both use text-pixel masks unless an experiment explicitly requests a rectangle.
 - Changed fallback GPT replacement crop composition to paste the GPT result through the transparent edit mask, instead of extracting dark text and filling the whole bbox background. This prevents mask-internal non-text art from being cleared by postprocessing.
 - Stopped treating `tight_enough=false` as a hard blocker when MIMO accepts the bbox semantically. A semantically accepted bbox can proceed to GPT even if it contains extra art or blank space.
 - Stopped expanding the editable mask merely because `tight_enough=false`. Loose semantic bboxes now keep the locator bbox as the edit mask unless an explicit experiment CLI expansion is requested.
 - Kept the special recovery for accepted bboxes that are clearly below the LabelPlus anchor.
 - Added a local GPT artifact gate. It compares the cleaned crop and GPT replacement crop and rejects large, nearly solid dark/gray overlays even when MIMO marks the text replacement usable.
+- Strengthened the GPT prompt again so the bbox is only a locator hint, and accidental non-text pixels inside the transparent mask are still not permission to change people, hair, clothing, body, background texture, or panel art.
 
 ## Real Runs
 
@@ -163,6 +167,98 @@ Manual review:
 
 Conclusion: rejected. This confirms that "wide bbox is acceptable" does not mean "any large editable region is safe"; the mask can include non-text context, but it still needs a reasonable edit area.
 
+### v14: default text-pixel mask with current prompt
+
+Command:
+
+```powershell
+python experiments/phase6_nonbubble_cleanup.py --detection-run-dir outputs/runs/phase2-gbc06-03-batch-4-6-cta-detection-v3-threshold40-merged --output-root outputs/runs --run-id phase6-gbc06-03-5-fallback-gpt-image2-v14-text-pixels-prompt-only --sample-limit 1 --record-id "GBC06_03.png#5" --call-gpt-image --fallback-edit-padding-px 16 --fallback-mask-expand-px 0
+```
+
+Artifacts:
+
+- Replacement grid: `outputs/runs/phase6-gbc06-03-5-fallback-gpt-image2-v14-text-pixels-prompt-only/visuals/fallback-replacement-grid.png`
+- Quality sheet: `outputs/runs/phase6-gbc06-03-5-fallback-gpt-image2-v14-quality/debug/replacement_quality_sheets/GBC06-03-png-5.png`
+- Quality JSONL: `outputs/runs/phase6-gbc06-03-5-fallback-gpt-image2-v14-quality/replacement-quality.jsonl`
+
+MIMO result:
+
+```json
+{
+  "score": 10,
+  "usable": true,
+  "exact_text_correct": true,
+  "observed_text": "好孩子不要看…",
+  "region_correct": true,
+  "style_consistent": true,
+  "outside_mask_preserved": true
+}
+```
+
+Local artifact gate:
+
+```json
+{
+  "local_artifact_gate_passed": true,
+  "largest_darken_component_area_ratio": 0.0146,
+  "largest_darken_component_fill_ratio": 0.2404
+}
+```
+
+Manual review:
+
+- The MIMO locator accepted a loose box and explicitly noted that the box includes part of the character, but contains the full intended text. This matches the current product direction.
+- The text-pixel mask still overlaps some non-text strokes, but GPT did not repaint the person into a large dark block.
+- Final replacement reads as the requested Chinese text with the correct ellipsis glyph `…`.
+- Compared with v13, the obvious dark rectangle failure is gone.
+
+Conclusion: accepted as the current best fallback result for this sample.
+
+### v15: current prompt with explicit rectangle mask
+
+Command:
+
+```powershell
+python experiments/phase6_nonbubble_cleanup.py --detection-run-dir outputs/runs/phase2-gbc06-03-batch-4-6-cta-detection-v3-threshold40-merged --output-root outputs/runs --run-id phase6-gbc06-03-5-fallback-gpt-image2-v15-rect-current-prompt --sample-limit 1 --record-id "GBC06_03.png#5" --call-gpt-image --fallback-edit-padding-px 16 --fallback-mask-expand-px 0 --fallback-gpt-mask-shape rect
+```
+
+Artifacts:
+
+- Replacement grid: `outputs/runs/phase6-gbc06-03-5-fallback-gpt-image2-v15-rect-current-prompt/visuals/fallback-replacement-grid.png`
+- Quality sheet: `outputs/runs/phase6-gbc06-03-5-fallback-gpt-image2-v15-quality/debug/replacement_quality_sheets/GBC06-03-png-5.png`
+- Quality JSONL: `outputs/runs/phase6-gbc06-03-5-fallback-gpt-image2-v15-quality/replacement-quality.jsonl`
+
+MIMO result:
+
+```json
+{
+  "score": 10,
+  "usable": true,
+  "exact_text_correct": true,
+  "observed_text": "好孩子不要看…",
+  "region_correct": true,
+  "style_consistent": true,
+  "outside_mask_preserved": true
+}
+```
+
+Local artifact gate:
+
+```json
+{
+  "local_artifact_gate_passed": true,
+  "largest_darken_component_area_ratio": 0.0018,
+  "largest_darken_component_fill_ratio": 0.203
+}
+```
+
+Manual review:
+
+- MIMO and the local artifact gate both miss a visible non-text error: the rectangle edit introduces a small face-like redraw in the character/background area.
+- The result proves that stronger prompt wording alone is not enough. A rectangle mask can still invite unwanted non-text generation even when the text itself is correct.
+
+Conclusion: rejected for default use. Keep `rect` only as an explicit experiment option; the operational fallback default should remain `text_pixels`.
+
 ## Local Artifact Gate
 
 Command:
@@ -186,17 +282,39 @@ Result:
 
 The gate does not reject wide locator context by itself. It only rejects replacement crops that contain a large continuous darkened overlay compared with the cleaned crop.
 
+Follow-up comparison after v14/v15:
+
+```powershell
+python experiments/phase6_gpt_artifact_gate.py --output-root outputs/runs --run-id phase6-gbc06-03-5-gpt-artifact-gate-v3-rect-vs-textpixels --run-dir outputs/runs/phase6-gbc06-03-5-fallback-gpt-image2-v11-wide-target-preserve-mask-compose --run-dir outputs/runs/phase6-gbc06-03-5-fallback-gpt-image2-v13-semantic-loose-direct --run-dir outputs/runs/phase6-gbc06-03-5-fallback-gpt-image2-v14-text-pixels-prompt-only --run-dir outputs/runs/phase6-gbc06-03-5-fallback-gpt-image2-v15-rect-current-prompt
+```
+
+Artifacts:
+
+- Result JSON: `outputs/runs/phase6-gbc06-03-5-gpt-artifact-gate-v3-rect-vs-textpixels/gpt-artifact-gate-results.json`
+- Evidence grid: `outputs/runs/phase6-gbc06-03-5-gpt-artifact-gate-v3-rect-vs-textpixels/visuals/gpt-artifact-gate-grid.png`
+
+Result:
+
+| Run | Gate | Largest darken component area ratio | Manual note |
+| --- | --- | ---: | --- |
+| v11 rect old prompt | pass | `0.0035` | Region good, but text uses `...` instead of `…`. |
+| v13 rect old prompt | fail | `0.0999` | Large dark block over character/background. |
+| v14 text_pixels current prompt | pass | `0.0146` | Best current result; target text correct and no broad non-text repaint. |
+| v15 rect current prompt | pass | `0.0018` | Gate misses a face-like non-text redraw; rejected manually. |
+
+The artifact gate is useful for catching large block failures, but it does not catch every non-text redraw. Manual or stronger visual review is still required before accepting a GPT fallback.
+
 ## Current Recommendation
 
-Use v11 as the current best GPT-image-2 fallback candidate for `GBC06_03.png#5`:
+Use v14 as the current best GPT-image-2 fallback candidate for `GBC06_03.png#5`:
 
 - `fallback_edit_padding_px=16`
 - `fallback_mask_expand_px=0`
-- `fallback_gpt_mask_shape=rect`
-- prompt must explicitly preserve all non-text manga art
+- `fallback_gpt_mask_shape=text_pixels` (now the default)
+- prompt must explicitly preserve all non-text manga art and treat the bbox only as a locator hint
 - final replacement composition must use the transparent edit mask, not black-text extraction plus bbox fill
 
-Do not trust MIMO alone for this route. It gave a false positive on v12 and a schema-invalid response on v10. The acceptance rule should be:
+Do not trust MIMO alone for this route. It gave a false positive on v12, missed the non-text redraw in v15, and returned a schema-invalid response on v10. The acceptance rule should be:
 
 1. MIMO replacement quality is useful as a first-pass signal.
 2. The local artifact gate must pass before Phase 7/8 can consume the GPT replacement crop.
@@ -205,9 +323,9 @@ Do not trust MIMO alone for this route. It gave a false positive on v12 and a sc
 
 ## Open Issues
 
-- Exact punctuation for `…` remains unstable. v11 is visually better but uses `...`; v12 satisfies MIMO text exactness but has unacceptable artifacting.
-- `gpt-image-2` can still interpret a large transparent rectangle as permission to repaint the whole area despite prompt constraints.
-- The local artifact gate catches the v12/v13 gray-block failures, but it is intentionally narrow. It does not replace manual review for typography, exact punctuation, or subtle style mismatch.
+- Exact punctuation for `…` improved in v14/v15, but this is still a small-sample result rather than a robust guarantee.
+- `gpt-image-2` can still interpret a large transparent rectangle as permission to repaint non-text art despite prompt constraints, as v15 shows.
+- The local artifact gate catches the v12/v13 gray-block failures, but it is intentionally narrow. It does not replace manual review for typography, exact punctuation, subtle style mismatch, or small non-text redraws.
 
 ## Verification
 
@@ -224,6 +342,32 @@ python -m pytest tests/test_phase6_nonbubble_cleanup.py::test_refine_fallback_lo
 ```
 
 Result: `3 passed`.
+
+Follow-up verification after changing the default fallback mask to `text_pixels` and adding the v14/v15 experiment:
+
+```powershell
+python -m pytest tests/test_phase6_nonbubble_cleanup.py::test_gpt_image_prompt_preserves_non_text_art_inside_wide_mask tests/test_phase6_nonbubble_cleanup.py::test_internal_fallback_gpt_cleanup_defaults_to_text_pixel_mask tests/test_phase6_nonbubble_cleanup.py::test_run_phase6_nonbubble_cleanup_fallback_calls_gpt_when_accepted_bbox_stays_loose -q
+```
+
+Result: `3 passed`.
+
+```powershell
+python -m pytest tests/test_phase6_nonbubble_gpt_replace.py::test_run_phase6_nonbubble_gpt_replace_masks_text_pixels_inside_large_bbox -q
+```
+
+Result: `1 passed`.
+
+```powershell
+python -m pytest tests/test_phase6_nonbubble_cleanup.py tests/test_phase6_nonbubble_gpt_replace.py tests/test_phase6_replacement_quality.py -q
+```
+
+Result: `95 passed`.
+
+```powershell
+python -m pytest tests/test_phase6_replacement_quality_gate.py tests/test_phase7_preview_evaluation.py tests/test_ctd_mask_matching.py tests/test_phase2_ctd_strategy.py -q
+```
+
+Result: `32 passed`.
 
 Additional verification after adding the local artifact gate:
 
