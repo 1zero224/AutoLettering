@@ -10,6 +10,7 @@ from .photoshop_jsx import JSX_SOURCE
 
 SCHEMA_VERSION = "autolettering.photoshop.v1"
 FINAL_REPLACEMENT_METHODS = {"gpt_image2_masked_edit", "cta_first_masked_edit"}
+GPT_REPLACEMENT_METHOD = "gpt_image2_masked_edit"
 
 
 def build_photoshop_manifest(
@@ -40,7 +41,7 @@ def _source_contract() -> dict:
         "import_script": "photoshop-import.jsx",
         "does_not_read_labelplus_txt_directly": True,
         "layer_order_top_to_bottom": ["嵌字图层1", "嵌字图层2", "...", "修复图像", "原图"],
-        "repaired_image_source": "page-level image synthesized from lama_large_512px cleanup crops and successful gpt-image-2 replacement crops",
+        "repaired_image_source": "page-level image synthesized from lama_large_512px cleanup crops and quality-accepted gpt-image-2 replacement crops",
     }
 
 
@@ -347,6 +348,7 @@ def _cleanup_payload(cleanup_row: dict | None, image_size: tuple[int, int] | Non
     replacement_method = cleanup.get("replacement_method")
     method = cleanup.get("method")
     bbox = cleanup.get("bbox")
+    contains_final_replacement = _cleanup_already_contains_replacement_text(cleanup_row)
     payload = {
         "status": cleanup_row.get("status"),
         "method": method,
@@ -359,8 +361,8 @@ def _cleanup_payload(cleanup_row: dict | None, image_size: tuple[int, int] | Non
         "before_after_path": cleanup.get("before_after_path"),
         "replacement_method": replacement_method,
         "replacement_crop_path": replacement_crop_path,
-        "effective_method": replacement_method or method,
-        "effective_crop_path": replacement_crop_path or cleaned_crop_path,
+        "effective_method": replacement_method if contains_final_replacement else method,
+        "effective_crop_path": replacement_crop_path if contains_final_replacement else cleaned_crop_path,
     }
     if cleanup.get("gpt_replacement_quality") is not None:
         payload["gpt_replacement_quality"] = cleanup.get("gpt_replacement_quality")
@@ -372,7 +374,12 @@ def _cleanup_already_contains_replacement_text(cleanup_row: dict | None) -> bool
         return False
     cleanup = cleanup_row.get("cleanup") or {}
     method = cleanup.get("replacement_method")
-    return method in FINAL_REPLACEMENT_METHODS and bool(cleanup.get("replacement_crop_path"))
+    if method not in FINAL_REPLACEMENT_METHODS or not cleanup.get("replacement_crop_path"):
+        return False
+    if method != GPT_REPLACEMENT_METHOD:
+        return True
+    quality = cleanup.get("gpt_replacement_quality")
+    return not isinstance(quality, dict) or quality.get("accepted") is True
 
 
 def _optional_bbox_payload(value: object) -> dict | None:

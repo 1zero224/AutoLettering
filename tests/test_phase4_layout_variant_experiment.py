@@ -30,6 +30,17 @@ def test_default_variants_keep_vertical_top_align_and_no_rotation():
     assert {variant.angle_degrees for variant in variants} == {0.0}
 
 
+def test_cleanup_crop_path_ignores_rejected_gpt_replacement():
+    cleanup = {
+        "cleaned_crop_path": "cleaned.png",
+        "replacement_method": "gpt_image2_masked_edit",
+        "replacement_crop_path": "bad-gpt.png",
+        "gpt_replacement_quality": {"accepted": False, "failure_reason": "quality_rejected"},
+    }
+
+    assert phase4_layout_variant_experiment._cleanup_crop_path(cleanup) == "cleaned.png"
+
+
 def test_run_variants_writes_text_layers_final_crops_and_grid(tmp_path: Path):
     page_path = _write_page(tmp_path / "page.png")
     cleaned_crop_path = _write_cleaned_crop(tmp_path / "cleaned.png")

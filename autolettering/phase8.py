@@ -8,6 +8,8 @@ from .cleanup_runs import CleanupRunInput, format_cleanup_run_dirs, load_cleanup
 from .export.photoshop import build_photoshop_manifest, write_json, write_photoshop_import_jsx
 from .phase6_replacement_quality_gate import effective_cleanup_for_gpt_quality, load_replacement_quality_by_id
 
+GPT_REPLACEMENT_METHOD = "gpt_image2_masked_edit"
+
 
 def run_phase8_photoshop_export(
     detection_run_dir: str | Path,
@@ -104,7 +106,8 @@ def _repair_image_records(records: list[dict]) -> list[dict]:
 
 def _cleanup_record_for_page(detection: dict, cleanup_row: dict) -> dict | None:
     cleanup = cleanup_row.get("cleanup") or {}
-    cleaned_path = cleanup.get("replacement_crop_path") or cleanup.get("cleaned_crop_path")
+    contains_final_replacement = _cleanup_contains_final_replacement_text(cleanup)
+    cleaned_path = cleanup.get("replacement_crop_path") if contains_final_replacement else cleanup.get("cleaned_crop_path")
     bbox = cleanup.get("bbox") or detection.get("selected_text_box_xyxy")
     if not cleaned_path or not bbox or not Path(cleaned_path).exists():
         return None
@@ -113,10 +116,10 @@ def _cleanup_record_for_page(detection: dict, cleanup_row: dict) -> dict | None:
         "bbox": [int(value) for value in bbox],
         "cleaned_crop_path": cleaned_path,
         "cleanup_method": cleanup.get("method"),
-        "replacement_method": cleanup.get("replacement_method"),
-        "effective_method": cleanup.get("replacement_method") or cleanup.get("method"),
+        "replacement_method": cleanup.get("replacement_method") if contains_final_replacement else None,
+        "effective_method": cleanup.get("replacement_method") if contains_final_replacement else cleanup.get("method"),
         "effective_crop_path": cleaned_path,
-        "cleanup_mask_path": None if cleanup.get("replacement_crop_path") else cleanup.get("cleanup_mask_path"),
+        "cleanup_mask_path": None if contains_final_replacement else cleanup.get("cleanup_mask_path"),
         "source_mask_path": _source_mask_path(cleanup, detection),
         "route": _cleanup_route(cleanup, detection, cleanup_row),
         "text_region_source": _text_region_source(cleanup, detection),
@@ -124,9 +127,25 @@ def _cleanup_record_for_page(detection: dict, cleanup_row: dict) -> dict | None:
         "fallback_locator_validation": cleanup_row.get("fallback_locator_validation"),
         "gpt_image2_edit_status": (cleanup_row.get("gpt_image2_edit") or {}).get("status"),
         "layout_preview_path": "",
-        "text_overlay_required": bool(cleanup.get("text_overlay_required", False)),
+        "text_overlay_required": _cleanup_needs_text_overlay(cleanup, contains_final_replacement),
         "gpt_replacement_quality": cleanup.get("gpt_replacement_quality"),
     }
+
+
+def _cleanup_needs_text_overlay(cleanup: dict, contains_final_replacement: bool) -> bool:
+    if contains_final_replacement:
+        return False
+    quality = cleanup.get("gpt_replacement_quality")
+    if isinstance(quality, dict) and quality.get("accepted") is not True:
+        return True
+    return bool(cleanup.get("text_overlay_required", False))
+
+
+def _cleanup_contains_final_replacement_text(cleanup: dict) -> bool:
+    if cleanup.get("replacement_method") != GPT_REPLACEMENT_METHOD or not cleanup.get("replacement_crop_path"):
+        return False
+    quality = cleanup.get("gpt_replacement_quality")
+    return not isinstance(quality, dict) or quality.get("accepted") is True
 
 
 def _source_mask_path(cleanup: dict, detection: dict) -> str | None:
@@ -356,7 +375,7 @@ def _write_report(
         "## JSX Behavior",
         "",
         "- Adds page-level `repaired_image_path` as a bitmap layer named `修复图像` above the original image when a Phase 7 preview run is supplied.",
-        "- Synthesizes page-level `repaired_image_path` from LaMA cleanup crops and successful `gpt-image-2` replacement crops when no Phase 7 repaired page is supplied and source crop files exist.",
+        "- Synthesizes page-level `repaired_image_path` from LaMA cleanup crops and quality-accepted `gpt-image-2` replacement crops when no Phase 7 repaired page is supplied and source crop files exist.",
         "- Skips per-record cleanup patch layers when a page-level repaired image is available.",
         "- Places `cleanup.effective_crop_path` as a bitmap patch layer only when no page-level repaired image is available.",
         "- Creates one editable Photoshop paragraph text layer per exported layer using `text_bbox` width, height, and initial position.",

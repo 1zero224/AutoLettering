@@ -17,7 +17,7 @@ def test_run_phase8_photoshop_export_writes_manifest_and_jsx(tmp_path: Path):
         "import_script": "photoshop-import.jsx",
         "does_not_read_labelplus_txt_directly": True,
         "layer_order_top_to_bottom": ["嵌字图层1", "嵌字图层2", "...", "修复图像", "原图"],
-        "repaired_image_source": "page-level image synthesized from lama_large_512px cleanup crops and successful gpt-image-2 replacement crops",
+        "repaired_image_source": "page-level image synthesized from lama_large_512px cleanup crops and quality-accepted gpt-image-2 replacement crops",
     }
     assert manifest["summary"] == {"record_count": 1, "page_count": 1}
     assert manifest["pages"][0]["layer_order"] == ["text_layers", "repaired_image", "original_image"]
@@ -592,6 +592,57 @@ def test_run_phase8_photoshop_export_keeps_text_layer_when_gpt_replacement_quali
     report = (run_dir / "reports" / "phase8-report.md").read_text(encoding="utf-8")
     assert "`local_diffusion_inpaint=1`" in report
     assert "`gpt_image2_masked_edit=1`" not in report
+
+
+def test_run_phase8_photoshop_export_honors_embedded_gpt_quality_rejection(tmp_path: Path):
+    image_path = tmp_path / "page.png"
+    Image.new("RGB", (120, 160), "white").save(image_path)
+    cleaned_path = tmp_path / "cleaned.png"
+    replacement_path = tmp_path / "bad-replacement.png"
+    Image.new("RGB", (70, 70), "gray").save(cleaned_path)
+    Image.new("RGB", (70, 70), "red").save(replacement_path)
+    detection_run = _mkdir(tmp_path / "phase2")
+    font_run = _mkdir(tmp_path / "phase3")
+    layout_run = _mkdir(tmp_path / "phase4")
+    cleanup_run = _mkdir(tmp_path / "phase6")
+    cleanup = _cleanup_payload(cleaned_path, replacement_path)
+    cleanup["cleanup"]["gpt_replacement_quality"] = {
+        "accepted": False,
+        "status": "evaluated",
+        "usable": False,
+        "exact_text_correct": False,
+        "simplified_chinese_correct": True,
+        "no_japanese_remaining": True,
+        "region_correct": True,
+        "failure_reason": "quality_rejected",
+        "issues": ["wrong_text"],
+    }
+    _write_jsonl(
+        detection_run / "detections.jsonl",
+        [_detection_payload(image_path, status="fallback_required", selected_bbox=[10, 20, 80, 90])],
+    )
+    _write_jsonl(font_run / "font-selections.jsonl", [_font_payload(tmp_path / "font.ttf")])
+    _write_jsonl(layout_run / "layout-results.jsonl", [_layout_payload()])
+    _write_jsonl(cleanup_run / "cleanup-results.jsonl", [cleanup])
+
+    run_dir = run_phase8_photoshop_export(
+        detection_run,
+        font_run,
+        layout_run,
+        cleanup_run,
+        tmp_path / "outputs",
+        sample_limit=1,
+    )
+
+    manifest = json.loads((run_dir / "photoshop-manifest.json").read_text(encoding="utf-8"))
+    page = manifest["pages"][0]
+    assert [layer["record_id"] for layer in page["layers"]] == ["page.png#1"]
+    assert page["layers"][0]["cleanup"]["effective_method"] == "local_diffusion_inpaint"
+    assert page["layers"][0]["cleanup"]["effective_crop_path"] == str(cleaned_path)
+    assert page["layers"][0]["cleanup"]["gpt_replacement_quality"]["accepted"] is False
+    assert page["repair_sources"][0]["effective_method"] == "local_diffusion_inpaint"
+    assert page["repair_sources"][0]["effective_crop_path"] == str(cleaned_path)
+    assert page["repair_sources"][0]["text_overlay_required"] is True
 
 
 def test_run_phase8_photoshop_export_uses_phase7_manifest_for_repaired_page_without_text_layers(tmp_path: Path):

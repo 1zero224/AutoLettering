@@ -26,6 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--radius-x", type=int, default=220)
     parser.add_argument("--radius-y", type=int, default=180)
     parser.add_argument("--ctd-max-edge-distance-px", type=float, default=20.0)
+    parser.add_argument("--phase6-gpt-quality-run-dir", action="append", default=None)
     parser.add_argument("--call-gpt-image", action="store_true")
     parser.add_argument("--skip-mimo", action="store_true")
     parser.add_argument("--env-file", default=".env")
@@ -47,6 +48,9 @@ def main() -> None:
         gpt_config=_gpt_config_from_env() if args.call_gpt_image else None,
         call_gpt_image=args.call_gpt_image,
         mimo_client=None if args.skip_mimo else MimoVisionClient(_mimo_config_from_env()),
+        phase6_gpt_quality_run_dir=[Path(value) for value in args.phase6_gpt_quality_run_dir]
+        if args.phase6_gpt_quality_run_dir
+        else None,
     )
     print(run_dir)
 

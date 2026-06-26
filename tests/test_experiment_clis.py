@@ -88,6 +88,22 @@ def test_phase2_6_cta_first_cleanup_cli_defaults_to_cta_first_contract():
     assert args.radius_x == 220
     assert args.radius_y == 180
     assert args.ctd_max_edge_distance_px == 20.0
+    assert args.phase6_gpt_quality_run_dir is None
+
+
+def test_phase2_6_cta_first_cleanup_cli_accepts_gpt_quality_runs():
+    parser = phase2_6_cta_first_cleanup.build_parser()
+
+    args = parser.parse_args(
+        [
+            "--phase6-gpt-quality-run-dir",
+            "outputs/runs/quality-a",
+            "--phase6-gpt-quality-run-dir",
+            "outputs/runs/quality-b",
+        ]
+    )
+
+    assert args.phase6_gpt_quality_run_dir == ["outputs/runs/quality-a", "outputs/runs/quality-b"]
 
 
 def test_phase3_context_font_selection_cli_defaults_to_dry_run_contract():

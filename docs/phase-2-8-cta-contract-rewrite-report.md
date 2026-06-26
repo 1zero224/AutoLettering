@@ -121,8 +121,9 @@ The export contract is now explicit:
 - PSD top-to-bottom order: `嵌字图层1`, `嵌字图层2`, ..., `修复图像`, `原图`.
 - `修复图像` can be a full-page composite built from both:
   - `lama_large_512px` cleanup crops for matched CTA records.
-  - successful `gpt-image-2` replacement crops for fallback records.
-- Records already containing final GPT replacement text are omitted from editable text layers to avoid duplicate Chinese text.
+  - `gpt-image-2` replacement crops for fallback records only after the same
+    `record_id` passes the optional `replacement-quality.jsonl` gate.
+- Records already containing quality-accepted final GPT replacement text are omitted from editable text layers to avoid duplicate Chinese text.
 
 ## Real Experiment: Phase 8 Synthesized Repaired Page
 

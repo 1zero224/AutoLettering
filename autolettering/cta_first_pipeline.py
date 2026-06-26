@@ -7,6 +7,13 @@ from .models.gpt_image import GptImageConfig
 from .models.mimo import MimoVisionClient
 from .phase2 import run_phase2
 from .phase6_nonbubble import run_phase6_nonbubble_cleanup
+from .phase6_replacement_quality_gate import (
+    MISSING_QUALITY_REASON,
+    QUALITY_REJECTION_REASON,
+    RunDirInput,
+    gpt_replacement_quality_gate,
+    load_replacement_quality_by_id,
+)
 
 
 CTA_FIRST_SCHEMA_VERSION = "autolettering.cta_first_pipeline.v1"
@@ -24,6 +31,7 @@ def run_cta_first_cleanup_pipeline(
     gpt_config: GptImageConfig | None = None,
     call_gpt_image: bool = False,
     mimo_client: MimoVisionClient | None = None,
+    phase6_gpt_quality_run_dir: RunDirInput = None,
 ) -> Path:
     run_dir = Path(output_root) / (run_id or "phase2-6-cta-first-cleanup")
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -52,7 +60,20 @@ def run_cta_first_cleanup_pipeline(
     )
     detections = _load_jsonl(phase2_run / "detections.jsonl")
     cleanups = _load_jsonl(phase6_run / "cleanup-results.jsonl")
-    manifest = _manifest(labelplus_file, phase2_run, phase6_run, detections, cleanups)
+    replacement_quality = (
+        load_replacement_quality_by_id(phase6_gpt_quality_run_dir)
+        if phase6_gpt_quality_run_dir is not None
+        else None
+    )
+    manifest = _manifest(
+        labelplus_file,
+        phase2_run,
+        phase6_run,
+        detections,
+        cleanups,
+        phase6_gpt_quality_run_dir=phase6_gpt_quality_run_dir,
+        replacement_quality_by_id=replacement_quality,
+    )
     _write_json(run_dir / "manifest.json", manifest)
     _write_report(run_dir / "reports" / "cta-first-pipeline-report.md", manifest)
     return run_dir
@@ -64,17 +85,20 @@ def _manifest(
     phase6_run: Path,
     detections: list[dict],
     cleanups: list[dict],
+    phase6_gpt_quality_run_dir: RunDirInput = None,
+    replacement_quality_by_id: dict[str, dict] | None = None,
 ) -> dict:
     return {
         "schema_version": CTA_FIRST_SCHEMA_VERSION,
         "labelplus_file": str(labelplus_file),
         "phase2_detection_run_dir": str(phase2_run),
         "phase6_cleanup_run_dir": str(phase6_run),
+        "phase6_gpt_quality_run_dir": _serialize_run_dir(phase6_gpt_quality_run_dir),
         "text_detection_plan": _text_detection_plan(),
         "cleanup_plan": _cleanup_plan(),
         "photoshop_export_contract": _photoshop_export_contract(),
         "review_image_contract": _review_image_contract(),
-        "summary": _summary(detections, cleanups),
+        "summary": _summary(detections, cleanups, replacement_quality_by_id),
         "routes": [
             {
                 "name": "cta_mask_lama_large_512px",
@@ -87,8 +111,11 @@ def _manifest(
             },
             {
                 "name": "mimo_locator_gpt_image2_masked_edit",
-                "description": "Unmatched LabelPlus point -> near-square MIMO locator crop -> gpt-image-2 transparent masked replacement only when the real edit call succeeds",
-                "completion_condition": "cleanup.status=cleaned and gpt_image2_edit.status=ok and cleanup.replacement_crop_path exists",
+                "description": "Unmatched LabelPlus point -> near-square MIMO locator crop -> gpt-image-2 transparent masked replacement only when the real edit call and optional replacement-quality gate succeed",
+                "completion_condition": (
+                    "cleanup.status=cleaned and gpt_image2_edit.status=ok and cleanup.replacement_crop_path exists "
+                    "and replacement-quality.jsonl accepts the same record when a quality run is supplied"
+                ),
                 "record_ids": [row["record_id"] for row in detections if row.get("status") == "fallback_required"],
             },
         ],
@@ -124,7 +151,7 @@ def _cleanup_plan() -> dict:
             "context_crop": "near_square_labelplus_context_crop",
             "locator": "mimo_vision_model_returns_crop_local_bbox",
             "replacement": "gpt-image-2_transparent_masked_edit",
-            "lettering": "gpt-image-2_direct_replacement_when_call_succeeds",
+            "lettering": "gpt-image-2_direct_replacement_when_call_and_optional_quality_gate_succeed",
         },
     }
 
@@ -134,7 +161,7 @@ def _photoshop_export_contract() -> dict:
         "project_manifest": "photoshop-manifest.json",
         "import_script": "photoshop-import.jsx",
         "layer_order_top_to_bottom": ["嵌字图层1", "嵌字图层2", "...", "修复图像", "原图"],
-        "repaired_image_source": "page-level image synthesized from lama_large_512px cleanup crops plus successful gpt-image-2 replacement crops",
+        "repaired_image_source": "page-level image synthesized from lama_large_512px cleanup crops plus quality-accepted gpt-image-2 replacement crops",
     }
 
 
@@ -146,7 +173,7 @@ def _review_image_contract() -> dict:
     }
 
 
-def _summary(detections: list[dict], cleanups: list[dict]) -> dict:
+def _summary(detections: list[dict], cleanups: list[dict], replacement_quality_by_id: dict[str, dict] | None = None) -> dict:
     return {
         "detected_records": len(detections),
         "cleanup_records": len(cleanups),
@@ -163,13 +190,23 @@ def _summary(detections: list[dict], cleanups: list[dict]) -> dict:
         "gpt_image2_replacement_records": sum(
             1
             for row in cleanups
-            if _has_completed_gpt_image2_replacement(row)
+            if _has_completed_gpt_image2_replacement(row, replacement_quality_by_id)
         ),
         "gpt_image2_pending_or_failed_records": sum(
             1
             for row in cleanups
             if (row.get("cleanup") or {}).get("method") == "gpt_image2_masked_edit"
-            and not _has_completed_gpt_image2_replacement(row)
+            and not _has_completed_gpt_image2_replacement(row, replacement_quality_by_id)
+        ),
+        "gpt_image2_quality_rejected_records": sum(
+            1
+            for row in cleanups
+            if _gpt_replacement_quality_failure_reason(row, replacement_quality_by_id) == QUALITY_REJECTION_REASON
+        ),
+        "gpt_image2_quality_missing_records": sum(
+            1
+            for row in cleanups
+            if _gpt_replacement_quality_failure_reason(row, replacement_quality_by_id) == MISSING_QUALITY_REASON
         ),
         "text_overlay_required_records": sum(
             1 for row in cleanups if (row.get("cleanup") or {}).get("text_overlay_required") is True
@@ -177,14 +214,41 @@ def _summary(detections: list[dict], cleanups: list[dict]) -> dict:
     }
 
 
-def _has_completed_gpt_image2_replacement(row: dict) -> bool:
+def _has_completed_gpt_image2_replacement(row: dict, replacement_quality_by_id: dict[str, dict] | None = None) -> bool:
     cleanup = row.get("cleanup") or {}
-    return (
+    api_completed = (
         row.get("status") == "cleaned"
         and cleanup.get("replacement_method") == "gpt_image2_masked_edit"
         and bool(cleanup.get("replacement_crop_path"))
         and (row.get("gpt_image2_edit") or {}).get("status") == "ok"
     )
+    if not api_completed:
+        return False
+    return bool(gpt_replacement_quality_gate(row.get("record_id"), cleanup, replacement_quality_by_id).get("accepted"))
+
+
+def _gpt_replacement_quality_failure_reason(row: dict, replacement_quality_by_id: dict[str, dict] | None = None) -> str | None:
+    if replacement_quality_by_id is None or not _has_gpt_replacement_artifact(row):
+        return None
+    gate = gpt_replacement_quality_gate(row.get("record_id"), row.get("cleanup") or {}, replacement_quality_by_id)
+    return gate.get("failure_reason")
+
+
+def _has_gpt_replacement_artifact(row: dict) -> bool:
+    cleanup = row.get("cleanup") or {}
+    return (
+        cleanup.get("replacement_method") == "gpt_image2_masked_edit"
+        and bool(cleanup.get("replacement_crop_path"))
+        and (row.get("gpt_image2_edit") or {}).get("status") == "ok"
+    )
+
+
+def _serialize_run_dir(run_dir: RunDirInput) -> str | list[str] | None:
+    if run_dir is None:
+        return None
+    if isinstance(run_dir, (str, Path)):
+        return str(run_dir)
+    return [str(item) for item in run_dir]
 
 
 def _write_report(path: Path, manifest: dict) -> None:
@@ -205,7 +269,7 @@ def _write_report(path: Path, manifest: dict) -> None:
         "## Routes",
         "",
         "- Matched CTD mask -> `lama_large_512px` cleanup -> editable lettering layer",
-        "- Unmatched LabelPlus point -> near-square MIMO locator crop -> `gpt-image-2` transparent masked replacement when the real edit call succeeds; dry-runs and failures stay pending and still need a text layer",
+        "- Unmatched LabelPlus point -> near-square MIMO locator crop -> `gpt-image-2` transparent masked replacement when the real edit call succeeds and any supplied `replacement-quality.jsonl` accepts the record; dry-runs, quality misses, and quality rejects stay pending and still need a text layer",
         "",
         "## Photoshop Export Contract",
         "",

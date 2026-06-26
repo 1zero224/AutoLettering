@@ -717,6 +717,51 @@ def test_run_phase7_preview_uses_cleaned_crop_when_gpt_replacement_quality_fails
         assert preview.getpixel((50, 30)) == (255, 255, 255)
 
 
+def test_run_phase7_preview_honors_embedded_gpt_quality_rejection(tmp_path: Path):
+    page_path = _write_page(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    cleanup_run = tmp_path / "phase6"
+    layout_run = tmp_path / "phase4"
+    detection_run.mkdir()
+    cleanup_run.mkdir()
+    layout_run.mkdir()
+    bbox = [40, 20, 80, 70]
+    cleaned_path = _write_cleaned_crop(tmp_path / "local.png")
+    replacement_path = tmp_path / "bad-replacement.png"
+    Image.new("RGB", (40, 50), "red").save(replacement_path)
+    cleanup = _cleanup_payload("page.png#1", cleaned_path, bbox, replacement_path)
+    cleanup["cleanup"]["gpt_replacement_quality"] = {
+        "accepted": False,
+        "status": "evaluated",
+        "usable": False,
+        "failure_reason": "quality_rejected",
+    }
+    _write_jsonl(
+        detection_run / "detections.jsonl",
+        [_detection_payload("page.png#1", page_path, bbox, status="fallback_required")],
+    )
+    _write_jsonl(cleanup_run / "cleanup-results.jsonl", [cleanup])
+    _write_jsonl(layout_run / "layout-results.jsonl", [_layout_payload("page.png#1", _transparent_layout(tmp_path))])
+
+    run_dir = run_phase7_preview(
+        detection_run,
+        cleanup_run,
+        layout_run,
+        tmp_path / "outputs",
+        "phase7-embedded-gpt-quality-rejected",
+        1,
+    )
+
+    rows = _read_jsonl(run_dir / "preview-results.jsonl")
+    record = rows[0]["records"][0]
+    assert record["cleanup_method"] == "bubble_fill"
+    assert record["cleanup_crop_path"] == str(cleaned_path)
+    assert record["text_overlay_required"] is True
+    assert record["gpt_replacement_quality"]["accepted"] is False
+    with Image.open(rows[0]["preview"]["page_preview_path"]).convert("RGB") as preview:
+        assert preview.getpixel((50, 30)) == (255, 255, 255)
+
+
 def test_run_phase7_preview_requires_layout_when_gpt_replacement_crop_is_missing(tmp_path: Path):
     page_path = _write_page(tmp_path / "page.png")
     detection_run = tmp_path / "phase2"

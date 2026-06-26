@@ -255,6 +255,9 @@ def _mimo_config_from_env() -> MimoVisionConfig:
 
 
 def _cleanup_crop_path(cleanup: dict) -> str:
+    quality = cleanup.get("gpt_replacement_quality")
+    if isinstance(quality, dict) and quality.get("accepted") is not True:
+        return cleanup["cleaned_crop_path"]
     return cleanup.get("replacement_crop_path") or cleanup["cleaned_crop_path"]
 
 

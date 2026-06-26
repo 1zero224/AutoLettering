@@ -584,6 +584,11 @@ is supplied:
   `no_japanese_remaining`, `region_correct`, and style/preservation fields.
 - Phase 7 and Phase 8 accept a repeatable `--phase6-gpt-quality-run-dir`
   argument.
+- The CTA-first Phase 2/6 wrapper also accepts repeatable
+  `--phase6-gpt-quality-run-dir` values. Its manifest stores
+  `phase6_gpt_quality_run_dir`, and its GPT fallback summary no longer counts
+  an API-ok replacement crop as completed when the supplied quality row rejects
+  or misses that `record_id`.
 - A `gpt_image2_masked_edit` replacement crop is consumed as final text only
   when the quality row for the same `record_id` has:
   - `status=evaluated`
@@ -609,15 +614,21 @@ Example gated preview:
 python experiments/phase7_page_preview.py --detection-run-dir outputs/runs/<phase2> --cleanup-run-dir outputs/runs/<phase6-gpt> --layout-run-dir outputs/runs/<phase4-layout> --phase6-gpt-quality-run-dir outputs/runs/<phase6-replacement-quality> --output-root outputs/runs --run-id <phase7-gated> --sample-limit 1
 ```
 
+Example gated CTA-first summary:
+
+```powershell
+python experiments/phase2_6_cta_first_cleanup.py --record-id "<record-id>" --sample-limit 1 --call-gpt-image --phase6-gpt-quality-run-dir outputs/runs/<phase6-replacement-quality> --run-id <phase2-6-gated>
+```
+
 Example gated Photoshop export:
 
 ```powershell
 python experiments/phase8_photoshop_export.py --detection-run-dir outputs/runs/<phase2> --font-selection-run-dir outputs/runs/<phase3-font> --layout-run-dir outputs/runs/<phase4-layout> --cleanup-run-dir outputs/runs/<phase6-gpt> --phase6-gpt-quality-run-dir outputs/runs/<phase6-replacement-quality> --output-root outputs/runs --run-id <phase8-gated> --sample-limit 1
 ```
 
-Important scope note: if no `--phase6-gpt-quality-run-dir` is supplied, Phase 7
-and Phase 8 keep their previous compatibility behavior. Strict gating is
-enabled by passing the quality run directory.
+Important scope note: if no `--phase6-gpt-quality-run-dir` is supplied, the
+CTA-first wrapper, Phase 7, and Phase 8 keep their previous compatibility
+behavior. Strict gating is enabled by passing the quality run directory.
 
 ## Current Recommendation
 

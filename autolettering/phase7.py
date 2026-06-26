@@ -14,6 +14,7 @@ from .rendering.debug_overlay import draw_page_debug_overlay
 
 
 FINAL_REPLACEMENT_METHODS = {"gpt_image2_masked_edit", "cta_first_masked_edit"}
+GPT_REPLACEMENT_METHOD = "gpt_image2_masked_edit"
 
 
 def run_phase7_preview(
@@ -182,22 +183,35 @@ def _record_summary(record: dict) -> dict:
 
 
 def _cleanup_crop_path(cleanup: dict) -> str:
-    return cleanup.get("replacement_crop_path") or cleanup["cleaned_crop_path"]
+    if _cleanup_contains_final_replacement_text(cleanup):
+        return cleanup["replacement_crop_path"]
+    return cleanup["cleaned_crop_path"]
 
 
 def _cleanup_mask_path(cleanup: dict) -> str | None:
-    if cleanup.get("replacement_crop_path"):
+    if _cleanup_contains_final_replacement_text(cleanup):
         return None
     return cleanup.get("cleanup_mask_path")
 
 
 def _cleanup_method(cleanup: dict) -> str | None:
-    return cleanup.get("replacement_method") or cleanup.get("method")
+    if _cleanup_contains_final_replacement_text(cleanup):
+        return cleanup.get("replacement_method")
+    return cleanup.get("method")
 
 
 def _text_overlay_required(cleanup: dict) -> bool:
+    return not _cleanup_contains_final_replacement_text(cleanup)
+
+
+def _cleanup_contains_final_replacement_text(cleanup: dict) -> bool:
     method = cleanup.get("replacement_method")
-    return not (method in FINAL_REPLACEMENT_METHODS and cleanup.get("replacement_crop_path"))
+    if method not in FINAL_REPLACEMENT_METHODS or not cleanup.get("replacement_crop_path"):
+        return False
+    if method != GPT_REPLACEMENT_METHOD:
+        return True
+    quality = cleanup.get("gpt_replacement_quality")
+    return not isinstance(quality, dict) or quality.get("accepted") is True
 
 
 def _skipped_row(record_id: str, reason: str) -> dict:
