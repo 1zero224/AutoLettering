@@ -295,7 +295,7 @@ def _fallback_gpt_cleanup_one(
             context["input_path"],
             context_bbox,
             locator,
-            {"status": "accepted", "tight_enough": False},
+            {"status": "accepted", "tight_enough": False, "anchor_recovery_allowed": True},
         )
         if anchor_locator.get("status") == "ok":
             anchor_locator = _refine_fallback_locator_bbox(anchor_locator, context["input_path"], context_bbox)
@@ -936,8 +936,9 @@ def _clamped_bbox_for_anchor_recovery(values: list[float], context_size: tuple[i
 
 
 def _can_try_anchor_recovery(validation: dict) -> bool:
-    return validation.get("failure_reason") == "fallback_locator_semantic_rejected" or (
-        validation.get("status") == "accepted" and validation.get("tight_enough") is not True
+    return (
+        validation.get("failure_reason") == "fallback_locator_semantic_rejected"
+        or validation.get("anchor_recovery_allowed") is True
     )
 
 
@@ -1349,6 +1350,7 @@ def _validate_fallback_locator_semantics(
             "Reject if the yellow bbox is on blank background, unrelated text, English lettering, UI marks, or only a partial phrase.",
             "Do not reject merely because the loose bbox also includes nearby people, hair, props, background, or other non-text manga artwork.",
             "A loose bbox is acceptable when it still contains the full intended original Japanese text; mark tight_enough=false so a tighter edit mask can be used.",
+            "Set bbox_targets_unrelated_text=true only when the bbox targets a different text string; do not set it true for nearby people, hair, props, background, or other non-text artwork.",
             f"Chinese translation: {detection.get('translated_text', '')}",
             "Return only JSON with keys: semantic_correct, tight_enough, bbox_on_blank_area, bbox_targets_unrelated_text, visible_original_text, recommendation, reasoning_summary.",
             "recommendation must be either accept or reject.",
@@ -1390,6 +1392,7 @@ def _retry_validate_fallback_locator_semantics(
             "Accept if the yellow bbox covers the visible Japanese manga sound effect, interjection, title, or caption that naturally corresponds to the Chinese translation.",
             "Reject only if the bbox is on blank background, contains no target text, targets unrelated text, English-only text, or misses important visible characters.",
             "Do not reject only because the bbox includes non-text people, hair, props, or background around the target text.",
+            "Set bbox_targets_unrelated_text=true only for a different text string, not for non-text manga context.",
             f"Chinese translation: {detection.get('translated_text', '')}",
             "Return only JSON with keys: semantic_correct, tight_enough, bbox_on_blank_area, bbox_targets_unrelated_text, visible_original_text, recommendation, reasoning_summary.",
             "recommendation must be either accept or reject.",
@@ -1459,7 +1462,11 @@ def _should_retry_fallback_validation(validation: dict) -> bool:
         and validation.get("bbox_targets_unrelated_text") is False
         and validation.get("semantic_correct") is not True
     )
-    return inconclusive_semantic_rejection or _has_contradictory_positive_semantic_reasoning(validation)
+    return (
+        inconclusive_semantic_rejection
+        or _has_contradictory_positive_semantic_reasoning(validation)
+        or _has_contradictory_non_text_context_rejection(validation)
+    )
 
 
 def _has_contradictory_positive_semantic_reasoning(validation: dict) -> bool:
@@ -1482,6 +1489,43 @@ def _has_contradictory_positive_semantic_reasoning(validation: dict) -> bool:
         "targets the correct",
     )
     return any(marker in summary for marker in positive_markers)
+
+
+def _has_contradictory_non_text_context_rejection(validation: dict) -> bool:
+    if (
+        validation.get("semantic_correct") is not False
+        or validation.get("bbox_on_blank_area") is True
+        or validation.get("bbox_targets_unrelated_text") is not True
+    ):
+        return False
+    visible = str(validation.get("visible_original_text") or "").strip()
+    if not visible:
+        return False
+    summary = str(validation.get("reasoning_summary") or "").lower()
+    target_markers = (
+        "contains the intended target",
+        "contains the target text",
+        "contains target text",
+        "includes the intended target",
+        "includes the target text",
+        "includes target text",
+        "covers the intended target",
+        "covers the target text",
+        "covers target text",
+        "visible target text is inside",
+    )
+    non_text_markers = (
+        "passerby",
+        "people",
+        "person",
+        "hair",
+        "background",
+        "artwork",
+        "non-text",
+        "props",
+        "context",
+    )
+    return any(marker in summary for marker in target_markers) and any(marker in summary for marker in non_text_markers)
 
 
 def _write_locator_grid_image(crop: Image.Image, output_path: Path, labelplus_point_xy: list[int] | None = None) -> Path:

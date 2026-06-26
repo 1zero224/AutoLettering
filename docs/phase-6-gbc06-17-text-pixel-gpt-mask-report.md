@@ -18,6 +18,19 @@ The editable mask now targets detected original-text pixels inside the bbox. Nea
 - MIMO locator validation no longer hard-rejects a bbox only because it contains extra non-text artwork when the intended text is present.
 - Replacement-quality prompts now state that extra non-text context inside a loose bbox is not a wrong-region failure by itself.
 
+## Loose Bbox Policy
+
+For outside-bubble GPT replacement, the bbox is only a context container. It only needs to contain the intended original text. It is allowed to include a passerby, hair, props, background, or panel texture.
+
+The quality boundary is now:
+
+- fail when the bbox does not include the intended original text, lands on blank area, or targets a different text string;
+- continue when the bbox includes the intended original text but is visually loose;
+- rely on the `text_pixels` GPT mask and prompt to restrict the actual edit to original lettering pixels;
+- judge the GPT result by whether only the target lettering changed and non-text manga content was preserved.
+
+This avoids wasting retries on "cleaning" the locator rectangle when the rectangle already contains the needed text. The remaining anchor-recovery path is reserved for cases where the accepted bbox is clearly in the wrong physical band, such as a tight box below the LabelPlus anchor rather than over the text.
+
 ## Real Sample Experiment
 
 Record:
@@ -90,7 +103,7 @@ python -m pytest tests/test_phase6_nonbubble_gpt_replace.py tests/test_phase6_no
 Result:
 
 ```text
-91 passed in 43.59s
+94 passed in 46.55s
 ```
 
 Additional CLI regression:
