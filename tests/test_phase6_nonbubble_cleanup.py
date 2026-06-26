@@ -19,6 +19,8 @@ from autolettering.phase6_nonbubble import _local_background_color, run_phase6_n
 from autolettering.phase6_nonbubble import _refine_fallback_locator_bbox
 from autolettering.phase6_nonbubble import _recover_locator_from_labelplus_anchor
 from autolettering.phase6_nonbubble import _compose_gpt_replacement_region
+from autolettering.phase6_nonbubble import _cv_tightness_override
+from autolettering.phase6_nonbubble import _should_retry_fallback_validation
 
 
 def test_build_text_mask_and_gpt_mask_use_expected_alpha_convention():
@@ -948,9 +950,10 @@ def test_run_phase6_nonbubble_cleanup_fallback_uses_mimo_bbox_and_gpt_mask(tmp_p
         ratio = grid.width / grid.height
         assert 0.45 <= ratio <= 2.2
     assert row["status"] == "cleaned"
-    assert row["cleanup"]["method"] == "gpt_image2_masked_edit"
+    assert row["cleanup"]["method"] == "bt_lama_large_inpaint"
     assert row["cleanup"]["bbox"] == [10, 10, 100, 80]
     assert row["cleanup"]["layout_text_bbox"] == [35, 25, 62, 55]
+    _assert_fallback_background_repaired(row)
     assert row["fallback_locator"]["status"] == "ok"
     assert Path(row["fallback_locator"]["locator_image_path"]).parent.name == "fallback_locator_input"
     assert row["fallback_locator_validation"]["status"] == "accepted"
@@ -1047,10 +1050,55 @@ def test_run_phase6_nonbubble_cleanup_fallback_accepts_mimo_percent_bbox(tmp_pat
     assert row["fallback_locator_validation"]["status"] == "accepted"
     assert row["fallback_locator"]["local_bbox_xyxy"] == [25, 15, 52, 45]
     assert row["cleanup"]["layout_text_bbox"] == [35, 25, 62, 55]
-    assert row["status"] == "failed"
+    assert row["status"] == "cleaned"
     assert row["cleanup"]["text_overlay_required"] is True
+    assert "failure_reason" not in row["cleanup"]
+    assert row["cleanup"]["replacement_failure_reason"] == "gpt_image2_replacement_not_completed"
     assert "replacement_method" not in row["cleanup"]
+    _assert_fallback_background_repaired(row)
     assert row["gpt_image2_edit"]["status"] == "dry_run"
+
+
+def test_run_phase6_nonbubble_cleanup_fallback_writes_repaired_background_before_gpt_acceptance(tmp_path: Path):
+    image_path = _write_nonbubble_image(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(
+        detection_run / "detections.jsonl",
+        image_path,
+        rows=[
+            {
+                "record_id": "page.png#2",
+                "status": "fallback_required",
+                "group_name": "框外",
+                "selected_text_box_xyxy": None,
+                "fallback": {
+                    "method": "mimo_crop_then_gpt_image2_masked_edit",
+                    "context_bbox_xyxy": [10, 10, 100, 80],
+                    "translated_text": "背景文字",
+                },
+            }
+        ],
+    )
+
+    run_dir = run_phase6_nonbubble_cleanup(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-fallback-background-before-gpt",
+        sample_limit=1,
+        mimo_client=_FakeMimoLocatorPercent(),
+    )
+
+    row = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]
+    cleanup = row["cleanup"]
+    assert row["status"] == "cleaned"
+    assert cleanup["text_overlay_required"] is True
+    assert cleanup["replacement_failure_reason"] == "gpt_image2_replacement_not_completed"
+    _assert_fallback_background_repaired(row)
+    assert "replacement_method" not in cleanup
+    assert row["gpt_image2_edit"]["status"] == "dry_run"
+    with Image.open(cleanup["cleaned_crop_path"]).convert("RGB") as repaired:
+        assert repaired.size == (90, 70)
 
 
 def test_run_phase6_nonbubble_cleanup_fallback_uses_percent_bbox_when_pixel_bbox_is_out_of_bounds(tmp_path: Path):
@@ -1129,12 +1177,14 @@ def test_run_phase6_nonbubble_cleanup_fallback_retries_invalid_mimo_bbox(tmp_pat
         "phase6_fallback_text_locator_retry",
         "phase6_fallback_text_locator_validation",
     ]
-    assert row["status"] == "failed"
+    assert row["status"] == "cleaned"
     assert row["fallback_locator"]["retry_of_error"] == "ValueError"
     assert row["fallback_locator"]["local_bbox_xyxy"] == [25, 15, 52, 45]
     assert row["fallback_locator_validation"]["status"] == "accepted"
     assert row["cleanup"]["text_overlay_required"] is True
+    assert row["cleanup"]["replacement_failure_reason"] == "gpt_image2_replacement_not_completed"
     assert "replacement_method" not in row["cleanup"]
+    _assert_fallback_background_repaired(row)
     assert row["gpt_image2_edit"]["status"] == "dry_run"
 
 
@@ -1211,9 +1261,11 @@ def test_run_phase6_nonbubble_cleanup_fallback_accepts_nested_mimo_bbox(tmp_path
     assert row["fallback_locator"]["status"] == "ok"
     assert row["fallback_locator"]["local_bbox_xyxy"] == [25, 15, 52, 45]
     assert row["fallback_locator_validation"]["status"] == "accepted"
-    assert row["status"] == "failed"
+    assert row["status"] == "cleaned"
     assert row["cleanup"]["text_overlay_required"] is True
+    assert row["cleanup"]["replacement_failure_reason"] == "gpt_image2_replacement_not_completed"
     assert "replacement_method" not in row["cleanup"]
+    _assert_fallback_background_repaired(row)
     assert row["gpt_image2_edit"]["status"] == "dry_run"
 
 
@@ -1254,11 +1306,13 @@ def test_run_phase6_nonbubble_cleanup_fallback_retries_inconclusive_semantic_val
         "phase6_fallback_text_locator_validation",
         "phase6_fallback_text_locator_validation_retry",
     ]
-    assert row["status"] == "failed"
+    assert row["status"] == "cleaned"
     assert row["fallback_locator_validation"]["status"] == "accepted"
     assert row["fallback_locator_validation"]["retry_of_error"] == "semantic_validation_inconclusive"
     assert row["cleanup"]["text_overlay_required"] is True
+    assert row["cleanup"]["replacement_failure_reason"] == "gpt_image2_replacement_not_completed"
     assert "replacement_method" not in row["cleanup"]
+    _assert_fallback_background_repaired(row)
     assert row["gpt_image2_edit"]["status"] == "dry_run"
 
 
@@ -1304,7 +1358,10 @@ def test_run_phase6_nonbubble_cleanup_fallback_retries_locator_after_semantic_re
     assert row["fallback_locator"]["local_bbox_xyxy"] == [25, 15, 52, 45]
     assert row["fallback_locator"]["semantic_retry_of_validation"] == "fallback_locator_semantic_rejected"
     assert row["fallback_locator_validation"]["status"] == "accepted"
-    assert row["status"] == "failed"
+    assert row["status"] == "cleaned"
+    assert row["cleanup"]["replacement_failure_reason"] == "gpt_image2_replacement_not_completed"
+    assert "replacement_method" not in row["cleanup"]
+    _assert_fallback_background_repaired(row)
     assert row["gpt_image2_edit"]["status"] == "dry_run"
 
 
@@ -1406,6 +1463,103 @@ def test_run_phase6_nonbubble_cleanup_fallback_does_not_call_gpt_when_accepted_b
     assert row["fallback_locator_validation"]["tight_enough"] is False
     assert row["gpt_image2_edit"]["status"] == "not_called"
     assert row["gpt_image2_edit"]["reason"] == "fallback_locator_bbox_not_tight"
+
+
+def test_cv_tightness_override_accepts_long_cv_refined_sound_effect_bbox():
+    locator = {
+        "local_bbox_xyxy": [41, 449, 563, 507],
+        "refinement": {
+            "method": "trim_to_light_text_ink_support",
+            "original_local_bbox_xyxy": [41, 449, 563, 605],
+            "refined_local_bbox_xyxy": [41, 449, 563, 507],
+        },
+    }
+    validation = {
+        "status": "accepted",
+        "semantic_correct": True,
+        "tight_enough": False,
+        "bbox_on_blank_area": False,
+        "bbox_targets_unrelated_text": False,
+        "recommendation": "reject",
+    }
+
+    override = _cv_tightness_override(locator, validation, (652, 652))
+
+    assert override["status"] == "accepted"
+    assert override["reason"] == "semantic_correct_after_cv_refinement"
+    assert override["bbox_area_ratio"] < 0.08
+
+
+def test_cv_tightness_override_rejects_bbox_that_stays_large_after_retry():
+    locator = {
+        "local_bbox_xyxy": [7, 9, 82, 61],
+        "refinement": {
+            "method": "trim_to_light_text_ink_support",
+            "original_local_bbox_xyxy": [5, 8, 84, 62],
+            "refined_local_bbox_xyxy": [7, 9, 82, 61],
+        },
+    }
+    validation = {
+        "status": "accepted",
+        "semantic_correct": True,
+        "tight_enough": False,
+        "bbox_on_blank_area": False,
+        "bbox_targets_unrelated_text": False,
+        "recommendation": "reject",
+    }
+
+    assert _cv_tightness_override(locator, validation, (90, 70)) is None
+
+
+def test_cv_tightness_override_accepts_anchor_recovered_sound_effect_bbox():
+    locator = {
+        "local_bbox_xyxy": [38, 398, 525, 488],
+        "refinement": {
+            "method": "recover_light_text_ink_band_near_labelplus_anchor",
+            "original_local_bbox_xyxy": [24, 501, 542, 601],
+            "refined_local_bbox_xyxy": [38, 398, 525, 488],
+        },
+    }
+    validation = {
+        "status": "accepted",
+        "semantic_correct": True,
+        "tight_enough": False,
+        "bbox_on_blank_area": False,
+        "bbox_targets_unrelated_text": False,
+        "recommendation": "reject",
+    }
+
+    override = _cv_tightness_override(locator, validation, (652, 652))
+
+    assert override["status"] == "accepted"
+    assert override["reason"] == "semantic_correct_after_cv_refinement"
+    assert override["refinement_method"] == "recover_light_text_ink_band_near_labelplus_anchor"
+
+
+def test_should_retry_validation_when_boolean_contradicts_reasoning_match():
+    validation = {
+        "semantic_correct": False,
+        "tight_enough": False,
+        "bbox_on_blank_area": False,
+        "bbox_targets_unrelated_text": False,
+        "visible_original_text": "スッスッスッスッ",
+        "reasoning_summary": "The yellow bounding box correctly identifies the onomatopoeia and corresponds to the Chinese translation.",
+    }
+
+    assert _should_retry_fallback_validation(validation) is True
+
+
+def test_should_not_retry_validation_for_clear_unrelated_rejection():
+    validation = {
+        "semantic_correct": False,
+        "tight_enough": False,
+        "bbox_on_blank_area": False,
+        "bbox_targets_unrelated_text": True,
+        "visible_original_text": "unrelated",
+        "reasoning_summary": "The bbox targets unrelated text.",
+    }
+
+    assert _should_retry_fallback_validation(validation) is False
 
 
 def test_run_phase6_nonbubble_cleanup_fallback_does_not_call_gpt_when_semantic_validation_rejects(
@@ -2571,3 +2725,15 @@ def _write_detection(path: Path, image_path: Path, rows: list[dict] | None = Non
 
 def _read_jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def _assert_fallback_background_repaired(row: dict) -> None:
+    cleanup = row["cleanup"]
+    assert cleanup["method"] == "bt_lama_large_inpaint"
+    assert cleanup["background_repair_method"] == "bt_lama_large_inpaint"
+    assert Path(cleanup["cleaned_crop_path"]).parent.name == "fallback_cleaned"
+    assert Path(cleanup["cleanup_mask_path"]).parent.name == "fallback_mask"
+    assert Path(cleanup["before_after_path"]).parent.name == "fallback_before_after"
+    assert Path(cleanup["cleaned_crop_path"]).exists()
+    assert Path(cleanup["cleanup_mask_path"]).exists()
+    assert Path(cleanup["before_after_path"]).exists()

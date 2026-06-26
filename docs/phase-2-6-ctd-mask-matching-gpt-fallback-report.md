@@ -690,6 +690,86 @@ This smoke run is a local diagnostic package for manual review and PSD/preview
 chain verification; it is not a new registry stage that should replace the
 underlying Phase 6 quality run in coverage inputs.
 
+### Real Fallback Background Repair Smoke: `GBC06_02.png#14`
+
+The v3 quality-gated smoke above revealed a second downstream contract risk:
+when a GPT direct replacement is missing, dry-run, or later rejected, the
+fallback row must not expose the raw `fallback_input` crop as its effective
+cleaned background. Otherwise Phase 7/8 can correctly ignore bad GPT text but
+still consume an unrepaired source crop.
+
+The fallback path now writes a local LaMA background repair before GPT
+acceptance:
+
+- `cleanup.method=bt_lama_large_inpaint`
+- `cleanup.cleaned_crop_path=fallback_cleaned/<record>.png`
+- `cleanup.cleanup_mask_path=fallback_mask/<record>.png`
+- `cleanup.before_after_path=fallback_before_after/<record>.png`
+- `cleanup.replacement_failure_reason=gpt_image2_replacement_not_completed`
+- `cleanup.replacement_method` is omitted unless a GPT edit actually succeeds
+
+MIMO locator validation can be noisy on this sample. Two guardrails were added
+to avoid losing a visually usable crop to structured-output variance:
+
+- If MIMO returns `semantic_correct=false` but its reasoning explicitly says
+  the bbox corresponds to the Chinese translation, Phase 6 retries semantic
+  validation instead of treating the first JSON boolean as final.
+- If MIMO accepts the text semantically but rejects tightness, a local CV
+  tightness override is allowed only for known CV-refined locator bboxes whose
+  area and side ratios remain small enough. Large loose boxes still fail.
+
+Real Phase 6 command:
+
+```powershell
+python experiments/phase6_nonbubble_cleanup.py --detection-run-dir outputs/runs/phase2-gbc06-02-14-cta-fallback-context-v2 --output-root outputs/runs --run-id phase6-gbc06-02-14-fallback-context-mimo-v24-background-cleaned-status --sample-limit 1 --record-id "GBC06_02.png#14"
+```
+
+Output:
+
+- Run directory: `outputs/runs/phase6-gbc06-02-14-fallback-context-mimo-v24-background-cleaned-status`
+- Cleaned context crop: `fallback_cleaned/GBC06-02-png-14.png` (`652x652`)
+- Cleanup mask: `fallback_mask/GBC06-02-png-14.png` (`652x652`)
+- Before/after context comparison: `fallback_before_after/GBC06-02-png-14.png` (`1304x652`)
+- Fallback locator grid: `visuals/fallback-locator-grid.png` (`350x374`)
+- Fallback replacement/debug grid: `visuals/fallback-replacement-grid.png` (`690x738`)
+
+Key result:
+
+- `status=cleaned`
+- `gpt_image2_edit.status=dry_run`
+- `replacement_method=null`
+- `text_overlay_required=true`
+- `fallback_locator_validation.status=accepted`
+- `fallback_locator_validation.tight_enough=true`
+
+Downstream Phase 7/8 smoke command:
+
+```powershell
+python experiments/phase7_8_gpt_quality_gate_smoke.py --detection-run-dir outputs/runs/phase2-gbc06-02-14-cta-fallback-context-v2 --cleanup-run-dir outputs/runs/phase6-gbc06-02-14-fallback-context-mimo-v24-background-cleaned-status --phase6-gpt-quality-run-dir outputs/runs/phase6-empty-quality-for-fallback-cleaned-smoke --output-root outputs/runs --run-id phase7-8-gbc06-02-14-fallback-cleaned-v24-smoke --sample-limit 1
+```
+
+Output:
+
+- Run directory: `outputs/runs/phase7-8-gbc06-02-14-fallback-cleaned-v24-smoke`
+- Summary: `quality-gate-smoke-summary.json`
+- Evidence grid: `visuals/quality-gate-evidence-grid.png` (`690x738`)
+- Phase 7 preview: `runs/phase7-preview/pages/GBC06-02-png.png`
+- Phase 7 cleaned page: `runs/phase7-preview/pages/cleaned/GBC06-02-png.png`
+- Phase 8 manifest: `runs/phase8-export/photoshop-manifest.json`
+
+Downstream result:
+
+- Phase 7 used
+  `outputs/runs/phase6-gbc06-02-14-fallback-context-mimo-v24-background-cleaned-status/fallback_cleaned/GBC06-02-png-14.png`
+  as `phase7_cleanup_crop_path`.
+- Phase 7 kept `phase7_text_overlay_required=true`.
+- Phase 8 exported an editable text layer for `GBC06_02.png#14`.
+- Phase 8 used the same `fallback_cleaned` crop as
+  `phase8_effective_crop_path`.
+- Phase 8 set `phase8_effective_method=bt_lama_large_inpaint` and
+  `phase8_replacement_method=null`, so dry-run GPT output is not represented as
+  a completed replacement.
+
 ## Current Recommendation
 
 Use the CTD matched path with `lama_large_512px` for non-bubble text when CTD detects the original text. This is the currently usable route.
@@ -710,10 +790,10 @@ Next experiments should focus on fallback locator stability:
 ## Verification
 
 ```powershell
-python -m pytest tests/test_phase2_ctd_strategy.py tests/test_ctd_mask_matching.py tests/test_phase2_threshold_sweep.py tests/test_cta_first_pipeline.py tests/test_phase6_nonbubble_cleanup.py -q
+python -m pytest tests/test_phase6_nonbubble_cleanup.py tests/test_phase7_preview.py tests/test_phase8_photoshop_export.py tests/test_phase7_8_gpt_quality_gate_smoke.py tests/test_cta_first_pipeline.py -q
 ```
 
-Result: `65 passed`.
+Result: `107 passed`.
 
 Full regression:
 
@@ -721,4 +801,4 @@ Full regression:
 python -m pytest -q
 ```
 
-Result: `336 passed`.
+Result: `366 passed`.

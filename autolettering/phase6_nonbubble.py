@@ -20,6 +20,16 @@ from .text_bbox import matched_text_mask_bbox, selected_text_polarity
 from .text_body_bbox import selected_text_body_bbox
 
 
+CV_TIGHTNESS_REFINEMENT_METHODS = {
+    "trim_to_light_text_ink_support",
+    "trim_to_dark_background_support",
+    "recover_light_text_ink_band_near_labelplus_anchor",
+}
+CV_TIGHTNESS_MAX_AREA_RATIO = 0.16
+CV_TIGHTNESS_MAX_SHORT_SIDE_RATIO = 0.35
+CV_TIGHTNESS_MAX_LONG_SIDE_RATIO = 0.9
+
+
 def run_phase6_nonbubble_cleanup(
     detection_run_dir: str | Path,
     output_root: str | Path = "outputs/runs",
@@ -292,25 +302,36 @@ def _fallback_gpt_cleanup_one(
             else:
                 locator = _with_rejected_locator_attempt(locator, "tightness_retry", tight_locator, tight_validation)
     if validation.get("tight_enough") is not True:
-        return {
-            "record_id": detection["record_id"],
-            "image_name": detection.get("image_name"),
-            "translated_text": detection.get("translated_text", ""),
-            "status": "failed",
-            "cleanup": {
-                "method": "gpt_image2_masked_edit",
-                "bbox": list(context_bbox),
-                "text_bbox": list(_global_bbox(context_bbox, tuple(locator.get("local_bbox_xyxy")))),
-                "failure_reason": "fallback_locator_bbox_not_tight",
-                "cleaned_crop_path": str(context["input_path"]),
-                "text_overlay_required": True,
-            },
-            "fallback_locator": locator,
-            "fallback_locator_validation": validation,
-            "gpt_image2_edit": {"status": "not_called", "reason": "fallback_locator_bbox_not_tight"},
-        }
+        tightness_override = _cv_tightness_override(locator, validation, context["size"])
+        if tightness_override is not None:
+            validation = {**validation, "tightness_override": tightness_override}
+        else:
+            return {
+                "record_id": detection["record_id"],
+                "image_name": detection.get("image_name"),
+                "translated_text": detection.get("translated_text", ""),
+                "status": "failed",
+                "cleanup": {
+                    "method": "gpt_image2_masked_edit",
+                    "bbox": list(context_bbox),
+                    "text_bbox": list(_global_bbox(context_bbox, tuple(locator.get("local_bbox_xyxy")))),
+                    "failure_reason": "fallback_locator_bbox_not_tight",
+                    "cleaned_crop_path": str(context["input_path"]),
+                    "text_overlay_required": True,
+                },
+                "fallback_locator": locator,
+                "fallback_locator_validation": validation,
+                "gpt_image2_edit": {"status": "not_called", "reason": "fallback_locator_bbox_not_tight"},
+            }
     local_bbox = tuple(locator.get("local_bbox_xyxy") or (0, 0, context["size"][0], context["size"][1]))
     mask_local_bbox = _fallback_mask_bbox(local_bbox, context["size"], validation)
+    background_repair = _write_fallback_background_repair(
+        run_dir,
+        detection,
+        context,
+        mask_local_bbox,
+        method="lama_large_512px",
+    )
     edit_context = _write_fallback_edit_context(run_dir, detection, context, mask_local_bbox)
     edit_mask_bbox = _rebase_bbox(mask_local_bbox, edit_context["local_context_bbox"])
     mask_path = _write_local_gpt_mask(edit_context["size"], edit_mask_bbox, edit_context["mask_path"])
@@ -336,25 +357,28 @@ def _fallback_gpt_cleanup_one(
     )
     has_replacement = gpt_payload.get("status") == "ok" and context["replacement_crop_path"].exists()
     cleanup = {
-        "method": "gpt_image2_masked_edit",
+        "method": background_repair["method"],
         "bbox": list(context_bbox),
         "text_bbox": list(_global_bbox(context_bbox, local_bbox)),
         "mask_bbox": list(_global_bbox(context_bbox, mask_local_bbox)),
         "layout_text_bbox": list(_global_bbox(context_bbox, local_bbox)),
-        "cleaned_crop_path": str(context["input_path"]),
-        "before_after_path": str(context["input_path"]),
+        "cleaned_crop_path": str(background_repair["cleaned_crop_path"]),
+        "cleanup_mask_path": str(background_repair["text_mask_path"]),
+        "before_after_path": str(background_repair["before_after_path"]),
+        "background_repair_method": background_repair["method"],
+        "background_repair_bbox": list(background_repair["bbox"]),
         "text_overlay_required": not has_replacement,
     }
     if has_replacement:
         cleanup["replacement_method"] = "gpt_image2_masked_edit"
         cleanup["replacement_crop_path"] = str(context["replacement_crop_path"])
     else:
-        cleanup["failure_reason"] = gpt_payload.get("failure_reason") or "gpt_image2_replacement_not_completed"
+        cleanup["replacement_failure_reason"] = gpt_payload.get("failure_reason") or "gpt_image2_replacement_not_completed"
     return {
         "record_id": detection["record_id"],
         "image_name": detection.get("image_name"),
         "translated_text": detection.get("translated_text", ""),
-        "status": "cleaned" if has_replacement else "failed",
+        "status": "cleaned",
         "cleanup": cleanup,
         "fallback_locator": locator,
         "fallback_locator_validation": validation,
@@ -380,6 +404,81 @@ def _edit_context_payload(edit_context: dict) -> dict:
         "local_context_bbox": list(edit_context["local_context_bbox"]),
         "size": list(edit_context["size"]),
     }
+
+
+def _write_fallback_background_repair(
+    run_dir: Path,
+    detection: dict,
+    context: dict,
+    local_bbox: tuple[int, int, int, int],
+    method: str,
+) -> dict:
+    result = inpaint_nonbubble_text(
+        image_path=context["input_path"],
+        bbox=local_bbox,
+        output_dir=run_dir / "fallback_background_repair",
+        record_id=detection["record_id"],
+        method=method,
+        polarity=_fallback_repair_polarity(context["input_path"], local_bbox),
+    )
+    return _fallback_background_payload(run_dir, detection["record_id"], result, context["input_path"], context["size"], local_bbox)
+
+
+def _fallback_background_payload(
+    run_dir: Path,
+    record_id: str,
+    result,
+    context_path: Path,
+    context_size: tuple[int, int],
+    local_bbox: tuple[int, int, int, int],
+) -> dict:
+    safe_id = _safe_name(record_id)
+    cleaned_path = run_dir / "fallback_cleaned" / f"{safe_id}.png"
+    mask_path = run_dir / "fallback_mask" / f"{safe_id}.png"
+    before_after_path = run_dir / "fallback_before_after" / f"{safe_id}.png"
+    cleaned_path.parent.mkdir(parents=True, exist_ok=True)
+    mask_path.parent.mkdir(parents=True, exist_ok=True)
+    before_after_path.parent.mkdir(parents=True, exist_ok=True)
+    with Image.open(context_path) as image, Image.open(result.cleaned_crop_path) as patch:
+        repaired = image.convert("RGB").resize(context_size)
+        repaired.paste(patch.convert("RGB").resize((local_bbox[2] - local_bbox[0], local_bbox[3] - local_bbox[1])), local_bbox[:2])
+    with Image.open(result.text_mask_path) as patch_mask:
+        mask = Image.new("L", context_size, 0)
+        mask.paste(patch_mask.convert("L").resize((local_bbox[2] - local_bbox[0], local_bbox[3] - local_bbox[1])), local_bbox[:2])
+    repaired.save(cleaned_path)
+    mask.save(mask_path)
+    _save_fallback_before_after(context_path, cleaned_path, before_after_path)
+    return {
+        "method": result.method,
+        "bbox": local_bbox,
+        "cleaned_crop_path": cleaned_path,
+        "text_mask_path": mask_path,
+        "before_after_path": before_after_path,
+    }
+
+
+def _fallback_repair_polarity(context_path: Path, local_bbox: tuple[int, int, int, int]) -> str:
+    try:
+        with Image.open(context_path) as image:
+            crop = image.convert("RGB").crop(local_bbox)
+    except (FileNotFoundError, OSError):
+        return "dark_on_light"
+    gray = np.array(crop.convert("L"), dtype=np.uint8)
+    if gray.size == 0:
+        return "dark_on_light"
+    dark_ratio = float((gray < 90).mean())
+    light_ratio = float((gray > 210).mean())
+    return "light_on_dark" if dark_ratio >= 0.35 and light_ratio >= 0.03 else "dark_on_light"
+
+
+def _save_fallback_before_after(before_path: Path, after_path: Path, output_path: Path) -> None:
+    with Image.open(before_path) as before_image, Image.open(after_path) as after_image:
+        before = before_image.convert("RGB")
+        after = after_image.convert("RGB")
+    canvas = Image.new("RGB", (before.width + after.width, max(before.height, after.height)), "white")
+    canvas.paste(before, (0, 0))
+    canvas.paste(after, (before.width, 0))
+    canvas.save(output_path)
 
 
 def _cleanup_payload(result) -> dict:
@@ -705,6 +804,50 @@ def _with_rejected_locator_attempt(locator: dict, key: str, attempt: dict, valid
         },
     }
     return result
+
+
+def _cv_tightness_override(locator: dict, validation: dict, context_size: tuple[int, int]) -> dict | None:
+    if not _semantically_accepted_loose_validation(validation):
+        return None
+    refinement = locator.get("refinement") or {}
+    if refinement.get("method") not in CV_TIGHTNESS_REFINEMENT_METHODS:
+        return None
+    local_bbox = locator.get("local_bbox_xyxy")
+    if not isinstance(local_bbox, list) or len(local_bbox) != 4:
+        return None
+    width, height = context_size
+    x1, y1, x2, y2 = [int(value) for value in local_bbox]
+    if width <= 0 or height <= 0 or x2 <= x1 or y2 <= y1:
+        return None
+    bbox_width = x2 - x1
+    bbox_height = y2 - y1
+    width_ratio = bbox_width / width
+    height_ratio = bbox_height / height
+    area_ratio = (bbox_width * bbox_height) / (width * height)
+    if (
+        area_ratio > CV_TIGHTNESS_MAX_AREA_RATIO
+        or min(width_ratio, height_ratio) > CV_TIGHTNESS_MAX_SHORT_SIDE_RATIO
+        or max(width_ratio, height_ratio) > CV_TIGHTNESS_MAX_LONG_SIDE_RATIO
+    ):
+        return None
+    return {
+        "status": "accepted",
+        "reason": "semantic_correct_after_cv_refinement",
+        "refinement_method": refinement.get("method"),
+        "bbox_area_ratio": round(area_ratio, 4),
+        "bbox_width_ratio": round(width_ratio, 4),
+        "bbox_height_ratio": round(height_ratio, 4),
+    }
+
+
+def _semantically_accepted_loose_validation(validation: dict) -> bool:
+    return (
+        validation.get("status") == "accepted"
+        and validation.get("semantic_correct") is True
+        and validation.get("tight_enough") is not True
+        and validation.get("bbox_on_blank_area") is False
+        and validation.get("bbox_targets_unrelated_text") is False
+    )
 
 
 def _locator_bbox_for_anchor_recovery(locator: dict, context_size: tuple[int, int]) -> list[int] | None:
@@ -1131,12 +1274,35 @@ def _fallback_validation_payload(payload: dict, response: dict, validation_image
 
 
 def _should_retry_fallback_validation(validation: dict) -> bool:
-    return (
+    inconclusive_semantic_rejection = (
         validation.get("tight_enough") is True
         and validation.get("bbox_on_blank_area") is False
         and validation.get("bbox_targets_unrelated_text") is False
         and validation.get("semantic_correct") is not True
     )
+    return inconclusive_semantic_rejection or _has_contradictory_positive_semantic_reasoning(validation)
+
+
+def _has_contradictory_positive_semantic_reasoning(validation: dict) -> bool:
+    if (
+        validation.get("semantic_correct") is not False
+        or validation.get("bbox_on_blank_area") is True
+        or validation.get("bbox_targets_unrelated_text") is True
+    ):
+        return False
+    summary = str(validation.get("reasoning_summary") or "").lower()
+    visible = str(validation.get("visible_original_text") or "").strip()
+    if not visible:
+        return False
+    positive_markers = (
+        "corresponds to the chinese translation",
+        "corresponds to",
+        "matches the meaning",
+        "correctly identifies",
+        "correctly targets",
+        "targets the correct",
+    )
+    return any(marker in summary for marker in positive_markers)
 
 
 def _write_locator_grid_image(crop: Image.Image, output_path: Path, labelplus_point_xy: list[int] | None = None) -> Path:
@@ -1203,7 +1369,7 @@ def _write_fallback_replacement_grid(run_dir: Path, rows: list[dict]) -> Path | 
     tiles: list[tuple[str, Path]] = []
     for row in rows:
         cleanup = row.get("cleanup") or {}
-        if cleanup.get("method") != "gpt_image2_masked_edit":
+        if not row.get("fallback_locator"):
             continue
         record_id = row["record_id"]
         safe_id = _safe_name(record_id)
