@@ -192,6 +192,13 @@ list:
 python experiments/pipeline_coverage_report.py --registry-file docs/pipeline-runs.gbc06.json --registry-entry phase0-8-gbc06-v22-gbc06-03-detection --output-root outputs/runs --next-limit 12
 ```
 
+Current v23 extends v22 with the real MIMO Phase 3 font-selection run for
+`GBC06_03.png#1-#3`:
+
+```powershell
+python experiments/pipeline_coverage_report.py --registry-file docs/pipeline-runs.gbc06.json --registry-entry phase0-8-gbc06-v23-gbc06-03-font-selection --output-root outputs/runs --next-limit 12
+```
+
 ## Generated Artifacts
 
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage/pipeline-coverage.json`
@@ -241,6 +248,12 @@ python experiments/pipeline_coverage_report.py --registry-file docs/pipeline-run
 - `outputs/runs/phase2-gbc06-03-batch-1-3-cta-detection-v1/debug/detection/GBC06_03-1-3-grid.png`
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v22-gbc06-03-detection/pipeline-coverage.json`
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v22-gbc06-03-detection/reports/pipeline-coverage-report.md`
+- `outputs/runs/phase3-gbc06-03-batch-1-3-font-comparison/font-comparisons.jsonl`
+- `outputs/runs/phase3-gbc06-03-batch-1-3-font-comparison/debug/font_comparison/GBC06_03-1-3-font-grid.png`
+- `outputs/runs/phase3-gbc06-03-batch-1-3-mimo-font-selection/font-selections.jsonl`
+- `outputs/runs/phase3-gbc06-03-batch-1-3-mimo-font-selection/reports/api-calls.jsonl`
+- `outputs/runs/phase0-8-gbc06-pipeline-coverage-v23-gbc06-03-font-selection/pipeline-coverage.json`
+- `outputs/runs/phase0-8-gbc06-pipeline-coverage-v23-gbc06-03-font-selection/reports/pipeline-coverage-report.md`
 
 `outputs/` remains ignored by Git. The source-backed summary below records the key numbers so the experiment is traceable in the repository.
 
@@ -259,7 +272,7 @@ Stage counts:
 ```text
 phase1_labelplus       covered=38 missing=0
 phase2_detection       covered=38 missing=0
-phase3_font_selection  covered=35 missing=3
+phase3_font_selection  covered=38 missing=0
 phase4_layout          covered=35 missing=3
 phase5_angle           covered=35 missing=3
 phase6_cleanup         covered=35 missing=3
@@ -364,6 +377,23 @@ next_records[2]=GBC06_03.png#3  first_missing_stage=phase3_font_selection
 phase1_pending_detection_count=142
 ```
 
+The v23 report adds real MIMO font selection for the same three records:
+
+```text
+GBC06_03.png#1  selected=[toolbox]文黑体-简繁-Bold(v2.4).ttf  confidence=0.95
+GBC06_03.png#2  selected=[toolbox]POP1-简繁(v2.5).ttf       confidence=0.90
+GBC06_03.png#3  selected=[toolbox]与墨体-简体-Bold(v2.4).ttf  confidence=0.90
+```
+
+After v23, all three records have moved past Phase 3 and now wait on layout:
+
+```text
+next_records[0]=GBC06_03.png#1  first_missing_stage=phase4_layout
+next_records[1]=GBC06_03.png#2  first_missing_stage=phase4_layout
+next_records[2]=GBC06_03.png#3  first_missing_stage=phase4_layout
+phase3_font_selection covered=38 missing=0
+```
+
 The first `next-limit=12` Phase 1 records missing detection in v17 are:
 
 ```text
@@ -398,11 +428,11 @@ The current detection prototype has produced 38 candidate records across the
 core `GBC06_01.png`/`GBC06_02.png` batches, the diverse expansion records, and
 the first three `GBC06_03.png` CTA matches. The v20 registry entry remains the
 accepted 35-record complete baseline. The v22 registry entry extends that
-baseline and appends `phase2-gbc06-03-batch-1-3-cta-detection-v1`, so coverage
-now reports 35 complete records and 3 newly detected records waiting for Phase 3
-font selection. The coverage report additionally treats Phase 7 MIMO preview
-evaluation failures plus Phase 8 export audit failures as quality issues that
-make affected records incomplete.
+baseline and appends `phase2-gbc06-03-batch-1-3-cta-detection-v1`; the v23 entry
+adds the corresponding real MIMO font-selection run. Coverage now reports 35
+complete records and 3 records waiting for Phase 4 layout search. The coverage
+report additionally treats Phase 7 MIMO preview evaluation failures plus Phase 8
+export audit failures as quality issues that make affected records incomplete.
 
 The `GBC06_02.png#1-#3` expansion required two fixes: tighter adjacent-column text bbox selection and mask-aware page cleanup composition. The best MIMO-backed integrated run is `phase7-8-gbc06-02-batch-1-3-preview-v3`, with score `7` and `usable=true`; `#2` and `#3` each received per-record MIMO score `10`. A follow-up top-aligned vertical-column rendering experiment (`preview-v4`) dropped to score `5`, so it was not kept.
 
@@ -557,6 +587,22 @@ base_record_count=38 complete_record_count=35 incomplete_record_count=3
 phase1_pending_detection_count=142
 next_records[0].record_id=GBC06_03.png#1
 next_records[0].first_missing_stage=phase3_font_selection
+```
+
+Fresh v23 registry extension coverage generation:
+
+```powershell
+python experiments/pipeline_coverage_report.py --registry-file docs/pipeline-runs.gbc06.json --registry-entry phase0-8-gbc06-v23-gbc06-03-font-selection --output-root outputs/runs --next-limit 12
+```
+
+Observed result:
+
+```text
+outputs\runs\phase0-8-gbc06-pipeline-coverage-v23-gbc06-03-font-selection
+base_record_count=38 complete_record_count=35 incomplete_record_count=3
+phase3_font_selection covered=38 missing=0
+next_records[0].record_id=GBC06_03.png#1
+next_records[0].first_missing_stage=phase4_layout
 ```
 
 Fresh targeted verification for pipeline coverage, Phase 6/7/8 quality
