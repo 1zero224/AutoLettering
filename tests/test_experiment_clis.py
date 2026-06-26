@@ -12,6 +12,7 @@ from experiments import (
     phase6_nonbubble_cleanup,
     phase6_nonbubble_gpt_replace,
     phase6_segmented_gpt_replace,
+    phase7_8_gpt_quality_gate_smoke,
 )
 
 
@@ -253,6 +254,30 @@ def test_phase6_nonbubble_gpt_cli_defaults_to_readable_tight_context():
 
     assert args.context_padding == 16
     assert args.rect_mask_expand_px == 2
+
+
+def test_phase7_8_quality_gate_smoke_cli_requires_existing_quality_run_contract():
+    parser = phase7_8_gpt_quality_gate_smoke.build_parser()
+
+    args = parser.parse_args(
+        [
+            "--detection-run-dir",
+            "outputs/runs/phase2",
+            "--cleanup-run-dir",
+            "outputs/runs/phase6",
+            "--phase6-gpt-quality-run-dir",
+            "outputs/runs/phase6-quality",
+            "--run-id",
+            "quality-smoke",
+        ]
+    )
+
+    assert args.detection_run_dir == "outputs/runs/phase2"
+    assert args.cleanup_run_dir == "outputs/runs/phase6"
+    assert args.phase6_gpt_quality_run_dir == "outputs/runs/phase6-quality"
+    assert args.output_root == "outputs/runs"
+    assert args.run_id == "quality-smoke"
+    assert args.sample_limit == 1
 
 
 def test_phase6_segmented_gpt_cli_builds_api_configs_from_env(monkeypatch):

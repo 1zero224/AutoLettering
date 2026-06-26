@@ -657,8 +657,10 @@ Output:
 
 - Run directory: `outputs/runs/phase7-8-gbc06-02-14-gpt-v3-quality-gated-smoke-v1`
 - Summary: `quality-gate-smoke-summary.json`
+- Run-local report: `reports/quality-gate-smoke-report.md`
 - Phase 7 preview: `runs/phase7-preview/pages/GBC06-02-png.png`
 - Phase 8 manifest: `runs/phase8-export/photoshop-manifest.json`
+- Evidence grid: `visuals/quality-gate-evidence-grid.png`
 
 Result:
 
@@ -670,6 +672,23 @@ Result:
 - Phase 8 set `replacement_method=null` and used the same cleaned/background
   crop as `effective_crop_path`, so the bad GPT text was not baked into
   `修复图像`.
+
+Follow-up smoke with the evidence grid enabled:
+
+```powershell
+python experiments/phase7_8_gpt_quality_gate_smoke.py --detection-run-dir outputs/runs/phase2-gbc06-02-14-cta-fallback-context-v2 --cleanup-run-dir outputs/runs/phase6-gbc06-02-14-fallback-context-gpt-v3-panel-divider-cap --phase6-gpt-quality-run-dir outputs/runs/phase6-gbc06-02-14-gpt-v3-mimo-quality --output-root outputs/runs --run-id phase7-8-gbc06-02-14-gpt-v3-quality-gated-smoke-v2 --sample-limit 1
+```
+
+The new grid is near-square (`690x738`) and puts the original bbox crop,
+rejected GPT crop, gated cleaned crop, and final Phase 7 before/after crop in a
+single manual-review image:
+
+- `outputs/runs/phase7-8-gbc06-02-14-gpt-v3-quality-gated-smoke-v2/visuals/quality-gate-evidence-grid.png`
+
+Pipeline coverage reads the same `phase6_gpt_quality_run_dir` signal directly.
+This smoke run is a local diagnostic package for manual review and PSD/preview
+chain verification; it is not a new registry stage that should replace the
+underlying Phase 6 quality run in coverage inputs.
 
 ## Current Recommendation
 

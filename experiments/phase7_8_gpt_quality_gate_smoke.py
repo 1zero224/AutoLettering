@@ -11,6 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from autolettering.experiment_grid import near_square_columns, write_grid
 from autolettering.phase7 import run_phase7_preview
 from autolettering.phase8 import run_phase8_photoshop_export
 
@@ -50,7 +51,8 @@ def run_quality_gate_smoke(
         preview_run_dir=phase7_run,
         phase6_gpt_quality_run_dir=phase6_gpt_quality_run_dir,
     )
-    summary = _summary(run_dir, phase7_run, phase8_run, detections, record_ids)
+    summary = _summary(run_dir, phase7_run, phase8_run, detections, cleanups, record_ids)
+    summary["evidence_grid_path"] = str(_write_evidence_grid(run_dir, summary, detections, cleanups))
     _write_json(run_dir / "quality-gate-smoke-summary.json", summary)
     _write_report(run_dir / "reports" / "quality-gate-smoke-report.md", summary)
     return run_dir
@@ -139,6 +141,7 @@ def _summary(
     phase7_run: Path,
     phase8_run: Path,
     detections: dict[str, dict],
+    cleanups: dict[str, dict],
     record_ids: list[str],
 ) -> dict:
     phase7_rows = _load_jsonl(phase7_run / "preview-results.jsonl")
@@ -149,25 +152,28 @@ def _summary(
         "phase7_run_dir": str(phase7_run),
         "phase8_run_dir": str(phase8_run),
         "records": [
-            _record_summary(record_id, detections.get(record_id) or {}, phase7_rows, phase8_manifest)
+            _record_summary(record_id, detections.get(record_id) or {}, cleanups.get(record_id) or {}, phase7_rows, phase8_manifest)
             for record_id in record_ids
         ],
     }
 
 
-def _record_summary(record_id: str, detection: dict, phase7_rows: list[dict], phase8_manifest: dict) -> dict:
+def _record_summary(record_id: str, detection: dict, cleanup: dict, phase7_rows: list[dict], phase8_manifest: dict) -> dict:
     phase7_record = _phase7_record(record_id, phase7_rows)
     phase8_layer = _phase8_layer(record_id, phase8_manifest)
     phase8_source = _phase8_repair_source(record_id, phase8_manifest)
     quality = (phase7_record or {}).get("gpt_replacement_quality") or (phase8_source or {}).get("gpt_replacement_quality")
+    cleanup_payload = cleanup.get("cleanup") or {}
     return {
         "record_id": record_id,
         "image_name": detection.get("image_name"),
+        "gpt_replacement_crop_path": cleanup_payload.get("replacement_crop_path"),
         "gpt_quality_accepted": quality.get("accepted") if isinstance(quality, dict) else None,
         "gpt_quality_failure_reason": quality.get("failure_reason") if isinstance(quality, dict) else None,
         "phase7_status": _phase7_status(record_id, phase7_rows),
         "phase7_cleanup_method": (phase7_record or {}).get("cleanup_method"),
         "phase7_cleanup_crop_path": (phase7_record or {}).get("cleanup_crop_path"),
+        "phase7_before_after_path": (phase7_record or {}).get("preview_before_after_path"),
         "phase7_text_overlay_required": (phase7_record or {}).get("text_overlay_required"),
         "phase8_text_layer_exported": phase8_layer is not None,
         "phase8_replacement_method": (phase8_layer or phase8_source or {}).get("replacement_method")
@@ -178,6 +184,49 @@ def _record_summary(record_id: str, detection: dict, phase7_rows: list[dict], ph
         or ((phase8_layer or {}).get("cleanup") or {}).get("effective_crop_path"),
         "phase8_text_overlay_required": (phase8_source or {}).get("text_overlay_required"),
     }
+
+
+def _write_evidence_grid(run_dir: Path, summary: dict, detections: dict[str, dict], cleanups: dict[str, dict]) -> Path:
+    tile_paths: list[tuple[str, Path]] = []
+    tile_dir = run_dir / "visuals" / "quality_gate_tiles"
+    for record in summary["records"]:
+        record_id = record["record_id"]
+        detection = detections.get(record_id) or {}
+        cleanup = (cleanups.get(record_id) or {}).get("cleanup") or {}
+        bbox = cleanup.get("bbox") or detection.get("selected_text_box_xyxy")
+        original_crop = _write_original_crop_tile(tile_dir, record_id, detection.get("image_path"), bbox)
+        if original_crop is not None:
+            tile_paths.append((f"{record_id} original bbox", original_crop))
+        _append_existing_tile(tile_paths, f"{record_id} rejected GPT crop", record.get("gpt_replacement_crop_path"))
+        _append_existing_tile(tile_paths, f"{record_id} gated cleaned crop", record.get("phase7_cleanup_crop_path"))
+        _append_existing_tile(tile_paths, f"{record_id} Phase7 before|after", record.get("phase7_before_after_path"))
+
+    output = run_dir / "visuals" / "quality-gate-evidence-grid.png"
+    if not tile_paths:
+        _write_blank_image(output)
+        return output
+    return write_grid(output, tile_paths, near_square_columns(len(tile_paths)))
+
+
+def _write_original_crop_tile(tile_dir: Path, record_id: str, image_path: str | None, bbox: list[int] | None) -> Path | None:
+    if not image_path or not isinstance(bbox, list) or len(bbox) != 4 or not Path(image_path).exists():
+        return None
+    x1, y1, x2, y2 = [int(value) for value in bbox]
+    output = tile_dir / f"{_safe_name(record_id)}-original.png"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with Image.open(image_path) as image:
+        image.convert("RGB").crop((x1, y1, x2, y2)).save(output)
+    return output
+
+
+def _append_existing_tile(tile_paths: list[tuple[str, Path]], label: str, path: str | None) -> None:
+    if path and Path(path).exists():
+        tile_paths.append((label, Path(path)))
+
+
+def _write_blank_image(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (480, 160), "white").save(path)
 
 
 def _phase7_status(record_id: str, rows: list[dict]) -> str | None:
@@ -237,6 +286,7 @@ def _write_report(path: Path, summary: dict) -> None:
         "",
         f"Phase 7 run: `{summary['phase7_run_dir']}`",
         f"Phase 8 run: `{summary['phase8_run_dir']}`",
+        f"Evidence grid: `{summary['evidence_grid_path']}`",
         "",
         "## Records",
         "",

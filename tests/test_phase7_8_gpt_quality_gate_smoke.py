@@ -74,8 +74,10 @@ def test_run_quality_gate_smoke_rejects_bad_gpt_replacement(tmp_path: Path):
     )
 
     summary = json.loads((run_dir / "quality-gate-smoke-summary.json").read_text(encoding="utf-8"))
+    evidence_grid_path = Path(summary["evidence_grid_path"])
     assert summary["records"][0]["record_id"] == "page.png#1"
     assert summary["records"][0]["gpt_quality_accepted"] is False
+    assert summary["records"][0]["gpt_replacement_crop_path"] == str(replacement_path)
     assert summary["records"][0]["phase7_cleanup_crop_path"] == str(cleaned_path)
     assert summary["records"][0]["phase7_text_overlay_required"] is True
     assert summary["records"][0]["phase8_effective_crop_path"] == str(cleaned_path)
@@ -84,6 +86,12 @@ def test_run_quality_gate_smoke_rejects_bad_gpt_replacement(tmp_path: Path):
     assert summary["records"][0]["phase8_text_layer_exported"] is True
     assert Path(summary["phase7_run_dir"]).parts[-2:] == ("runs", "phase7-preview")
     assert Path(summary["phase8_run_dir"]).parts[-2:] == ("runs", "phase8-export")
+    assert evidence_grid_path == run_dir / "visuals" / "quality-gate-evidence-grid.png"
+    with Image.open(evidence_grid_path) as grid:
+        ratio = grid.width / grid.height
+    assert 0.5 <= ratio <= 2.0
+    report = (run_dir / "reports" / "quality-gate-smoke-report.md").read_text(encoding="utf-8")
+    assert "quality-gate-evidence-grid.png" in report
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
