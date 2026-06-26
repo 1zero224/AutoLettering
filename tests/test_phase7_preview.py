@@ -401,6 +401,38 @@ def test_run_phase7_preview_writes_record_before_after_crops(tmp_path: Path):
         assert crop.getpixel((60, 25)) == (0, 0, 0)
 
 
+def test_run_phase7_preview_writes_context_before_after_crops_for_mimo_review(tmp_path: Path):
+    page_path = _write_page(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    cleanup_run = tmp_path / "phase6"
+    layout_run = tmp_path / "phase4"
+    detection_run.mkdir()
+    cleanup_run.mkdir()
+    layout_run.mkdir()
+    _write_detections(detection_run / "detections.jsonl", page_path)
+    _write_cleanups(cleanup_run / "cleanup-results.jsonl", tmp_path)
+    _write_layouts(layout_run / "layout-results.jsonl", tmp_path)
+
+    run_dir = run_phase7_preview(
+        detection_run_dir=detection_run,
+        cleanup_run_dir=cleanup_run,
+        layout_run_dir=layout_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase7-context-before-after",
+        sample_limit=2,
+    )
+
+    rows = _read_jsonl(run_dir / "preview-results.jsonl")
+    record = rows[0]["records"][0]
+    context_path = Path(record["preview_context_before_after_path"])
+    assert context_path.exists()
+    assert context_path.parent.name == "context_before_after"
+    with Image.open(context_path).convert("RGB") as crop:
+        assert crop.size[0] > 80
+        assert crop.size[1] > 50
+        assert crop.getpixel((5, 20)) == (0, 0, 0)
+
+
 def test_run_phase7_preview_uses_layout_target_bbox_for_text_overlay(tmp_path: Path):
     page_path = _write_page(tmp_path / "page.png")
     detection_run = tmp_path / "phase2"

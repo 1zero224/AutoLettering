@@ -93,7 +93,7 @@ def assign_labelplus_points_to_ctd_masks(
     for distance, label, component in sorted(candidates, key=lambda item: (item[0], item[1].id, item[2].component_id)):
         if label.id in matched_labels:
             continue
-        group = _vertical_component_group(component, components)
+        group = _vertical_component_group(component, components, label)
         member_ids = {item.component_id for item in group}
         if claims & member_ids:
             continue
@@ -186,6 +186,7 @@ def _component_record(
 def _vertical_component_group(
     seed: CtdMaskComponent,
     components: list[CtdMaskComponent],
+    label: ManifestLabel | None = None,
 ) -> list[CtdMaskComponent]:
     group = [seed]
     previous_len = -1
@@ -195,7 +196,12 @@ def _vertical_component_group(
         for component in sorted(components, key=lambda item: (item.bbox_xyxy[1], item.bbox_xyxy[0])):
             if component in group:
                 continue
-            if _is_vertical_continuation(component.bbox_xyxy, cluster_bbox, seed.bbox_xyxy):
+            if _is_vertical_continuation(component.bbox_xyxy, cluster_bbox, seed.bbox_xyxy) or _is_bubble_adjacent_vertical_column(
+                component.bbox_xyxy,
+                cluster_bbox,
+                seed.bbox_xyxy,
+                label,
+            ):
                 group.append(component)
     return sorted(group, key=lambda item: (item.bbox_xyxy[1], item.bbox_xyxy[0]))
 
@@ -234,6 +240,28 @@ def _is_tall_promo_column_continuation(
     if _horizontal_center_delta_ratio(bbox, cluster) > 0.36:
         return False
     return gap <= max(90, int(round(_height(cluster) * 0.18)))
+
+
+def _is_bubble_adjacent_vertical_column(
+    bbox: tuple[int, int, int, int],
+    cluster: tuple[int, int, int, int],
+    seed: tuple[int, int, int, int],
+    label: ManifestLabel | None,
+) -> bool:
+    if label is None or label.group_name != "框内":
+        return False
+    seed_width = _width(seed)
+    if _width(bbox) > max(seed_width * 1.25, seed_width + 16):
+        return False
+    if _height(bbox) > max(_height(seed) * 1.25, _height(seed) + 36):
+        return False
+    vertical_gap = _vertical_gap(bbox, cluster)
+    if _horizontal_overlap_ratio(bbox, cluster) >= 0.55:
+        return vertical_gap <= max(10, int(round(_height(seed) * 0.08)))
+    if _vertical_overlap_ratio(bbox, cluster) < 0.35:
+        return False
+    horizontal_gap = _horizontal_gap(bbox, cluster)
+    return horizontal_gap <= max(12, int(round(seed_width * 0.35))) and vertical_gap == 0
 
 
 def _merged_component(group: list[CtdMaskComponent]) -> CtdMaskComponent:
@@ -404,6 +432,17 @@ def _horizontal_overlap_ratio(a: tuple[int, int, int, int], b: tuple[int, int, i
     if overlap <= 0:
         return 0.0
     return overlap / max(1, min(_width(a), _width(b)))
+
+
+def _vertical_overlap_ratio(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
+    overlap = min(a[3], b[3]) - max(a[1], b[1])
+    if overlap <= 0:
+        return 0.0
+    return overlap / max(1, min(_height(a), _height(b)))
+
+
+def _horizontal_gap(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> int:
+    return max(0, max(a[0], b[0]) - min(a[2], b[2]))
 
 
 def _horizontal_center_delta_ratio(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:

@@ -191,6 +191,7 @@ def _record_summary(record: dict) -> dict:
         "layout_preview_path": record.get("layout_preview_path", ""),
         "text_overlay_required": record.get("text_overlay_required", True),
         "preview_before_after_path": record.get("preview_before_after_path", ""),
+        "preview_context_before_after_path": record.get("preview_context_before_after_path", ""),
     }
     _copy_optional_fields(
         payload,
@@ -279,6 +280,9 @@ def _write_record_before_after_crops(run_dir: Path, preview_path: Path, records:
         output_path = run_dir / "crops" / "before_after" / f"{_safe_name(record['record_id'])}.png"
         _save_before_after_crop(original, preview, tuple(record["bbox"]), output_path)
         record["preview_before_after_path"] = str(output_path)
+        context_output_path = run_dir / "crops" / "context_before_after" / f"{_safe_name(record['record_id'])}.png"
+        _save_before_after_crop(original, preview, _context_bbox(tuple(record["bbox"]), original.size), context_output_path)
+        record["preview_context_before_after_path"] = str(context_output_path)
 
 
 def _save_before_after_crop(original: Image.Image, preview: Image.Image, bbox: tuple[int, int, int, int], path: Path) -> None:
@@ -289,6 +293,26 @@ def _save_before_after_crop(original: Image.Image, preview: Image.Image, bbox: t
     comparison.paste(after, (before.width, 0))
     path.parent.mkdir(parents=True, exist_ok=True)
     comparison.save(path)
+
+
+def _context_bbox(
+    bbox: tuple[int, int, int, int],
+    image_size: tuple[int, int],
+    padding_ratio: float = 0.6,
+    min_padding: int = 24,
+) -> tuple[int, int, int, int]:
+    x1, y1, x2, y2 = bbox
+    width = max(1, x2 - x1)
+    height = max(1, y2 - y1)
+    pad_x = max(min_padding, int(round(width * padding_ratio)))
+    pad_y = max(min_padding, int(round(height * padding_ratio)))
+    image_width, image_height = image_size
+    return (
+        max(0, x1 - pad_x),
+        max(0, y1 - pad_y),
+        min(image_width, x2 + pad_x),
+        min(image_height, y2 + pad_y),
+    )
 
 
 def _write_report(

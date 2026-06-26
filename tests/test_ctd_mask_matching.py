@@ -11,7 +11,7 @@ from autolettering.detection.ctd_masks import (
 from autolettering.labelplus.models import ManifestLabel
 
 
-def _label(record_index: int, x: int, y: int) -> ManifestLabel:
+def _label(record_index: int, x: int, y: int, group_name: str = "框外") -> ManifestLabel:
     return ManifestLabel(
         id=f"page.png#{record_index}",
         page_index=1,
@@ -21,7 +21,7 @@ def _label(record_index: int, x: int, y: int) -> ManifestLabel:
         x_px=x,
         y_px=y,
         group_id=1,
-        group_name="框外",
+        group_name=group_name,
         translated_text=f"译文{record_index}",
     )
 
@@ -161,6 +161,26 @@ def test_assign_labelplus_points_to_ctd_masks_merges_tall_promo_side_column(tmp_
     )
     assert "component-wide-logo" not in match.component_id
     assert "component-bottom-banner" not in match.component_id
+
+
+def test_assign_labelplus_points_to_ctd_masks_merges_bubble_adjacent_vertical_columns(tmp_path: Path):
+    components = [
+        _component(tmp_path, "component-0004", (1170, 735, 1201, 799), 1984),
+        _component(tmp_path, "component-0005", (1207, 738, 1225, 766), 504),
+        _component(tmp_path, "component-0006", (1225, 738, 1242, 761), 391),
+        _component(tmp_path, "component-0007", (1205, 768, 1243, 891), 4674),
+        _component(tmp_path, "component-0008", (1225, 769, 1242, 792), 391),
+        _component(tmp_path, "component-distant-column", (929, 774, 970, 1048), 11234),
+    ]
+    labels = [_label(3, 1257, 782, group_name="框内")]
+
+    matches = assign_labelplus_points_to_ctd_masks(labels, components, max_edge_distance_px=20)
+
+    match = matches["page.png#3"]
+    assert match.status == "matched"
+    assert match.component_id == "component-0004+component-0005+component-0006+component-0007+component-0008"
+    assert match.bbox_xyxy == (1170, 735, 1243, 891)
+    assert "component-distant-column" not in match.component_id
 
 
 def test_assign_labelplus_points_to_ctd_masks_rejects_ambiguous_component_claims():

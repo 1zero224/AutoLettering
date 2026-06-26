@@ -163,7 +163,7 @@ def test_build_preview_evaluation_prompt_lists_records_and_methods():
     assert "锵~锵" in prompt
     assert "Chinese sound effects are valid translated lettering" in prompt
     assert "Return exactly one page-level JSON object" in prompt
-    assert "tight crops" in prompt
+    assert "local context crops" in prompt
     assert "not as same-size score targets" in prompt
     assert "Do not penalize missing full speech-bubble outlines" in prompt
     assert "Long vertical records may be split into numbered segments" in prompt
@@ -260,6 +260,40 @@ def test_evaluation_contact_sheet_splits_tall_vertical_crops_into_readable_grid(
         assert sheet.getpixel((11, 144)) == (0, 160, 80)
 
 
+def test_evaluation_contact_sheet_prefers_context_crop_when_available(tmp_path: Path):
+    preview_run = tmp_path / "phase7"
+    preview_page = preview_run / "pages" / "page.png"
+    preview_page.parent.mkdir(parents=True)
+    Image.new("RGB", (64, 64), "white").save(preview_page)
+    tight_before_after = tmp_path / "tight-before-after.png"
+    context_before_after = tmp_path / "context-before-after.png"
+    Image.new("RGB", (80, 40), "white").save(tight_before_after)
+    context = Image.new("RGB", (80, 40), "white")
+    for x in range(40, 80):
+        for y in range(0, 40):
+            context.putpixel((x, y), (0, 180, 0))
+    context.save(context_before_after)
+    row = {
+        "image_name": "page.png",
+        "status": "page_preview_generated",
+        "records": [
+            {
+                "record_id": "page.png#1",
+                "translated_text": "译文",
+                "cleanup_method": "bubble_region_fill",
+                "preview_before_after_path": str(tight_before_after),
+                "preview_context_before_after_path": str(context_before_after),
+            }
+        ],
+        "preview": {"page_preview_path": str(preview_page), "record_count": 1},
+    }
+
+    sheet_path = Path(_build_evaluation_contact_sheet(row))
+
+    with Image.open(sheet_path).convert("RGB") as sheet:
+        assert _has_color_pixel(sheet, (0, 180, 0), (10, 144, 240, 300))
+
+
 def test_run_phase7_preview_evaluation_preserves_records_when_api_fails(tmp_path: Path):
     preview_run = tmp_path / "phase7"
     preview_page = preview_run / "pages" / "page.png"
@@ -321,5 +355,14 @@ def _has_nonwhite_pixel(image: Image.Image, box: tuple[int, int, int, int]) -> b
     for y in range(y1, y2):
         for x in range(x1, x2):
             if image.getpixel((x, y)) != (255, 255, 255):
+                return True
+    return False
+
+
+def _has_color_pixel(image: Image.Image, color: tuple[int, int, int], box: tuple[int, int, int, int]) -> bool:
+    x1, y1, x2, y2 = box
+    for y in range(y1, y2):
+        for x in range(x1, x2):
+            if image.getpixel((x, y)) == color:
                 return True
     return False

@@ -14,6 +14,14 @@ The accepted layout run is `phase4-gbc06-03-batch-1-3-layout-v3`. The earlier
 `v1` output is preserved as a negative control because the vertical text looked
 visually cramped despite `overflow_ratio=0.0`.
 
+Follow-up Phase 7 manual review later found an upstream detection gap for
+`GBC06_03.png#3`: the v1 CTA match omitted adjacent bubble text `しろ`. The
+accepted final preview/export chain therefore supersedes this v3 layout with
+`phase2-gbc06-03-batch-1-3-cta-detection-v2` and
+`phase4-gbc06-03-batch-1-3-layout-v4-cta-merged` for Phase 6-8. This report
+remains the record of the original Phase 4/5 layout experiment and its optical
+advance fix.
+
 ## Commands
 
 Estimate orientation and angle:

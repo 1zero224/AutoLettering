@@ -424,6 +424,57 @@ next_records[1]=GBC06_03.png#2  first_missing_stage=phase6_cleanup
 next_records[2]=GBC06_03.png#3  first_missing_stage=phase6_cleanup
 ```
 
+The v25 report closes `GBC06_03.png#1-#3` through Phase 8. The first integrated
+preview run received MIMO score `10`, but manual full-page review found that
+`GBC06_03.png#3` still left the adjacent Japanese text `しろ` in the speech
+bubble. The root cause was a CTA component grouping gap: the original v1
+detection matched only `component-0007+component-0008` with bbox
+`[1205,768,1243,891]`, while the complete bubble text also needed adjacent
+components `component-0004+component-0005+component-0006`.
+
+The accepted v25 chain therefore replaces the GBC06_03 detection, layout,
+cleanup, preview, and export dirs with the CTA-merged runs:
+
+```text
+phase2-gbc06-03-batch-1-3-cta-detection-v2
+phase4-gbc06-03-batch-1-3-layout-v4-cta-merged
+phase6-gbc06-03-batch-1-3-region-fill-v2-cta-merged
+phase7-8-gbc06-03-batch-1-3-preview-v3-context-eval/runs/phase7-preview
+phase7-8-gbc06-03-batch-1-3-preview-v3-context-eval/runs/phase8-export
+phase7-8-gbc06-03-batch-1-3-preview-v3-context-eval/runs/phase7-evaluation
+```
+
+The accepted `#3` detection bbox is `[1170,735,1243,891]` and the merged
+component id is
+`component-0004+component-0005+component-0006+component-0007+component-0008`.
+The v25 Phase 7 evaluator also uses local context before/after crops instead of
+only tight crops, so adjacent leftover Japanese text is visible to MIMO instead
+of being hidden outside the review image. The final v3 context evaluation scored
+`10`, `usable=true`, with `original_text_removed=true`,
+`art_preserved=true`, and `lettering_readable=true`.
+
+Observed v25 coverage result:
+
+```text
+base_record_count=38
+complete_record_count=38
+incomplete_record_count=0
+phase1_labelplus covered=38 missing=0
+phase2_detection covered=38 missing=0
+phase3_font_selection covered=38 missing=0
+phase4_layout covered=38 missing=0
+phase5_angle covered=38 missing=0
+phase6_cleanup covered=38 missing=0
+phase7_preview covered=38 missing=0
+phase8_export covered=38 missing=0
+phase7_preview evaluations=16 usable=16/16 failed=0 low_score=0 records=38 record_issues=0
+phase8_export audits=6 passed=6/6 records=9 record_issues=0
+phase1_pending_detection_count=142
+next_records=[]
+next_experiments[0]=GBC06_02.png#14
+next_experiments[1]=GBC06_03.png#4
+```
+
 The first `next-limit=12` Phase 1 records missing detection in v17 are:
 
 ```text

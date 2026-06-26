@@ -164,6 +164,31 @@
           "outputs/runs/phase5-gbc06-03-batch-1-3-angle"
         ]
       }
+    },
+    "phase0-8-gbc06-v25-gbc06-03-preview-export": {
+      "extends": "phase0-8-gbc06-v24-gbc06-03-layout-angle",
+      "run_id": "phase0-8-gbc06-pipeline-coverage-v25-gbc06-03-preview-export",
+      "next_limit": 12,
+      "append": {
+        "detection_run_dir": [
+          "outputs/runs/phase2-gbc06-03-batch-1-3-cta-detection-v2"
+        ],
+        "layout_run_dir": [
+          "outputs/runs/phase4-gbc06-03-batch-1-3-layout-v4-cta-merged"
+        ],
+        "cleanup_run_dirs": [
+          "outputs/runs/phase6-gbc06-03-batch-1-3-region-fill-v2-cta-merged"
+        ],
+        "preview_run_dir": [
+          "outputs/runs/phase7-8-gbc06-03-batch-1-3-preview-v3-context-eval/runs/phase7-preview"
+        ],
+        "export_run_dir": [
+          "outputs/runs/phase7-8-gbc06-03-batch-1-3-preview-v3-context-eval/runs/phase8-export"
+        ],
+        "phase7_preview_evaluation_run_dir": [
+          "outputs/runs/phase7-8-gbc06-03-batch-1-3-preview-v3-context-eval/runs/phase7-evaluation"
+        ]
+      }
     }
   }
 }

@@ -81,9 +81,10 @@ def build_preview_evaluation_prompt(row: dict) -> str:
             "Chinese text and Chinese sound effects are valid translated lettering when they match the Records JSON text.",
             "This is not a translation audit or strict OCR task; for programmatic lettering, judge visual readability and placement.",
             "Do not lower the score for alleged missing or extra Chinese characters unless the mismatch is unmistakable in the green AFTER RESULT panel.",
-            "These are tight crops of the same original text area; compare BEFORE and AFTER only to understand the edit target, not as same-size score targets.",
+            "These are local context crops around the original text area; compare BEFORE and AFTER only to understand the edit target, not as same-size score targets.",
             "Do not penalize missing full speech-bubble outlines or full bubble background when the tight crop only contains the text area.",
             "Focus on whether the original Japanese text was removed, nearby art/tones are preserved, and translated lettering is readable.",
+            "If local context shows leftover Japanese text adjacent to the translated target in the green AFTER RESULT panel, count that as failed original_text_removed.",
             "Compare the generated lettering placement against the original text area, not the source-language meaning.",
             "Mark it unusable or lower the score if translated lettering is oversized, outside the original text area, or covers nearby art.",
             f"Records JSON: {json.dumps(records, ensure_ascii=False)}",
@@ -261,7 +262,7 @@ def _failure_api_call(row: dict, exc: Exception, prompt: str, image_path: str | 
 def _build_evaluation_contact_sheet(row: dict) -> str:
     output = _contact_sheet_path(row)
     output.parent.mkdir(parents=True, exist_ok=True)
-    records = [record for record in row.get("records", []) if record.get("preview_before_after_path")]
+    records = [record for record in row.get("records", []) if _review_pair_path(record)]
     if not records:
         row.setdefault("preview", {})["evaluation_image_path"] = row.get("preview", {}).get("page_preview_path")
         return str(row["preview"]["evaluation_image_path"])
@@ -311,7 +312,7 @@ def _build_evaluation_contact_sheet(row: dict) -> str:
 def _contact_sheet_segments(records: list[dict]) -> list[tuple[str, Image.Image, Image.Image]]:
     segments: list[tuple[str, Image.Image, Image.Image]] = []
     for record in records:
-        before, after = _split_before_after(record["preview_before_after_path"])
+        before, after = _split_before_after(_review_pair_path(record))
         split_pairs = _split_tall_review_pair(before, after)
         for index, (before_segment, after_segment) in enumerate(split_pairs, start=1):
             label = _record_label(record)
@@ -319,6 +320,10 @@ def _contact_sheet_segments(records: list[dict]) -> list[tuple[str, Image.Image,
                 label = f"{label} | segment {index}/{len(split_pairs)} {_segment_position(index, len(split_pairs))}"
             segments.append((label, before_segment, after_segment))
     return segments
+
+
+def _review_pair_path(record: dict) -> str | None:
+    return record.get("preview_context_before_after_path") or record.get("preview_before_after_path")
 
 
 def _segment_position(index: int, total: int) -> str:
