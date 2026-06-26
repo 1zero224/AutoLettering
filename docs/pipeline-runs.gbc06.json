@@ -189,6 +189,38 @@
           "outputs/runs/phase7-8-gbc06-03-batch-1-3-preview-v3-context-eval/runs/phase7-evaluation"
         ]
       }
+    },
+    "phase0-8-gbc06-17-gpt-direct-repair-source": {
+      "run_id": "phase0-8-gbc06-17-gpt-direct-coverage-v1",
+      "next_limit": 5,
+      "phase1_run_dir": "outputs/runs/phase1-gbc06-smoke",
+      "detection_run_dir": [
+        "outputs/runs/phase2-gbc06-17-3-target-fix-v3"
+      ],
+      "font_selection_run_dir": [
+        "outputs/runs/phase3-gbc06-17-3-mimo-font-selection-target-fix-v2"
+      ],
+      "layout_run_dir": [
+        "outputs/runs/phase4-gbc06-17-3-layout-target-fix-v4"
+      ],
+      "angle_run_dir": [
+        "outputs/runs/phase5-gbc06-17-3-angle-target-fix-v2"
+      ],
+      "cleanup_run_dirs": [
+        "outputs/runs/phase6-gbc06-17-3-text-pixel-mask-gpt-v1"
+      ],
+      "preview_run_dir": [
+        "outputs/runs/phase7-gbc06-17-3-text-pixel-gpt-preview-v1"
+      ],
+      "export_run_dir": [
+        "outputs/runs/phase8-gbc06-17-3-text-pixel-gpt-export-v1"
+      ],
+      "phase6_gpt_quality_run_dir": [
+        "outputs/runs/phase6-gbc06-17-3-text-pixel-mask-gpt-v1"
+      ],
+      "phase7_preview_evaluation_run_dir": [
+        "outputs/runs/phase7-gbc06-17-3-text-pixel-gpt-preview-mimo-v1"
+      ]
     }
   }
 }

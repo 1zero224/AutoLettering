@@ -575,6 +575,18 @@ as a failed comparison for this small dark-card crop because it left visible
 ghosting, while `bt_patchmatch` removed the title cleanly enough without
 damaging the logo.
 
+The alternative accepted GPT direct-replacement chain uses the same Phase 2-5
+target-fix inputs but replaces Phase 6-8 with
+`phase6-gbc06-17-3-text-pixel-mask-gpt-v1`,
+`phase7-gbc06-17-3-text-pixel-gpt-preview-v1`, and
+`phase8-gbc06-17-3-text-pixel-gpt-export-v1`. In that Phase 8 manifest,
+`layers=[]` and `repair_sources[0].record_id=GBC06_17.png#3`, because the final
+Chinese lettering is already inside the repaired page image. Pipeline coverage
+therefore treats both editable text layers and `repair_sources[]` entries as
+Phase 8 export evidence. The dedicated registry entry
+`phase0-8-gbc06-17-gpt-direct-repair-source` keeps this contract test separate
+from the older patchmatch export chain.
+
 The `GBC06_29.png#2` diverse run validates the CTA matched path on a large
 non-bubble vertical title. Phase 2 uses BallonsTranslator CTA/CTD masks and
 matches the merged closed component
@@ -718,6 +730,22 @@ Records submitted: 3
 Accepted: 3
 Needs revision: 0
 Failed: 0
+```
+
+Fresh GPT direct repair-source coverage generation:
+
+```powershell
+python experiments/pipeline_coverage_report.py --registry-file docs/pipeline-runs.gbc06.json --registry-entry phase0-8-gbc06-17-gpt-direct-repair-source --output-root outputs/runs
+```
+
+Observed result:
+
+```text
+outputs\runs\phase0-8-gbc06-17-gpt-direct-coverage-v1
+base_record_count=1 complete_record_count=1 incomplete_record_count=0
+phase8_export covered=1 missing=0 covered_record_ids=[GBC06_17.png#3]
+records[GBC06_17.png#3].missing_stages=[]
+records[GBC06_17.png#3].quality_issues=[]
 ```
 
 Fresh targeted verification for pipeline coverage, Phase 6/7/8 quality

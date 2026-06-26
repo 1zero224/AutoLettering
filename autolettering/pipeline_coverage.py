@@ -346,7 +346,11 @@ def _export_ids(run_dir: RunDirInput) -> list[str]:
         if path is None or not path.exists():
             continue
         payload = json.loads(path.read_text(encoding="utf-8"))
-        ids.extend(str(layer["record_id"]) for page in payload.get("pages", []) for layer in page.get("layers", []))
+        for page in payload.get("pages", []):
+            ids.extend(str(layer["record_id"]) for layer in page.get("layers", []) if layer.get("record_id"))
+            ids.extend(
+                str(source["record_id"]) for source in page.get("repair_sources", []) if source.get("record_id")
+            )
     return _unique(ids)
 
 

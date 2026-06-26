@@ -127,6 +127,38 @@ def test_build_pipeline_coverage_merges_multiple_runs_per_stage(tmp_path: Path):
     ]
 
 
+def test_build_pipeline_coverage_counts_phase8_repair_sources_as_exported_records(tmp_path: Path):
+    phase1 = tmp_path / "phase1"
+    phase2 = tmp_path / "phase2"
+    phase8 = tmp_path / "phase8"
+    _write_phase1_manifest(phase1 / "manifest.json")
+    _write_jsonl(phase2 / "detections.jsonl", [_row("r1", "ok")])
+    payload = {
+        "pages": [
+            {
+                "layers": [],
+                "repair_sources": [
+                    {
+                        "record_id": "r1",
+                        "replacement_method": "gpt_image2_masked_edit",
+                        "text_overlay_required": False,
+                    }
+                ],
+            }
+        ]
+    }
+    phase8.mkdir()
+    (phase8 / "photoshop-manifest.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    report = build_pipeline_coverage(
+        phase1_run_dir=phase1,
+        detection_run_dir=phase2,
+        export_run_dir=phase8,
+    )
+
+    assert report["stages"]["phase8_export"]["covered_record_ids"] == ["r1"]
+
+
 def test_build_pipeline_coverage_merges_multiple_detection_runs(tmp_path: Path):
     phase1 = tmp_path / "phase1"
     phase2a = tmp_path / "phase2a"
