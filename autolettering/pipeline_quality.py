@@ -4,6 +4,8 @@ import json
 from collections.abc import Iterable
 from pathlib import Path
 
+from .phase6_gpt_artifact_gate import local_artifact_gate_for_quality_row
+
 
 RunDirInput = str | Path | Iterable[str | Path] | None
 PHASE7_MIN_USABLE_SCORE = 7
@@ -203,7 +205,10 @@ def _phase6_replacement_quality_records(rows: list[dict]) -> list[dict]:
         record_id = row.get("record_id")
         if not record_id:
             continue
+        artifact_result = local_artifact_gate_for_quality_row(row)
         issues = ["phase6_gpt_image2_quality_unacceptable", *[str(item) for item in row.get("issues") or []]]
+        if artifact_result.passed is False:
+            issues.extend(issue for issue in artifact_result.issues if issue not in issues)
         records.append(
             {
                 "record_id": str(record_id),
@@ -220,6 +225,7 @@ def _phase6_replacement_quality_records(rows: list[dict]) -> list[dict]:
 
 
 def _phase6_replacement_quality_accepted(row: dict) -> bool:
+    artifact_result = local_artifact_gate_for_quality_row(row)
     return (
         row.get("status") == "evaluated"
         and row.get("usable") is True
@@ -227,6 +233,7 @@ def _phase6_replacement_quality_accepted(row: dict) -> bool:
         and row.get("simplified_chinese_correct") is True
         and row.get("no_japanese_remaining") is True
         and row.get("region_correct") is True
+        and artifact_result.passed is not False
     )
 
 

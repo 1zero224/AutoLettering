@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Protocol
 
+from .phase6_gpt_artifact_gate import evaluate_gpt_replacement_artifacts, gpt_artifact_payload
 from .phase6_replacement_quality_io import build_replacement_quality_prompt, parse_replacement_quality_response
 from .phase6_replacement_sheet import resolve_existing_path, write_replacement_quality_sheet
 from .phase6_replacement_quality_types import ReplacementQualityResult
@@ -104,6 +105,7 @@ def _evaluate_one(
 ) -> tuple[dict, dict]:
     prompt = build_replacement_quality_prompt(row)
     image_path = _write_replacement_quality_sheet(run_dir, cleanup_run_dir, path_roots, row)
+    artifact_payload = _local_artifact_payload(row, cleanup_run_dir, path_roots)
     try:
         response = client.analyze_image(
             image_path,
@@ -112,12 +114,12 @@ def _evaluate_one(
             max_completion_tokens=1200,
         )
         result = parse_replacement_quality_response(response["raw_text"])
-        return _evaluation_row(row, result, response["raw_text"], image_path), _api_call_row(row, response)
+        return _evaluation_row(row, result, response["raw_text"], image_path, artifact_payload), _api_call_row(row, response)
     except Exception as exc:
-        return _failure_evaluation(row, exc, image_path), _failure_api_call(row, exc, prompt, image_path)
+        return _failure_evaluation(row, exc, image_path, artifact_payload), _failure_api_call(row, exc, prompt, image_path)
 
 
-def _evaluation_row(row: dict, result: ReplacementQualityResult, raw_text: str, image_path: str) -> dict:
+def _evaluation_row(row: dict, result: ReplacementQualityResult, raw_text: str, image_path: str, artifact_payload: dict) -> dict:
     cleanup = row.get("cleanup") or {}
     return {
         "record_id": row.get("record_id"),
@@ -138,6 +140,7 @@ def _evaluation_row(row: dict, result: ReplacementQualityResult, raw_text: str, 
         "replacement_method": cleanup.get("replacement_method"),
         "replacement_crop_path": cleanup.get("replacement_crop_path"),
         **_source_fields(row),
+        **artifact_payload,
         "evaluation_image_path": image_path,
         "raw_model_text": raw_text,
     }
@@ -153,7 +156,7 @@ def _api_call_row(row: dict, response: dict) -> dict:
     }
 
 
-def _failure_evaluation(row: dict, exc: Exception, image_path: str) -> dict:
+def _failure_evaluation(row: dict, exc: Exception, image_path: str, artifact_payload: dict) -> dict:
     cleanup = row.get("cleanup") or {}
     return {
         "record_id": row.get("record_id"),
@@ -174,6 +177,7 @@ def _failure_evaluation(row: dict, exc: Exception, image_path: str) -> dict:
         "replacement_method": cleanup.get("replacement_method"),
         "replacement_crop_path": cleanup.get("replacement_crop_path"),
         **_source_fields(row),
+        **artifact_payload,
         "evaluation_image_path": image_path,
         "raw_model_text": None,
     }
@@ -203,6 +207,17 @@ def _source_fields(row: dict) -> dict:
         "source_mask_bbox": cleanup.get("mask_bbox"),
         "source_target_size": request.get("target_size"),
     }
+
+
+def _local_artifact_payload(row: dict, cleanup_run_dir: Path, path_roots: list[Path]) -> dict:
+    cleanup = row.get("cleanup") or {}
+    roots = [cleanup_run_dir, *path_roots]
+    result = evaluate_gpt_replacement_artifacts(
+        cleanup.get("cleaned_crop_path"),
+        cleanup.get("replacement_crop_path"),
+        roots,
+    )
+    return gpt_artifact_payload(result)
 
 
 def _write_replacement_quality_sheet(run_dir: Path, cleanup_run_dir: Path, path_roots: list[Path], row: dict) -> str:

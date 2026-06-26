@@ -219,6 +219,9 @@ def test_run_phase6_replacement_quality_writes_results_and_review_sheet(tmp_path
     assert rows[0]["source_cleaned_crop_path"] == str(original)
     assert rows[0]["source_local_context_bbox"] == [5, 6, 205, 126]
     assert rows[0]["source_mask_bbox"] == [30, 40, 180, 90]
+    assert rows[0]["local_artifact_gate_passed"] is True
+    assert rows[0]["local_artifact_issues"] == []
+    assert rows[0]["local_artifact_metrics"]["largest_darken_component_area"] >= 0
     assert rows[0]["raw_model_text"]
     sheet_path = Path(rows[0]["evaluation_image_path"])
     assert sheet_path.exists()
@@ -230,6 +233,43 @@ def test_run_phase6_replacement_quality_writes_results_and_review_sheet(tmp_path
     assert "api_key" not in json.dumps(api_calls[0]).lower()
     assert "Usable replacements: 0" in report
     assert "debug/replacement_quality_sheets/*.png" in report
+
+
+def test_run_phase6_replacement_quality_records_local_artifact_rejection(tmp_path: Path):
+    cleanup_run = tmp_path / "phase6"
+    original = _write_image(tmp_path / "original.png", "white", text="jp")
+    validation = _write_image(tmp_path / "validation.png", "gray", text="box")
+    edit_input = _write_image(tmp_path / "edit-input.png", "white", text="jp")
+    mask = _write_mask(tmp_path / "mask.png")
+    replacement = _write_large_overlay_image(tmp_path / "replacement.png")
+    _write_jsonl(
+        cleanup_run / "cleanup-results.jsonl",
+        [
+            _replacement_row(
+                original=original,
+                validation=validation,
+                edit_input=edit_input,
+                mask=mask,
+                replacement=replacement,
+            )
+        ],
+    )
+
+    run_dir = run_phase6_replacement_quality(
+        cleanup_run_dir=cleanup_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-replacement-quality-artifact-test",
+        sample_limit=1,
+        client=FakeReplacementQualityClient(),
+    )
+
+    rows = _read_jsonl(run_dir / "replacement-quality.jsonl")
+
+    assert rows[0]["local_artifact_gate_passed"] is False
+    assert "local_artifact_large_flat_overlay" in rows[0]["local_artifact_issues"]
+    metrics = rows[0]["local_artifact_metrics"]
+    assert metrics["largest_darken_component_area_ratio"] > 0.04
+    assert metrics["largest_darken_component_fill_ratio"] > 0.85
 
 
 def test_run_phase6_replacement_quality_skips_pending_or_non_gpt_rows(tmp_path: Path):
@@ -369,6 +409,16 @@ def _write_image(path: Path, background: str, text: str) -> Path:
     draw = ImageDraw.Draw(image)
     draw.rectangle((20, 35, 190, 85), outline="white", width=2)
     draw.text((35, 50), text, fill="white")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(path)
+    return path
+
+
+def _write_large_overlay_image(path: Path) -> Path:
+    image = Image.new("RGB", (220, 140), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((76, 12, 130, 130), fill=(45, 48, 52))
+    draw.text((88, 35), "cn", fill=(20, 20, 20))
     path.parent.mkdir(parents=True, exist_ok=True)
     image.save(path)
     return path

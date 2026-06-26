@@ -23,6 +23,8 @@ from autolettering.phase6_nonbubble import _write_fallback_replacement_crop
 from autolettering.phase6_nonbubble import _cv_tightness_override
 from autolettering.phase6_nonbubble import _accepted_locator_is_suspiciously_below_anchor
 from autolettering.phase6_nonbubble import _should_retry_fallback_validation
+from autolettering.phase6_nonbubble import _fallback_mask_bbox
+from autolettering.phase6_nonbubble import _fallback_validation_payload
 
 
 def test_build_text_mask_and_gpt_mask_use_expected_alpha_convention():
@@ -76,6 +78,26 @@ def test_gpt_image_prompt_preserves_non_text_art_inside_wide_mask():
     assert "Do not repaint, erase, blur, white out, or simplify any non-text artwork" in prompt
     assert "single ellipsis glyph `…`" in prompt
     assert "Do not replace `…` with three periods `...`" in prompt
+
+
+def test_semantically_accepted_loose_fallback_bbox_does_not_expand_editable_mask(tmp_path: Path):
+    validation = _fallback_validation_payload(
+        {
+            "semantic_correct": True,
+            "tight_enough": False,
+            "bbox_on_blank_area": False,
+            "bbox_targets_unrelated_text": False,
+            "recommendation": "accept",
+            "reasoning_summary": "The bbox contains the target text plus extra non-text artwork.",
+        },
+        {"raw_text": "{}"},
+        tmp_path / "validation.png",
+    )
+
+    assert validation["status"] == "accepted"
+    assert validation["bbox_padding_px"] == 0
+    assert validation["needs_tighter_edit_mask"] is True
+    assert _fallback_mask_bbox((40, 30, 70, 120), (160, 180), validation) == (40, 30, 70, 120)
 
 
 def test_build_text_mask_excludes_large_solid_icon_on_light_background():

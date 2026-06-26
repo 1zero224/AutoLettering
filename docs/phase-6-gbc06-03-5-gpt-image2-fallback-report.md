@@ -24,7 +24,9 @@ The fallback locator should not keep chasing a bbox only because it includes a p
   - `fallback_gpt_mask_shape`
 - Changed fallback GPT replacement crop composition to paste the GPT result through the transparent edit mask, instead of extracting dark text and filling the whole bbox background. This prevents mask-internal non-text art from being cleared by postprocessing.
 - Stopped treating `tight_enough=false` as a hard blocker when MIMO accepts the bbox semantically. A semantically accepted bbox can proceed to GPT even if it contains extra art or blank space.
+- Stopped expanding the editable mask merely because `tight_enough=false`. Loose semantic bboxes now keep the locator bbox as the edit mask unless an explicit experiment CLI expansion is requested.
 - Kept the special recovery for accepted bboxes that are clearly below the LabelPlus anchor.
+- Added a local GPT artifact gate. It compares the cleaned crop and GPT replacement crop and rejects large, nearly solid dark/gray overlays even when MIMO marks the text replacement usable.
 
 ## Real Runs
 
@@ -122,6 +124,7 @@ Manual review:
 - MIMO is a false positive.
 - The final visual contains an obvious dark vertical artifact block.
 - This is worse than v11 despite the exact ellipsis being reported as correct.
+- Local artifact gate rejects this run with `local_artifact_large_flat_overlay`.
 
 Conclusion: rejected. Keep as evidence that exact-text MIMO score cannot override manual visual inspection.
 
@@ -156,8 +159,32 @@ Manual review:
 
 - The wide mask produced a large dark rectangle over the character/background.
 - The replacement text appears in the wrong visible area.
+- Local artifact gate rejects this run with `local_artifact_large_flat_overlay`.
 
 Conclusion: rejected. This confirms that "wide bbox is acceptable" does not mean "any large editable region is safe"; the mask can include non-text context, but it still needs a reasonable edit area.
+
+## Local Artifact Gate
+
+Command:
+
+```powershell
+python experiments\phase6_gpt_artifact_gate.py --run-id phase6-gbc06-03-5-gpt-artifact-gate-v1 --run-dir outputs\runs\phase6-gbc06-03-5-fallback-gpt-image2-v11-wide-target-preserve-mask-compose --run-dir outputs\runs\phase6-gbc06-03-5-fallback-gpt-image2-v12-ellipsis-glyph --run-dir outputs\runs\phase6-gbc06-03-5-fallback-gpt-image2-v13-semantic-loose-direct
+```
+
+Artifacts:
+
+- Result JSON: `outputs/runs/phase6-gbc06-03-5-gpt-artifact-gate-v1/gpt-artifact-gate-results.json`
+- Evidence grid: `outputs/runs/phase6-gbc06-03-5-gpt-artifact-gate-v1/visuals/gpt-artifact-gate-grid.png`
+
+Result:
+
+| Run | Gate | Largest darken component area ratio | Notes |
+| --- | --- | ---: | --- |
+| v11 | pass | `0.0035` | Sparse text/line-art changes, no solid overlay. |
+| v12 | fail | `0.0568` | Nearly solid vertical dark block; MIMO false positive. |
+| v13 | fail | `0.0999` | Large dark/gray rectangle over character/background. |
+
+The gate does not reject wide locator context by itself. It only rejects replacement crops that contain a large continuous darkened overlay compared with the cleaned crop.
 
 ## Current Recommendation
 
@@ -172,14 +199,15 @@ Use v11 as the current best GPT-image-2 fallback candidate for `GBC06_03.png#5`:
 Do not trust MIMO alone for this route. It gave a false positive on v12 and a schema-invalid response on v10. The acceptance rule should be:
 
 1. MIMO replacement quality is useful as a first-pass signal.
-2. Manual review remains required for gpt-image-2 fallback outputs.
-3. A result with obvious gray/dark blocks or character/background damage is rejected even if MIMO scores it high.
+2. The local artifact gate must pass before Phase 7/8 can consume the GPT replacement crop.
+3. Manual review remains required for gpt-image-2 fallback outputs.
+4. A result with obvious gray/dark blocks or character/background damage is rejected even if MIMO scores it high.
 
 ## Open Issues
 
 - Exact punctuation for `…` remains unstable. v11 is visually better but uses `...`; v12 satisfies MIMO text exactness but has unacceptable artifacting.
 - `gpt-image-2` can still interpret a large transparent rectangle as permission to repaint the whole area despite prompt constraints.
-- A future quality gate should inspect for gray/dark rectangular artifacts before allowing Phase 7/8 to consume the replacement crop.
+- The local artifact gate catches the v12/v13 gray-block failures, but it is intentionally narrow. It does not replace manual review for typography, exact punctuation, or subtle style mismatch.
 
 ## Verification
 
@@ -196,6 +224,14 @@ python -m pytest tests/test_phase6_nonbubble_cleanup.py::test_refine_fallback_lo
 ```
 
 Result: `3 passed`.
+
+Additional verification after adding the local artifact gate:
+
+```powershell
+python -m pytest tests/test_phase6_replacement_quality_gate.py tests/test_phase6_replacement_quality.py::test_run_phase6_replacement_quality_records_local_artifact_rejection tests/test_phase6_replacement_quality.py::test_run_phase6_replacement_quality_writes_results_and_review_sheet tests/test_phase6_nonbubble_cleanup.py::test_semantically_accepted_loose_fallback_bbox_does_not_expand_editable_mask tests/test_experiment_clis.py::test_phase6_gpt_artifact_gate_experiment_writes_near_square_grid -q
+```
+
+Result: `6 passed`.
 
 ```powershell
 python -m pytest tests/test_phase6_nonbubble_cleanup.py::test_run_phase6_nonbubble_cleanup_fallback_keeps_semantically_accepted_loose_bbox tests/test_phase6_nonbubble_cleanup.py::test_run_phase6_nonbubble_cleanup_fallback_calls_gpt_when_accepted_bbox_stays_loose tests/test_phase6_nonbubble_cleanup.py::test_run_phase6_nonbubble_cleanup_recovers_accepted_tight_bbox_that_is_below_anchor -q

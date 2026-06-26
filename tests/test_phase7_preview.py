@@ -706,6 +706,43 @@ def test_run_phase7_preview_requires_layout_when_gpt_replacement_quality_fails(t
     assert rows == [_skipped_payload("page.png#1", "missing_layout")]
 
 
+def test_run_phase7_preview_requires_layout_when_local_gpt_artifact_gate_fails(tmp_path: Path):
+    page_path = _write_page(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    cleanup_run = tmp_path / "phase6"
+    layout_run = tmp_path / "phase4"
+    detection_run.mkdir()
+    cleanup_run.mkdir()
+    layout_run.mkdir()
+    bbox = [40, 20, 80, 70]
+    replacement_path = tmp_path / "mimo-accepted-but-artifact.png"
+    Image.new("RGB", (40, 50), "red").save(replacement_path)
+    _write_jsonl(
+        detection_run / "detections.jsonl",
+        [_detection_payload("page.png#1", page_path, bbox, status="fallback_required")],
+    )
+    _write_jsonl(
+        cleanup_run / "cleanup-results.jsonl",
+        [_cleanup_payload("page.png#1", _write_cleaned_crop(tmp_path / "local.png"), bbox, replacement_path)],
+    )
+    _write_jsonl(layout_run / "layout-results.jsonl", [])
+    quality_run = tmp_path / "phase6-replacement-quality"
+    _write_replacement_quality(quality_run, "page.png#1", local_artifact_gate_passed=False)
+
+    run_dir = run_phase7_preview(
+        detection_run_dir=detection_run,
+        cleanup_run_dir=cleanup_run,
+        layout_run_dir=layout_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase7-gpt-local-artifact-failed",
+        sample_limit=1,
+        phase6_gpt_quality_run_dir=quality_run,
+    )
+
+    rows = _read_jsonl(run_dir / "preview-results.jsonl")
+    assert rows == [_skipped_payload("page.png#1", "missing_layout")]
+
+
 def test_run_phase7_preview_uses_cleaned_crop_when_gpt_replacement_quality_fails(tmp_path: Path):
     page_path = _write_page(tmp_path / "page.png")
     detection_run = tmp_path / "phase2"
@@ -965,6 +1002,7 @@ def _write_replacement_quality(
     *,
     usable: bool = True,
     exact_text_correct: bool = True,
+    local_artifact_gate_passed: bool = True,
 ) -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     _write_jsonl(
@@ -981,6 +1019,8 @@ def _write_replacement_quality(
                 "region_correct": usable,
                 "style_consistent": usable,
                 "outside_mask_preserved": True,
+                "local_artifact_gate_passed": local_artifact_gate_passed,
+                "local_artifact_issues": [] if local_artifact_gate_passed else ["local_artifact_large_flat_overlay"],
                 "issues": [] if usable and exact_text_correct else ["bad_gpt_replacement"],
                 "observed_text": "啪嗒啪嗒" if exact_text_correct else "嗒嗒哈哈",
             }

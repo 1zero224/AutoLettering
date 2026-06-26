@@ -583,7 +583,19 @@ def test_run_phase8_photoshop_export_keeps_text_layer_when_gpt_replacement_quali
                 "region_correct": False,
                 "style_consistent": False,
                 "failure_reason": "quality_rejected",
-                "issues": ["bad_gpt_replacement"],
+                "issues": ["bad_gpt_replacement", "local_artifact_large_flat_overlay"],
+                "local_artifact_gate_passed": False,
+                "local_artifact_issues": ["local_artifact_large_flat_overlay"],
+                "local_artifact_metrics": {
+                    "status": "evaluated",
+                    "image_width": 70,
+                    "image_height": 70,
+                    "darken_pixel_ratio": 1.0,
+                    "largest_darken_component_area": 4900,
+                    "largest_darken_component_area_ratio": 1.0,
+                    "largest_darken_component_bbox": [0, 0, 70, 70],
+                    "largest_darken_component_fill_ratio": 1.0,
+                },
             },
         }
     ]

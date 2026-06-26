@@ -4,6 +4,7 @@ import json
 from collections.abc import Iterable
 from pathlib import Path
 
+from .phase6_gpt_artifact_gate import gpt_artifact_payload, local_artifact_gate_for_quality_row
 
 RunDirInput = str | Path | Iterable[str | Path] | None
 GPT_REPLACEMENT_METHOD = "gpt_image2_masked_edit"
@@ -39,7 +40,12 @@ def gpt_replacement_quality_gate(record_id: str | None, cleanup: dict, quality_b
             "failure_reason": MISSING_QUALITY_REASON,
             "issues": [MISSING_QUALITY_REASON],
         }
-    accepted = _quality_accepts_replacement(quality)
+    artifact_result = local_artifact_gate_for_quality_row(quality, cleanup)
+    artifact_payload = gpt_artifact_payload(artifact_result)
+    accepted = _quality_accepts_replacement(quality, artifact_payload)
+    issues = list(quality.get("issues") or [])
+    if artifact_payload["local_artifact_gate_passed"] is False:
+        issues.extend(issue for issue in artifact_payload["local_artifact_issues"] if issue not in issues)
     return {
         "accepted": accepted,
         "status": quality.get("status"),
@@ -50,7 +56,8 @@ def gpt_replacement_quality_gate(record_id: str | None, cleanup: dict, quality_b
         "region_correct": quality.get("region_correct"),
         "style_consistent": quality.get("style_consistent"),
         "failure_reason": None if accepted else QUALITY_REJECTION_REASON,
-        "issues": list(quality.get("issues") or []),
+        "issues": issues,
+        **artifact_payload,
     }
 
 
@@ -75,7 +82,7 @@ def effective_cleanup_for_gpt_quality(record_id: str | None, cleanup: dict, qual
     return payload
 
 
-def _quality_accepts_replacement(row: dict) -> bool:
+def _quality_accepts_replacement(row: dict, artifact_payload: dict) -> bool:
     return (
         row.get("status") == "evaluated"
         and row.get("usable") is True
@@ -83,6 +90,7 @@ def _quality_accepts_replacement(row: dict) -> bool:
         and row.get("simplified_chinese_correct") is True
         and row.get("no_japanese_remaining") is True
         and row.get("region_correct") is True
+        and artifact_payload.get("local_artifact_gate_passed") is not False
     )
 
 

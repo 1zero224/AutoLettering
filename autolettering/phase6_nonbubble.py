@@ -1423,7 +1423,7 @@ def _fallback_validation_payload(payload: dict, response: dict, validation_image
     recommendation = str(payload.get("recommendation", "")).strip().lower()
     hard_reject = semantic_correct is False or bbox_on_blank_area is True or bbox_targets_unrelated_text is True
     accepted = semantic_correct is True and not hard_reject
-    needs_padding = accepted and (tight_enough is not True or recommendation == "reject")
+    needs_tighter_edit_mask = accepted and tight_enough is not True
     status = "accepted" if accepted else "rejected"
     return {
         "status": status,
@@ -1434,7 +1434,8 @@ def _fallback_validation_payload(payload: dict, response: dict, validation_image
         "visible_original_text": str(payload.get("visible_original_text", "")).strip() or None,
         "recommendation": recommendation or None,
         "reasoning_summary": payload.get("reasoning_summary"),
-        "bbox_padding_px": 12 if needs_padding else 0,
+        "needs_tighter_edit_mask": needs_tighter_edit_mask,
+        "bbox_padding_px": 0,
         "failure_reason": None if accepted else "fallback_locator_semantic_rejected",
         "validation_image_path": str(validation_image_path),
         "raw_text": response.get("raw_text", ""),

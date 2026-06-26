@@ -1,3 +1,5 @@
+from PIL import Image, ImageDraw
+
 from experiments import (
     phase2_detect_text_regions,
     phase2_6_cta_first_cleanup,
@@ -7,6 +9,7 @@ from experiments import (
     phase6_cleanup_gate,
     phase6_cleanup_escalation_gpt_background_repair,
     phase6_cleanup_escalation_gpt_replace,
+    phase6_gpt_artifact_gate,
     phase6_replacement_quality,
     phase6_cleanup_retry,
     phase6_nonbubble_cleanup,
@@ -31,6 +34,27 @@ def test_phase2_detection_cli_accepts_ctd_mask_strategy():
 
     assert args.detection_strategy == "ctd_mask"
     assert args.ctd_max_edge_distance_px == 16
+
+
+def test_phase6_gpt_artifact_gate_experiment_writes_near_square_grid(tmp_path):
+    source_run = tmp_path / "phase6-gpt"
+    cleaned = source_run / "fallback_cleaned" / "page-1.png"
+    replacement = source_run / "fallback_replacement_crop" / "page-1.png"
+    cleaned.parent.mkdir(parents=True)
+    replacement.parent.mkdir(parents=True)
+    Image.new("RGB", (120, 120), "white").save(cleaned)
+    image = Image.new("RGB", (120, 120), "white")
+    ImageDraw.Draw(image).rectangle((45, 10, 80, 110), fill=(45, 45, 45))
+    image.save(replacement)
+
+    run_dir = phase6_gpt_artifact_gate.run_artifact_gate_experiment(
+        [source_run],
+        output_root=tmp_path / "outputs",
+        run_id="artifact-gate",
+    )
+
+    assert (run_dir / "gpt-artifact-gate-results.json").exists()
+    assert (run_dir / "visuals" / "gpt-artifact-gate-grid.png").exists()
 
 
 def test_phase2_detection_cli_defaults_to_cta_mask_strategy():
