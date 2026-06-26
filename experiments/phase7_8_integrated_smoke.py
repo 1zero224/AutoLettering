@@ -13,20 +13,24 @@ from autolettering.models.mimo import MimoVisionClient, MimoVisionConfig
 from autolettering.phase7_8_smoke import run_phase7_8_smoke
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run integrated Phase 7 preview, MIMO evaluation, and Phase 8 export.")
     parser.add_argument("--detection-run-dir", required=True)
     parser.add_argument("--cleanup-run-dir", action="append", required=True)
     parser.add_argument("--layout-run-dir", required=True)
     parser.add_argument("--font-selection-run-dir", required=True)
+    parser.add_argument("--phase6-gpt-quality-run-dir", action="append", default=None)
     parser.add_argument("--output-root", default="outputs/runs")
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--sample-limit", type=int, default=2)
     parser.add_argument("--font-mapping", default=None)
     parser.add_argument("--skip-mimo-evaluation", action="store_true")
     parser.add_argument("--env-file", default=".env")
-    args = parser.parse_args()
+    return parser
 
+
+def main() -> None:
+    args = build_parser().parse_args()
     _load_env_file(Path(args.env_file))
     client = None if args.skip_mimo_evaluation else MimoVisionClient(_mimo_config_from_env())
     run_dir = run_phase7_8_smoke(
@@ -39,6 +43,9 @@ def main() -> None:
         sample_limit=args.sample_limit,
         evaluation_client=client,
         font_mapping_path=Path(args.font_mapping) if args.font_mapping else None,
+        phase6_gpt_quality_run_dir=[Path(value) for value in args.phase6_gpt_quality_run_dir]
+        if args.phase6_gpt_quality_run_dir
+        else None,
     )
     print(run_dir)
 

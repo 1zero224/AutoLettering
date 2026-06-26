@@ -44,6 +44,24 @@ def build_parser() -> argparse.ArgumentParser:
             "bt_patchmatch",
         ],
     )
+    parser.add_argument(
+        "--fallback-edit-padding-px",
+        type=int,
+        default=16,
+        help="Padding around the accepted fallback bbox before sending the edit crop to gpt-image-2.",
+    )
+    parser.add_argument(
+        "--fallback-mask-expand-px",
+        type=int,
+        default=0,
+        help="Expand the accepted fallback bbox mask before constructing the transparent gpt-image-2 edit mask.",
+    )
+    parser.add_argument(
+        "--fallback-gpt-mask-shape",
+        choices=["rect", "text_ink"],
+        default="rect",
+        help="Shape of the transparent gpt-image-2 edit mask for fallback records.",
+    )
     return parser
 
 
@@ -62,6 +80,9 @@ def main() -> None:
         inpaint_method=args.inpaint_method,
         mimo_client=None if args.skip_mimo else MimoVisionClient(_mimo_config_from_env()),
         allow_cta_method_override=args.allow_cta_method_override,
+        fallback_edit_padding_px=args.fallback_edit_padding_px,
+        fallback_mask_expand_px=args.fallback_mask_expand_px,
+        fallback_gpt_mask_shape=args.fallback_gpt_mask_shape,
     )
     print(run_dir)
 

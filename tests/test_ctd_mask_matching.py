@@ -183,6 +183,25 @@ def test_assign_labelplus_points_to_ctd_masks_merges_bubble_adjacent_vertical_co
     assert "component-distant-column" not in match.component_id
 
 
+def test_assign_labelplus_points_to_ctd_masks_merges_taller_bubble_adjacent_column(tmp_path: Path):
+    components = [
+        _component(tmp_path, "component-0012", (398, 839, 437, 1025), 5498),
+        _component(tmp_path, "component-0013", (477, 840, 516, 967), 3702),
+        _component(tmp_path, "component-0014", (437, 841, 476, 939), 3192),
+        _component(tmp_path, "component-0015", (437, 942, 476, 1040), 3348),
+        _component(tmp_path, "component-unrelated", (301, 968, 341, 1208), 3237),
+    ]
+    labels = [_label(6, 510, 977, group_name="框内")]
+
+    matches = assign_labelplus_points_to_ctd_masks(labels, components, max_edge_distance_px=40)
+
+    match = matches["page.png#6"]
+    assert match.status == "matched"
+    assert match.component_id == "component-0012+component-0013+component-0014+component-0015"
+    assert match.bbox_xyxy == (398, 839, 516, 1040)
+    assert "component-unrelated" not in match.component_id
+
+
 def test_assign_labelplus_points_to_ctd_masks_rejects_ambiguous_component_claims():
     components = [
         CtdMaskComponent(

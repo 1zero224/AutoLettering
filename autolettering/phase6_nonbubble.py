@@ -9,6 +9,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from .experiment_grid import near_square_columns, write_grid
 from .inpaint.nonbubble import inpaint_nonbubble_text
+from .inpaint.nonbubble import build_gpt_edit_mask, build_text_mask
 from .models.gpt_image import (
     GptImageConfig,
     GptImageEditClient,
@@ -23,7 +24,9 @@ from .text_body_bbox import selected_text_body_bbox
 CV_TIGHTNESS_REFINEMENT_METHODS = {
     "trim_to_light_text_ink_support",
     "trim_to_dark_background_support",
+    "trim_to_dark_vertical_text_column_support",
     "recover_light_text_ink_band_near_labelplus_anchor",
+    "recover_dark_text_ink_column_near_labelplus_anchor",
 }
 CV_TIGHTNESS_MAX_AREA_RATIO = 0.16
 CV_TIGHTNESS_MAX_SHORT_SIDE_RATIO = 0.35
@@ -41,13 +44,27 @@ def run_phase6_nonbubble_cleanup(
     inpaint_method: str = "bt_lama_large",
     mimo_client=None,
     allow_cta_method_override: bool = False,
+    fallback_edit_padding_px: int = 16,
+    fallback_mask_expand_px: int = 0,
+    fallback_gpt_mask_shape: str = "rect",
 ) -> Path:
     run_dir = Path(output_root) / (run_id or "phase6-nonbubble-cleanup")
     run_dir.mkdir(parents=True, exist_ok=True)
     detections = _load_nonbubble_detections(Path(detection_run_dir) / "detections.jsonl", sample_limit, record_ids)
     client = GptImageEditClient(gpt_config) if call_gpt_image and gpt_config else None
     rows = [
-        _cleanup_one(run_dir, detection, gpt_config, client, inpaint_method, mimo_client, allow_cta_method_override)
+        _cleanup_one(
+            run_dir,
+            detection,
+            gpt_config,
+            client,
+            inpaint_method,
+            mimo_client,
+            allow_cta_method_override,
+            fallback_edit_padding_px,
+            fallback_mask_expand_px,
+            fallback_gpt_mask_shape,
+        )
         for detection in detections
     ]
     _write_jsonl(run_dir / "cleanup-results.jsonl", rows)
@@ -80,9 +97,21 @@ def _cleanup_one(
     inpaint_method: str,
     mimo_client,
     allow_cta_method_override: bool,
+    fallback_edit_padding_px: int,
+    fallback_mask_expand_px: int,
+    fallback_gpt_mask_shape: str,
 ) -> dict:
     if detection.get("status") == "fallback_required":
-        return _fallback_gpt_cleanup_one(run_dir, detection, config, client, mimo_client)
+        return _fallback_gpt_cleanup_one(
+            run_dir,
+            detection,
+            config,
+            client,
+            mimo_client,
+            fallback_edit_padding_px,
+            fallback_mask_expand_px,
+            fallback_gpt_mask_shape,
+        )
     bbox = _cleanup_bbox_for_detection(detection)
     method = _method_for_detection(detection, inpaint_method, allow_cta_method_override)
     result = inpaint_nonbubble_text(
@@ -134,6 +163,9 @@ def _fallback_gpt_cleanup_one(
     config: GptImageConfig | None,
     client: GptImageEditClient | None,
     mimo_client,
+    edit_padding_px: int = 16,
+    mask_expand_px: int = 0,
+    gpt_mask_shape: str = "rect",
 ) -> dict:
     fallback = detection.get("fallback") or {}
     context_bbox = tuple(int(value) for value in fallback.get("context_bbox_xyxy") or detection.get("search_region_xyxy"))
@@ -147,6 +179,18 @@ def _fallback_gpt_cleanup_one(
             locator,
             {"status": "rejected", "failure_reason": "fallback_locator_semantic_rejected"},
         )
+        if recovered_locator.get("status") != "ok":
+            recovered_locator = _recover_dark_text_locator_from_labelplus_anchor(
+                detection,
+                context["input_path"],
+                context_bbox,
+                locator,
+                {
+                    "status": "rejected",
+                    "failure_reason": "fallback_locator_semantic_rejected",
+                    "bbox_targets_unrelated_text": True,
+                },
+            )
         if recovered_locator.get("status") == "ok":
             locator = recovered_locator
         else:
@@ -176,6 +220,14 @@ def _fallback_gpt_cleanup_one(
             validation,
         )
         if retry_locator.get("status") != "ok":
+            retry_locator = _recover_dark_text_locator_from_labelplus_anchor(
+                detection,
+                context["input_path"],
+                context_bbox,
+                locator,
+                validation,
+            )
+        if retry_locator.get("status") != "ok":
             retry_locator = _relocate_after_semantic_rejection(
                 detection,
                 context["locator_path"],
@@ -197,7 +249,7 @@ def _fallback_gpt_cleanup_one(
                 locator = retry_locator
                 validation = retry_validation
             else:
-                if retry_locator.get("refinement", {}).get("method") == "recover_light_text_ink_band_near_labelplus_anchor":
+                if retry_locator.get("refinement", {}).get("method") in CV_TIGHTNESS_REFINEMENT_METHODS:
                     locator = _with_rejected_locator_attempt(locator, "anchor_recovery_attempt", retry_locator, retry_validation)
                 anchor_locator = _recover_locator_from_labelplus_anchor(
                     detection,
@@ -258,73 +310,10 @@ def _fallback_gpt_cleanup_one(
                 validation = anchor_validation
             else:
                 locator = _with_rejected_locator_attempt(locator, "anchor_recovery_attempt", anchor_locator, anchor_validation)
-    if validation.get("tight_enough") is not True:
-        tight_locator = _recover_locator_from_labelplus_anchor(
-            detection,
-            context["input_path"],
-            context_bbox,
-            locator,
-            validation,
-        )
-        if tight_locator.get("status") != "ok":
-            tight_locator = _tighten_accepted_locator_bbox(
-                detection,
-                context["locator_path"],
-                context_bbox,
-                locator,
-                validation,
-                mimo_client,
-            )
-        if tight_locator.get("status") == "ok":
-            tight_locator = _refine_fallback_locator_bbox(tight_locator, context["input_path"], context_bbox)
-            tight_validation = _validate_fallback_locator_semantics(
-                run_dir,
-                detection,
-                tight_locator,
-                context["locator_path"],
-                mimo_client,
-            )
-            if tight_validation.get("status") == "accepted":
-                if tight_validation.get("tight_enough") is True:
-                    locator = tight_locator
-                    validation = tight_validation
-                else:
-                    locator["tightness_retry"] = {
-                        "status": "rejected",
-                        "reason": "retry_bbox_not_tight",
-                        "local_bbox_xyxy": tight_locator.get("local_bbox_xyxy"),
-                        "validation": {
-                            "status": tight_validation.get("status"),
-                            "tight_enough": tight_validation.get("tight_enough"),
-                            "reasoning_summary": tight_validation.get("reasoning_summary"),
-                        },
-                    }
-            else:
-                locator = _with_rejected_locator_attempt(locator, "tightness_retry", tight_locator, tight_validation)
-    if validation.get("tight_enough") is not True:
-        tightness_override = _cv_tightness_override(locator, validation, context["size"])
-        if tightness_override is not None:
-            validation = {**validation, "tightness_override": tightness_override}
-        else:
-            return {
-                "record_id": detection["record_id"],
-                "image_name": detection.get("image_name"),
-                "translated_text": detection.get("translated_text", ""),
-                "status": "failed",
-                "cleanup": {
-                    "method": "gpt_image2_masked_edit",
-                    "bbox": list(context_bbox),
-                    "text_bbox": list(_global_bbox(context_bbox, tuple(locator.get("local_bbox_xyxy")))),
-                    "failure_reason": "fallback_locator_bbox_not_tight",
-                    "cleaned_crop_path": str(context["input_path"]),
-                    "text_overlay_required": True,
-                },
-                "fallback_locator": locator,
-                "fallback_locator_validation": validation,
-                "gpt_image2_edit": {"status": "not_called", "reason": "fallback_locator_bbox_not_tight"},
-            }
     local_bbox = tuple(locator.get("local_bbox_xyxy") or (0, 0, context["size"][0], context["size"][1]))
     mask_local_bbox = _fallback_mask_bbox(local_bbox, context["size"], validation)
+    if mask_expand_px > 0:
+        mask_local_bbox = _expanded_local_bbox(mask_local_bbox, context["size"][0], context["size"][1], mask_expand_px)
     background_repair = _write_fallback_background_repair(
         run_dir,
         detection,
@@ -332,9 +321,16 @@ def _fallback_gpt_cleanup_one(
         mask_local_bbox,
         method="lama_large_512px",
     )
-    edit_context = _write_fallback_edit_context(run_dir, detection, context, mask_local_bbox)
+    edit_context = _write_fallback_edit_context(run_dir, detection, context, mask_local_bbox, padding_px=edit_padding_px)
     edit_mask_bbox = _rebase_bbox(mask_local_bbox, edit_context["local_context_bbox"])
-    mask_path = _write_local_gpt_mask(edit_context["size"], edit_mask_bbox, edit_context["mask_path"])
+    edit_context["gpt_mask_shape"] = gpt_mask_shape
+    mask_path = _write_fallback_gpt_edit_mask(
+        edit_context["input_path"],
+        edit_context["size"],
+        edit_mask_bbox,
+        edit_context["mask_path"],
+        gpt_mask_shape,
+    )
     prompt = gpt_image_edit_prompt(detection.get("translated_text", ""))
     gpt_payload = _gpt_image_payload_for_paths(
         run_dir,
@@ -368,6 +364,7 @@ def _fallback_gpt_cleanup_one(
         "background_repair_method": background_repair["method"],
         "background_repair_bbox": list(background_repair["bbox"]),
         "text_overlay_required": not has_replacement,
+        "gpt_mask_shape": gpt_mask_shape,
     }
     if has_replacement:
         cleanup["replacement_method"] = "gpt_image2_masked_edit"
@@ -403,6 +400,7 @@ def _edit_context_payload(edit_context: dict) -> dict:
         "mask_path": str(edit_context["mask_path"]),
         "local_context_bbox": list(edit_context["local_context_bbox"]),
         "size": list(edit_context["size"]),
+        "gpt_mask_shape": edit_context.get("gpt_mask_shape", "rect"),
     }
 
 
@@ -749,12 +747,19 @@ def _recover_locator_from_labelplus_anchor(
         return {"status": "failed", "failure_reason": "anchor_recovery_locator_not_below_anchor"}
     try:
         with Image.open(context_path) as image:
-            recovered = _recover_light_text_ink_band_near_anchor(image.convert("RGB"), anchor, tuple(local_bbox))
+            rgb = image.convert("RGB")
+            recovered = _recover_dark_text_ink_column_near_anchor(rgb, anchor, tuple(local_bbox))
+            recovery_method = "recover_dark_text_ink_column_near_labelplus_anchor"
+            if recovered is None:
+                recovered = _recover_light_text_ink_band_near_anchor(rgb, anchor, tuple(local_bbox))
+                recovery_method = "recover_light_text_ink_band_near_labelplus_anchor"
     except (FileNotFoundError, OSError, ValueError):
         return {"status": "failed", "failure_reason": "anchor_recovery_image_unavailable"}
     if recovered is None:
         return {"status": "failed", "failure_reason": "anchor_recovery_no_light_text_band"}
-    recovered, right_trim_method = _trim_sparse_right_component_after_anchor_recovery(image, recovered, anchor)
+    right_trim_method = None
+    if recovery_method == "recover_light_text_ink_band_near_labelplus_anchor":
+        recovered, right_trim_method = _trim_sparse_right_component_after_anchor_recovery(image, recovered, anchor)
     result = dict(locator)
     result["status"] = "ok"
     result.pop("failure_reason", None)
@@ -763,7 +768,7 @@ def _recover_locator_from_labelplus_anchor(
     result["global_bbox_xyxy"] = list(_global_bbox(context_bbox, recovered))
     result["anchor_recovery_of_validation"] = validation.get("failure_reason") or "accepted_bbox_not_tight"
     refinement = {
-        "method": "recover_light_text_ink_band_near_labelplus_anchor",
+        "method": recovery_method,
         "original_local_bbox_xyxy": [int(value) for value in local_bbox],
         "refined_local_bbox_xyxy": list(recovered),
         "labelplus_anchor_xy": anchor,
@@ -771,6 +776,46 @@ def _recover_locator_from_labelplus_anchor(
     if right_trim_method:
         refinement["right_trim_method"] = right_trim_method
     result["refinement"] = refinement
+    return result
+
+
+def _recover_dark_text_locator_from_labelplus_anchor(
+    detection: dict,
+    context_path: Path,
+    context_bbox: tuple[int, int, int, int],
+    locator: dict,
+    validation: dict,
+) -> dict:
+    anchor = _context_labelplus_point(detection)
+    context_size = (context_bbox[2] - context_bbox[0], context_bbox[3] - context_bbox[1])
+    local_bbox = _locator_bbox_for_anchor_recovery(locator, context_size)
+    if (
+        validation.get("failure_reason") != "fallback_locator_semantic_rejected"
+        or validation.get("bbox_targets_unrelated_text") is not True
+        or anchor is None
+        or local_bbox is None
+    ):
+        return {"status": "failed", "failure_reason": "dark_anchor_recovery_not_applicable"}
+    try:
+        with Image.open(context_path) as image:
+            recovered = _recover_dark_text_ink_column_near_anchor(image.convert("RGB"), anchor, tuple(local_bbox))
+    except (FileNotFoundError, OSError, ValueError):
+        return {"status": "failed", "failure_reason": "dark_anchor_recovery_image_unavailable"}
+    if recovered is None:
+        return {"status": "failed", "failure_reason": "dark_anchor_recovery_no_text_column"}
+    result = dict(locator)
+    result["status"] = "ok"
+    result.pop("failure_reason", None)
+    result.pop("retry_failure_reason", None)
+    result["local_bbox_xyxy"] = list(recovered)
+    result["global_bbox_xyxy"] = list(_global_bbox(context_bbox, recovered))
+    result["anchor_recovery_of_validation"] = validation.get("failure_reason") or "fallback_locator_semantic_rejected"
+    result["refinement"] = {
+        "method": "recover_dark_text_ink_column_near_labelplus_anchor",
+        "original_local_bbox_xyxy": [int(value) for value in local_bbox],
+        "refined_local_bbox_xyxy": list(recovered),
+        "labelplus_anchor_xy": anchor,
+    }
     return result
 
 
@@ -783,6 +828,11 @@ def _accepted_locator_is_suspiciously_below_anchor(locator: dict, validation: di
         return False
     ax, ay = anchor
     x1, y1, x2, y2 = [int(value) for value in local_bbox]
+    bbox_width = x2 - x1
+    bbox_height = y2 - y1
+    is_vertical_target = bbox_height >= max(bbox_width * 1.25, bbox_width + 24)
+    if is_vertical_target and y1 <= ay + 24:
+        return False
     if y2 <= ay + 48:
         return False
     return x1 <= ax + 40 and x2 >= ax - 40
@@ -909,6 +959,126 @@ def _recover_light_text_ink_band_near_anchor(
         return None
     candidate = _cap_recovered_anchor_band_height(image, candidate, ay)
     return candidate
+
+
+def _recover_dark_text_ink_column_near_anchor(
+    image: Image.Image,
+    anchor_xy: list[int],
+    rejected_bbox: tuple[int, int, int, int],
+) -> tuple[int, int, int, int] | None:
+    width, height = image.size
+    ax, ay = anchor_xy
+    bx1, _, bx2, _ = rejected_bbox
+    window_x1 = max(0, min(ax - 72, bx1 - 96))
+    window_x2 = min(width, max(ax + 42, bx2 + 12))
+    window_y1 = max(0, ay - 170)
+    window_y2 = min(height, ay + 110)
+    if window_x2 - window_x1 < 48 or window_y2 - window_y1 < 80:
+        return None
+    gray = np.array(image.convert("L"), dtype=np.uint8)
+    crop = gray[window_y1:window_y2, window_x1:window_x2]
+    if crop.size == 0:
+        return None
+    dark = crop < 95
+    components = _dark_component_bboxes(dark)
+    if not components:
+        return None
+    candidates = []
+    for local_bbox in _merge_nearby_dark_text_components(components, dark.shape):
+        x1, y1, x2, y2 = local_bbox
+        bbox_width = x2 - x1
+        bbox_height = y2 - y1
+        if bbox_width < 4 or bbox_height < 28:
+            continue
+        if bbox_width > 54 or bbox_height / max(1, bbox_width) < 1.35:
+            continue
+        global_bbox = (window_x1 + x1, window_y1 + y1, window_x1 + x2, window_y1 + y2)
+        gx1, gy1, gx2, gy2 = global_bbox
+        if not (gx1 - 24 <= ax <= gx2 + 36 and gy1 - 24 <= ay <= gy2 + 48):
+            continue
+        area = bbox_width * bbox_height
+        dark_count = int(dark[y1:y2, x1:x2].sum())
+        fill = dark_count / max(1, area)
+        if fill > 0.42:
+            continue
+        score = dark_count - abs(((gx1 + gx2) / 2) - ax) * 0.8 - abs(((gy1 + gy2) / 2) - ay) * 0.25
+        candidates.append((score, global_bbox))
+    if not candidates:
+        return None
+    _, best = max(candidates, key=lambda item: item[0])
+    return _pad_local_bbox(best, width, height, 4, 6)
+
+
+def _dark_component_bboxes(binary: np.ndarray) -> list[tuple[int, int, int, int, int]]:
+    height, width = binary.shape
+    visited = np.zeros_like(binary, dtype=bool)
+    bboxes: list[tuple[int, int, int, int, int]] = []
+    for start_y, start_x in zip(*np.where(binary & ~visited)):
+        stack = [(int(start_x), int(start_y))]
+        visited[start_y, start_x] = True
+        xs: list[int] = []
+        ys: list[int] = []
+        while stack:
+            x, y = stack.pop()
+            xs.append(x)
+            ys.append(y)
+            for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+                if nx < 0 or ny < 0 or nx >= width or ny >= height:
+                    continue
+                if visited[ny, nx] or not binary[ny, nx]:
+                    continue
+                visited[ny, nx] = True
+                stack.append((nx, ny))
+        area = len(xs)
+        if area < 8:
+            continue
+        x1, x2 = min(xs), max(xs) + 1
+        y1, y2 = min(ys), max(ys) + 1
+        bbox_width = x2 - x1
+        bbox_height = y2 - y1
+        if area > 2800 or bbox_width > 74 or bbox_height > 190:
+            continue
+        bboxes.append((x1, y1, x2, y2, area))
+    return bboxes
+
+
+def _merge_nearby_dark_text_components(
+    components: list[tuple[int, int, int, int, int]],
+    shape: tuple[int, int],
+) -> list[tuple[int, int, int, int]]:
+    height, width = shape
+    groups: list[list[tuple[int, int, int, int, int]]] = []
+    for component in sorted(components, key=lambda item: (item[0] + item[2]) / 2):
+        cx = (component[0] + component[2]) / 2
+        for group in groups:
+            group_center = np.mean([(item[0] + item[2]) / 2 for item in group])
+            if abs(cx - float(group_center)) <= 20:
+                group.append(component)
+                break
+        else:
+            groups.append([component])
+
+    merged: list[tuple[int, int, int, int]] = []
+    for group in groups:
+        if len(group) < 2:
+            continue
+        x1 = max(0, min(item[0] for item in group) - 2)
+        y1 = max(0, min(item[1] for item in group) - 2)
+        x2 = min(width, max(item[2] for item in group) + 2)
+        y2 = min(height, max(item[3] for item in group) + 2)
+        merged.append((x1, y1, x2, y2))
+    return merged
+
+
+def _pad_local_bbox(
+    bbox: tuple[int, int, int, int],
+    width: int,
+    height: int,
+    x_pad: int,
+    y_pad: int,
+) -> tuple[int, int, int, int]:
+    x1, y1, x2, y2 = bbox
+    return max(0, x1 - x_pad), max(0, y1 - y_pad), min(width, x2 + x_pad), min(height, y2 + y_pad)
 
 
 def _trim_sparse_right_component_after_anchor_recovery(
@@ -1489,6 +1659,27 @@ def _write_local_gpt_mask(
     return output_path
 
 
+def _write_fallback_gpt_edit_mask(
+    image_path: Path,
+    size: tuple[int, int],
+    local_bbox: tuple[int, int, int, int],
+    output_path: Path,
+    mask_shape: str,
+) -> Path:
+    if mask_shape == "rect":
+        return _write_local_gpt_mask(size, local_bbox, output_path)
+    if mask_shape != "text_ink":
+        raise ValueError(f"unsupported_fallback_gpt_mask_shape:{mask_shape}")
+
+    with Image.open(image_path) as image:
+        crop = image.convert("RGB").resize(size).crop(local_bbox)
+    text_mask = build_text_mask(crop, dark_threshold=170, dilate_px=5, polarity="dark_on_light")
+    full_mask = Image.new("L", size, 0)
+    full_mask.paste(text_mask, local_bbox[:2])
+    build_gpt_edit_mask(full_mask).save(output_path)
+    return output_path
+
+
 def _expanded_local_bbox(
     bbox: tuple[int, int, int, int],
     width: int,
@@ -1532,11 +1723,35 @@ def _write_fallback_replacement_crop(
         edited = edited_image.convert("RGB")
     if edit_context is not None:
         local_context_bbox = edit_context["local_context_bbox"]
+        mask_path = edit_context.get("mask_path")
+        if mask_path:
+            original = _compose_masked_edit_crop_to_context(original, edited, local_context_bbox, Path(mask_path))
+            original.save(output_path)
+            return
         edited = _expand_edit_crop_to_context(edited, original, local_context_bbox)
     else:
         edited = edited.resize(size)
     original = _compose_gpt_replacement_region(original, edited, local_bbox)
     original.save(output_path)
+
+
+def _compose_masked_edit_crop_to_context(
+    original: Image.Image,
+    edited: Image.Image,
+    local_context_bbox: tuple[int, int, int, int],
+    mask_path: Path,
+) -> Image.Image:
+    x1, y1, x2, y2 = local_context_bbox
+    patch_size = (x2 - x1, y2 - y1)
+    if patch_size[0] <= 0 or patch_size[1] <= 0:
+        return original
+    patch = edited.convert("RGB").resize(patch_size)
+    with Image.open(mask_path) as mask_image:
+        mask_alpha = mask_image.convert("RGBA").getchannel("A").resize(patch_size)
+    editable_alpha = mask_alpha.point(lambda value: 255 - value)
+    canvas = original.copy()
+    canvas.paste(patch, (x1, y1), editable_alpha)
+    return canvas
 
 
 def _expand_edit_crop_to_context(
@@ -1706,6 +1921,7 @@ def _refine_fallback_locator_bbox(locator: dict, context_path: str | Path, conte
             for method, trimmer in (
                 ("trim_to_dark_background_support", _trim_bbox_to_dark_background_support),
                 ("trim_to_light_text_ink_support", _trim_bbox_to_light_text_ink_support),
+                ("trim_to_dark_vertical_text_column_support", _trim_bbox_to_dark_vertical_text_column_support),
             ):
                 refined = trimmer(rgb, original)
                 if refined != original:
@@ -1788,6 +2004,47 @@ def _trim_bbox_to_light_text_ink_support(image: Image.Image, bbox: tuple[int, in
     if (refined[2] - refined[0]) * (refined[3] - refined[1]) > width * height * 0.85:
         return bbox
     if refined[3] - refined[1] < max(18, int(height * 0.08)):
+        return bbox
+    return refined
+
+
+def _trim_bbox_to_dark_vertical_text_column_support(image: Image.Image, bbox: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+    x1, y1, x2, y2 = bbox
+    width, height = x2 - x1, y2 - y1
+    if width < 24 or width > 120 or height < 90:
+        return bbox
+    if width > 80:
+        return bbox
+    gray = np.array(image.convert("L"), dtype=np.uint8)
+    crop = gray[y1:y2, x1:x2]
+    if crop.size == 0:
+        return bbox
+    if float((crop > 210).mean()) < 0.45:
+        return bbox
+    dark = crop < 105
+    components = _dark_component_bboxes(dark)
+    candidates = _merge_nearby_dark_text_components(components, dark.shape)
+    if not candidates:
+        return bbox
+    scored = []
+    for cx1, cy1, cx2, cy2 in candidates:
+        candidate_width = cx2 - cx1
+        candidate_height = cy2 - cy1
+        if candidate_width > max(52, width * 0.72) or candidate_height < 40:
+            continue
+        if candidate_height / max(1, candidate_width) < 1.35:
+            continue
+        fill = float(dark[cy1:cy2, cx1:cx2].mean())
+        if fill > 0.45:
+            continue
+        score = int(dark[cy1:cy2, cx1:cx2].sum()) - abs(((cx1 + cx2) / 2) - width / 2) * 0.35
+        scored.append((score, (cx1, cy1, cx2, cy2)))
+    if not scored:
+        return bbox
+    _, local = max(scored, key=lambda item: item[0])
+    padded = _pad_local_bbox(local, width, height, 5, 8)
+    refined = (x1 + padded[0], y1 + padded[1], x1 + padded[2], y1 + padded[3])
+    if (refined[2] - refined[0]) * (refined[3] - refined[1]) > width * height * 0.72:
         return bbox
     return refined
 

@@ -253,7 +253,8 @@ def _is_bubble_adjacent_vertical_column(
     seed_width = _width(seed)
     if _width(bbox) > max(seed_width * 1.25, seed_width + 16):
         return False
-    if _height(bbox) > max(_height(seed) * 1.25, _height(seed) + 36):
+    height_limit = max(_height(seed) * 1.25, _height(seed) + 36, _height(cluster) * 1.05, _height(cluster) + 12)
+    if _height(bbox) > height_limit:
         return False
     vertical_gap = _vertical_gap(bbox, cluster)
     if _horizontal_overlap_ratio(bbox, cluster) >= 0.55:

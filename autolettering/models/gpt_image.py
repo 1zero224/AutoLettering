@@ -46,7 +46,11 @@ class GptImageEditClient:
 def gpt_image_edit_prompt(translated_text: str) -> str:
     lines = [
         "Edit only the transparent masked text area.",
+        "The transparent masked area may include non-text manga artwork as context; that context is not permission to redraw it.",
+        "Only replace the original Japanese text glyphs that correspond to the target Chinese text.",
         "Remove the original Japanese manga text and preserve the surrounding artwork.",
+        "Inside and outside the mask, preserve every non-text element: person, face, hair, clothing, hands, body, props, background line art, screentone, panel borders, texture, and motion lines.",
+        "Do not repaint, erase, blur, white out, or simplify any non-text artwork, even when it is inside the transparent masked area.",
         "Render the Chinese replacement text naturally inside the transparent masked area only.",
         "The output text must exactly match the target string below, character for character.",
         "Do not write text anywhere outside the transparent masked area.",
@@ -77,6 +81,9 @@ def _exact_target_text_constraints(translated_text: str) -> list[str]:
         constraints.append("Do not replace `啪` with `啦`, `吧`, `拍`, `哇`, or any visually similar character.")
     if "嗒" in translated_text:
         constraints.append("Do not replace `嗒` with `哒`, `啦`, `搭`, `塔`, or any visually similar character.")
+    if "…" in translated_text:
+        constraints.append("The target contains the single ellipsis glyph `…`; copy that exact glyph.")
+        constraints.append("Do not replace `…` with three periods `...`, two periods `..`, centered dots, or any other punctuation.")
     return constraints
 
 

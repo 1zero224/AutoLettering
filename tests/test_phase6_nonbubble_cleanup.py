@@ -19,7 +19,9 @@ from autolettering.phase6_nonbubble import _local_background_color, run_phase6_n
 from autolettering.phase6_nonbubble import _refine_fallback_locator_bbox
 from autolettering.phase6_nonbubble import _recover_locator_from_labelplus_anchor
 from autolettering.phase6_nonbubble import _compose_gpt_replacement_region
+from autolettering.phase6_nonbubble import _write_fallback_replacement_crop
 from autolettering.phase6_nonbubble import _cv_tightness_override
+from autolettering.phase6_nonbubble import _accepted_locator_is_suspiciously_below_anchor
 from autolettering.phase6_nonbubble import _should_retry_fallback_validation
 
 
@@ -62,6 +64,18 @@ def test_gpt_image_prompt_spells_out_repeated_sound_effect_characters():
     assert "Target Chinese text: 啪嗒啪嗒啪嗒" in prompt
     assert "Character sequence: 啪 | 嗒 | 啪 | 嗒 | 啪 | 嗒" in prompt
     assert "exactly 6 visible Chinese characters" in prompt
+
+
+def test_gpt_image_prompt_preserves_non_text_art_inside_wide_mask():
+    prompt = gpt_image_edit_prompt("好孩子不要看…")
+
+    assert "The transparent masked area may include non-text manga artwork" in prompt
+    assert "Only replace the original Japanese text glyphs" in prompt
+    assert "person, face, hair, clothing, hands, body" in prompt
+    assert "background line art, screentone, panel borders, texture, and motion lines" in prompt
+    assert "Do not repaint, erase, blur, white out, or simplify any non-text artwork" in prompt
+    assert "single ellipsis glyph `…`" in prompt
+    assert "Do not replace `…` with three periods `...`" in prompt
 
 
 def test_build_text_mask_excludes_large_solid_icon_on_light_background():
@@ -906,6 +920,46 @@ def test_refine_fallback_locator_bbox_trims_light_background_sound_effect_band(t
     assert refined["refinement"]["original_local_bbox_xyxy"] == [35, 45, 615, 585]
 
 
+def test_refine_fallback_locator_bbox_trims_dark_vertical_text_column(tmp_path: Path):
+    context_path = _write_dark_vertical_text_near_anchor_panel(tmp_path / "context.png")
+    locator = {
+        "status": "ok",
+        "local_bbox_xyxy": [74, 35, 132, 210],
+        "global_bbox_xyxy": [74, 35, 132, 210],
+    }
+
+    refined = _refine_fallback_locator_bbox(locator, context_path, (0, 0, 220, 220))
+
+    assert refined["local_bbox_xyxy"][0] >= 80
+    assert refined["local_bbox_xyxy"][2] <= 118
+    assert refined["local_bbox_xyxy"][1] <= 45
+    assert refined["local_bbox_xyxy"][3] <= 156
+    assert refined["refinement"]["method"] == "trim_to_dark_vertical_text_column_support"
+    assert refined["refinement"]["original_local_bbox_xyxy"] == [74, 35, 132, 210]
+
+
+def test_refine_fallback_locator_bbox_keeps_wide_bbox_when_trim_would_drop_target_column(tmp_path: Path):
+    context_path = tmp_path / "context.png"
+    image = Image.new("RGB", (140, 220), "white")
+    draw = ImageDraw.Draw(image)
+    for y in (38, 72, 106, 140, 174):
+        draw.rectangle((22, y, 42, y + 9), fill=(25, 25, 25))
+        draw.line((28, y - 8, 28, y + 20), fill=(25, 25, 25), width=3)
+    for y in range(42, 182, 22):
+        draw.rectangle((88, y, 110, y + 15), fill=(8, 8, 8))
+    image.save(context_path)
+    locator = {
+        "status": "ok",
+        "local_bbox_xyxy": [12, 24, 124, 208],
+        "global_bbox_xyxy": [12, 24, 124, 208],
+    }
+
+    refined = _refine_fallback_locator_bbox(locator, context_path, (0, 0, 140, 220))
+
+    assert refined["local_bbox_xyxy"] == [12, 24, 124, 208]
+    assert "refinement" not in refined
+
+
 def test_run_phase6_nonbubble_cleanup_fallback_uses_mimo_bbox_and_gpt_mask(tmp_path: Path, monkeypatch):
     image_path = _write_nonbubble_image(tmp_path / "page.png")
     detection_run = tmp_path / "phase2"
@@ -973,6 +1027,101 @@ def test_run_phase6_nonbubble_cleanup_fallback_uses_mimo_bbox_and_gpt_mask(tmp_p
         with Image.open(row["cleanup"]["replacement_crop_path"]).convert("RGB") as replacement:
             assert replacement.getpixel((0, 0)) == original.getpixel((0, 0))
             assert replacement.getpixel((30, 20)) == (255, 255, 255)
+
+
+def test_run_phase6_nonbubble_cleanup_fallback_accepts_edit_padding_and_mask_expand(tmp_path: Path, monkeypatch):
+    image_path = _write_nonbubble_image(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(
+        detection_run / "detections.jsonl",
+        image_path,
+        rows=[
+            {
+                "record_id": "page.png#2",
+                "status": "fallback_required",
+                "group_name": "框外",
+                "selected_text_box_xyxy": None,
+                "failure_reason": "no_ctd_mask_within_threshold",
+                "fallback": {
+                    "method": "mimo_crop_then_gpt_image2_masked_edit",
+                    "context_bbox_xyxy": [10, 10, 100, 80],
+                    "labelplus_point_xy": [48, 38],
+                    "context_labelplus_point_xy": [38, 28],
+                    "translated_text": "背景文字",
+                },
+            }
+        ],
+    )
+    monkeypatch.setattr("autolettering.phase6_nonbubble.GptImageEditClient", lambda config: _FakeGptClient())
+
+    run_dir = run_phase6_nonbubble_cleanup(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-fallback-gpt-expanded-mask",
+        sample_limit=1,
+        gpt_config=GptImageConfig(base_url="https://example.test/v1/images", api_key="test", model="gpt-image-2"),
+        call_gpt_image=True,
+        mimo_client=_FakeMimoLocator(),
+        fallback_edit_padding_px=24,
+        fallback_mask_expand_px=8,
+    )
+
+    row = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]
+    assert row["cleanup"]["mask_bbox"] == [27, 17, 70, 63]
+    assert row["gpt_image2_edit"]["request"]["target_size"] == [84, 70]
+    assert row["gpt_image2_edit"]["edit_context"]["local_context_bbox"] == [0, 0, 84, 70]
+    with Image.open(row["gpt_image2_edit"]["request"]["mask_path"]) as mask:
+        assert mask.size == (84, 70)
+        assert mask.getpixel((26, 25))[3] == 0
+        assert mask.getpixel((4, 4))[3] == 255
+
+
+def test_run_phase6_nonbubble_cleanup_fallback_can_use_text_ink_gpt_mask(tmp_path: Path, monkeypatch):
+    image_path = _write_sparse_ink_nonbubble_image(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(
+        detection_run / "detections.jsonl",
+        image_path,
+        rows=[
+            {
+                "record_id": "page.png#2",
+                "status": "fallback_required",
+                "group_name": "框外",
+                "selected_text_box_xyxy": None,
+                "failure_reason": "no_ctd_mask_within_threshold",
+                "fallback": {
+                    "method": "mimo_crop_then_gpt_image2_masked_edit",
+                    "context_bbox_xyxy": [10, 10, 100, 80],
+                    "labelplus_point_xy": [48, 38],
+                    "context_labelplus_point_xy": [38, 28],
+                    "translated_text": "背景文字",
+                },
+            }
+        ],
+    )
+    monkeypatch.setattr("autolettering.phase6_nonbubble.GptImageEditClient", lambda config: _FakeGptClient())
+
+    run_dir = run_phase6_nonbubble_cleanup(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-fallback-gpt-text-ink-mask",
+        sample_limit=1,
+        gpt_config=GptImageConfig(base_url="https://example.test/v1/images", api_key="test", model="gpt-image-2"),
+        call_gpt_image=True,
+        mimo_client=_FakeMimoLocator(),
+        fallback_gpt_mask_shape="text_ink",
+    )
+
+    row = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]
+    assert row["cleanup"]["gpt_mask_shape"] == "text_ink"
+    assert row["gpt_image2_edit"]["edit_context"]["gpt_mask_shape"] == "text_ink"
+    with Image.open(row["gpt_image2_edit"]["request"]["mask_path"]) as mask:
+        assert mask.size == (59, 61)
+        assert mask.getpixel((27, 30))[3] == 0
+        assert mask.getpixel((16, 15))[3] == 255
+        assert mask.getpixel((52, 52))[3] == 255
 
 
 def test_run_phase6_nonbubble_cleanup_fallback_accepts_mimo_bbox_array_response(tmp_path: Path, monkeypatch):
@@ -1365,7 +1514,7 @@ def test_run_phase6_nonbubble_cleanup_fallback_retries_locator_after_semantic_re
     assert row["gpt_image2_edit"]["status"] == "dry_run"
 
 
-def test_run_phase6_nonbubble_cleanup_fallback_tightens_accepted_loose_bbox(tmp_path: Path):
+def test_run_phase6_nonbubble_cleanup_fallback_keeps_semantically_accepted_loose_bbox(tmp_path: Path):
     image_path = _write_nonbubble_image(tmp_path / "page.png")
     detection_run = tmp_path / "phase2"
     detection_run.mkdir()
@@ -1400,19 +1549,17 @@ def test_run_phase6_nonbubble_cleanup_fallback_tightens_accepted_loose_bbox(tmp_
     assert mimo.kinds == [
         "phase6_fallback_text_locator",
         "phase6_fallback_text_locator_validation",
-        "phase6_fallback_text_locator_tightness_retry",
-        "phase6_fallback_text_locator_validation",
     ]
     assert row["fallback_locator"]["status"] == "ok"
-    assert row["fallback_locator"]["local_bbox_xyxy"] == [25, 15, 52, 45]
-    assert row["fallback_locator"]["tightness_retry_of_validation"] == "accepted_bbox_not_tight"
+    assert row["fallback_locator"]["local_bbox_xyxy"] == [5, 8, 84, 62]
+    assert "tightness_retry_of_validation" not in row["fallback_locator"]
     assert row["fallback_locator_validation"]["status"] == "accepted"
-    assert row["fallback_locator_validation"]["tight_enough"] is True
-    assert row["cleanup"]["layout_text_bbox"] == [35, 25, 62, 55]
+    assert row["fallback_locator_validation"]["tight_enough"] is False
+    assert row["cleanup"]["layout_text_bbox"] == [15, 18, 94, 72]
     assert row["gpt_image2_edit"]["status"] == "dry_run"
 
 
-def test_run_phase6_nonbubble_cleanup_fallback_does_not_call_gpt_when_accepted_bbox_stays_loose(
+def test_run_phase6_nonbubble_cleanup_fallback_calls_gpt_when_accepted_bbox_stays_loose(
     tmp_path: Path,
     monkeypatch,
 ):
@@ -1448,7 +1595,7 @@ def test_run_phase6_nonbubble_cleanup_fallback_does_not_call_gpt_when_accepted_b
     run_dir = run_phase6_nonbubble_cleanup(
         detection_run_dir=detection_run,
         output_root=tmp_path / "outputs",
-        run_id="phase6-fallback-loose-accepted-no-gpt",
+        run_id="phase6-fallback-loose-accepted-gpt",
         sample_limit=1,
         gpt_config=GptImageConfig(base_url="https://example.test/v1/images", api_key="test", model="gpt-image-2"),
         call_gpt_image=True,
@@ -1456,13 +1603,12 @@ def test_run_phase6_nonbubble_cleanup_fallback_does_not_call_gpt_when_accepted_b
     )
 
     row = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]
-    assert calls["gpt"] == 0
-    assert row["status"] == "failed"
-    assert row["cleanup"]["failure_reason"] == "fallback_locator_bbox_not_tight"
+    assert calls["gpt"] == 1
+    assert row["status"] == "cleaned"
+    assert row["cleanup"]["replacement_method"] == "gpt_image2_masked_edit"
     assert row["fallback_locator_validation"]["status"] == "accepted"
     assert row["fallback_locator_validation"]["tight_enough"] is False
-    assert row["gpt_image2_edit"]["status"] == "not_called"
-    assert row["gpt_image2_edit"]["reason"] == "fallback_locator_bbox_not_tight"
+    assert row["gpt_image2_edit"]["status"] == "ok"
 
 
 def test_cv_tightness_override_accepts_long_cv_refined_sound_effect_bbox():
@@ -1709,6 +1855,56 @@ def test_run_phase6_nonbubble_cleanup_fallback_recovers_anchor_band_after_invali
     assert row["gpt_image2_edit"]["status"] == "dry_run"
 
 
+def test_run_phase6_nonbubble_cleanup_fallback_recovers_dark_vertical_text_near_anchor(tmp_path: Path):
+    image_path = _write_dark_vertical_text_near_anchor_panel(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(
+        detection_run / "detections.jsonl",
+        image_path,
+        rows=[
+            {
+                "record_id": "page.png#2",
+                "status": "fallback_required",
+                "group_name": "框外",
+                "selected_text_box_xyxy": None,
+                "failure_reason": "no_ctd_mask_within_threshold",
+                "fallback": {
+                    "method": "mimo_crop_then_gpt_image2_masked_edit",
+                    "context_bbox_xyxy": [0, 0, 220, 220],
+                    "context_labelplus_point_xy": [100, 92],
+                    "translated_text": "好孩子不要看…",
+                },
+            }
+        ],
+    )
+    mimo = _FakeMimoLocatorRightArtworkThenDarkAnchorRecovered()
+
+    run_dir = run_phase6_nonbubble_cleanup(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-fallback-dark-anchor-column-recovery",
+        sample_limit=1,
+        mimo_client=mimo,
+    )
+
+    row = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]
+    assert mimo.kinds == [
+        "phase6_fallback_text_locator",
+        "phase6_fallback_text_locator_validation",
+        "phase6_fallback_text_locator_validation",
+    ]
+    assert row["fallback_locator"]["anchor_recovery_of_validation"] == "fallback_locator_semantic_rejected"
+    assert row["fallback_locator"]["refinement"]["method"] == "recover_dark_text_ink_column_near_labelplus_anchor"
+    x1, y1, x2, y2 = row["fallback_locator"]["local_bbox_xyxy"]
+    assert 76 <= x1 <= 98
+    assert 106 <= x2 <= 124
+    assert y1 <= 52
+    assert y2 >= 135
+    assert row["fallback_locator_validation"]["status"] == "accepted"
+    assert row["gpt_image2_edit"]["status"] == "dry_run"
+
+
 def test_run_phase6_nonbubble_cleanup_fallback_recovers_after_retry_validation_rejects(tmp_path: Path):
     image_path = _write_light_sound_effect_panel(tmp_path / "page.png")
     detection_run = tmp_path / "phase2"
@@ -1795,6 +1991,14 @@ def test_run_phase6_nonbubble_cleanup_recovers_accepted_tight_bbox_that_is_below
     assert row["fallback_locator"]["refinement"]["method"] == "recover_light_text_ink_band_near_labelplus_anchor"
     assert row["fallback_locator_validation"]["status"] == "accepted"
     assert row["gpt_image2_edit"]["status"] == "dry_run"
+
+
+def test_accepted_vertical_locator_near_anchor_is_not_recovered_as_below_anchor():
+    locator = {"local_bbox_xyxy": [185, 280, 262, 397]}
+    validation = {"status": "accepted", "tight_enough": True}
+    detection = {"fallback": {"context_labelplus_point_xy": [230, 279]}}
+
+    assert _accepted_locator_is_suspiciously_below_anchor(locator, validation, detection) is False
 
 
 def test_run_phase6_nonbubble_cleanup_records_rejected_anchor_recovery_attempt(tmp_path: Path):
@@ -1996,6 +2200,44 @@ def test_compose_gpt_replacement_region_extracts_light_text_without_gray_box():
 
     assert max(result.getpixel((34, 28))) < 40
     assert min(result.getpixel((50, 32))) > 235
+
+
+def test_write_fallback_replacement_crop_uses_edit_mask_without_clearing_non_text_art(tmp_path: Path):
+    context_path = tmp_path / "context.png"
+    original = Image.new("RGB", (100, 80), "white")
+    draw = ImageDraw.Draw(original)
+    draw.rectangle((54, 20, 76, 62), fill=(12, 12, 12))
+    draw.line((15, 45, 88, 18), fill=(35, 35, 35), width=2)
+    original.save(context_path)
+
+    edited = original.crop((10, 10, 90, 70))
+    edit_draw = ImageDraw.Draw(edited)
+    edit_draw.rectangle((14, 16, 30, 48), fill=(20, 20, 20))
+    normalized = tmp_path / "normalized.png"
+    edited.save(normalized)
+
+    mask = Image.new("RGBA", (80, 60), (0, 0, 0, 255))
+    alpha = Image.new("L", (80, 60), 255)
+    ImageDraw.Draw(alpha).rectangle((10, 10, 70, 54), fill=0)
+    Image.merge("RGBA", [Image.new("L", (80, 60), 0)] * 3 + [alpha]).save(tmp_path / "edit-mask.png")
+    output = tmp_path / "replacement.png"
+
+    _write_fallback_replacement_crop(
+        {"normalized_output_path": str(normalized)},
+        context_path,
+        output,
+        (100, 80),
+        (20, 20, 80, 64),
+        edit_context={
+            "local_context_bbox": (10, 10, 90, 70),
+            "mask_path": tmp_path / "edit-mask.png",
+        },
+    )
+
+    with Image.open(output).convert("RGB") as result:
+        assert result.getpixel((64, 35)) == (12, 12, 12)
+        assert result.getpixel((24, 32)) == (20, 20, 20)
+        assert result.getpixel((5, 5)) == (255, 255, 255)
 
 
 class _FakeGptClient:
@@ -2484,6 +2726,47 @@ class _FakeMimoLocatorInvalidLowThenAnchorRecovered:
         raise AssertionError(f"unexpected kind {kind}")
 
 
+class _FakeMimoLocatorRightArtworkThenDarkAnchorRecovered:
+    def __init__(self):
+        self.kinds = []
+
+    def analyze_image(self, image_path: str, prompt: str, kind: str = "image_analysis", max_completion_tokens: int | None = None):
+        self.kinds.append(kind)
+        if kind == "phase6_fallback_text_locator":
+            return {
+                "raw_text": json.dumps(
+                    {
+                        "bbox_xyxy": [146, 62, 202, 180],
+                        "confidence": 0.94,
+                        "reasoning_summary": "bbox falls on the right-side artwork, not the dark vertical text near the anchor",
+                    },
+                    ensure_ascii=False,
+                ),
+                "request": {"kind": kind, "image_path": str(image_path)},
+                "response": {"status": "ok"},
+            }
+        if kind == "phase6_fallback_text_locator_validation":
+            if self.kinds.count("phase6_fallback_text_locator_validation") == 1:
+                return {
+                    "raw_text": json.dumps(
+                        {
+                            "semantic_correct": False,
+                            "tight_enough": False,
+                            "bbox_on_blank_area": False,
+                            "bbox_targets_unrelated_text": True,
+                            "visible_original_text": "",
+                            "recommendation": "reject",
+                            "reasoning_summary": "The bbox is over unrelated character artwork to the right of the intended vertical text.",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    "request": {"kind": kind, "image_path": str(image_path)},
+                    "response": {"status": "ok"},
+                }
+            return _mimo_validation_response(kind, image_path, accepted=True)
+        raise AssertionError(f"unexpected kind {kind}")
+
+
 class _FakeMimoLocatorRetryLowRejectedThenAnchorRecovered:
     def __init__(self):
         self.kinds = []
@@ -2625,6 +2908,17 @@ def _write_nonbubble_image(path: Path) -> Path:
     return path
 
 
+def _write_sparse_ink_nonbubble_image(path: Path) -> Path:
+    image = Image.new("RGB", (120, 100), (230, 226, 214))
+    draw = ImageDraw.Draw(image)
+    for y in range(100):
+        draw.line((0, y, 120, y), fill=(220 + y // 8, 216 + y // 9, 204 + y // 10))
+    draw.line((46, 34, 46, 48), fill="black", width=3)
+    draw.line((43, 40, 49, 40), fill="black", width=2)
+    image.save(path)
+    return path
+
+
 def _write_light_nonbubble_image(path: Path) -> Path:
     image = Image.new("RGB", (120, 100), (20, 20, 20))
     draw = ImageDraw.Draw(image)
@@ -2659,6 +2953,19 @@ def _write_light_sound_effect_panel(path: Path) -> Path:
     for x in range(90, 620, 34):
         draw.line((x, 542, x - 42, 655), fill=(92, 92, 92), width=2)
     draw.arc((118, 520, 552, 1040), start=192, end=346, fill=(36, 36, 36), width=3)
+    image.save(path)
+    return path
+
+
+def _write_dark_vertical_text_near_anchor_panel(path: Path) -> Path:
+    image = Image.new("RGB", (220, 220), "white")
+    draw = ImageDraw.Draw(image)
+    for offset, y in enumerate(range(42, 145, 18)):
+        x = 92 + (offset % 2) * 8
+        draw.line((x, y, x, y + 12), fill="black", width=3)
+        draw.line((x - 4, y + 5, x + 5, y + 5), fill="black", width=2)
+    draw.rectangle((154, 58, 205, 184), fill="black")
+    draw.line((12, 170, 210, 118), fill=(160, 160, 160), width=2)
     image.save(path)
     return path
 

@@ -12,6 +12,7 @@ from experiments import (
     phase6_nonbubble_cleanup,
     phase6_nonbubble_gpt_replace,
     phase6_segmented_gpt_replace,
+    phase7_8_integrated_smoke,
     phase7_8_gpt_quality_gate_smoke,
 )
 
@@ -135,6 +136,28 @@ def test_phase6_nonbubble_cli_can_disable_mimo_locator():
     args = parser.parse_args(["--skip-mimo"])
 
     assert args.skip_mimo is True
+    assert args.fallback_edit_padding_px == 16
+    assert args.fallback_mask_expand_px == 0
+    assert args.fallback_gpt_mask_shape == "rect"
+
+
+def test_phase6_nonbubble_cli_accepts_fallback_gpt_mask_geometry():
+    parser = phase6_nonbubble_cleanup.build_parser()
+
+    args = parser.parse_args(
+        [
+            "--fallback-edit-padding-px",
+            "32",
+            "--fallback-mask-expand-px",
+            "10",
+            "--fallback-gpt-mask-shape",
+            "text_ink",
+        ]
+    )
+
+    assert args.fallback_edit_padding_px == 32
+    assert args.fallback_mask_expand_px == 10
+    assert args.fallback_gpt_mask_shape == "text_ink"
 
 
 def test_phase6_nonbubble_cli_builds_mimo_config_from_env(monkeypatch):
@@ -278,6 +301,31 @@ def test_phase7_8_quality_gate_smoke_cli_requires_existing_quality_run_contract(
     assert args.output_root == "outputs/runs"
     assert args.run_id == "quality-smoke"
     assert args.sample_limit == 1
+
+
+def test_phase7_8_integrated_smoke_cli_accepts_gpt_quality_runs():
+    parser = phase7_8_integrated_smoke.build_parser()
+
+    args = parser.parse_args(
+        [
+            "--detection-run-dir",
+            "outputs/runs/phase2",
+            "--cleanup-run-dir",
+            "outputs/runs/phase6-a",
+            "--cleanup-run-dir",
+            "outputs/runs/phase6-b",
+            "--layout-run-dir",
+            "outputs/runs/phase4",
+            "--font-selection-run-dir",
+            "outputs/runs/phase3",
+            "--phase6-gpt-quality-run-dir",
+            "outputs/runs/quality-a",
+            "--phase6-gpt-quality-run-dir",
+            "outputs/runs/quality-b",
+        ]
+    )
+
+    assert args.phase6_gpt_quality_run_dir == ["outputs/runs/quality-a", "outputs/runs/quality-b"]
 
 
 def test_phase6_segmented_gpt_cli_builds_api_configs_from_env(monkeypatch):

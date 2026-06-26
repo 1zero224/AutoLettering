@@ -76,6 +76,59 @@ def test_run_phase7_8_smoke_writes_integrated_manifest_and_reports(tmp_path: Pat
     assert "- Missing cleanup layers: 0" in report
 
 
+def test_run_phase7_8_smoke_passes_gpt_quality_gate_to_preview_and_export(tmp_path: Path):
+    fixture = _write_integrated_smoke_inputs(tmp_path)
+    replacement_path = _write_cleaned_crop(tmp_path / "gpt-replacement-2.png")
+    quality_run = tmp_path / "phase6-replacement-quality"
+    quality_run.mkdir()
+    _write_jsonl(
+        fixture["cleanup_b"] / "cleanup-results.jsonl",
+        [
+            _gpt_replacement_cleanup_payload(
+                "page.png#2",
+                replacement_path,
+                [10, 10, 50, 40],
+            )
+        ],
+    )
+    _write_jsonl(fixture["layout_run"] / "layout-results.jsonl", [_layout_payload("page.png#1", _write_layout_preview(tmp_path / "layout-1.png"), "horizontal")])
+    _write_jsonl(fixture["font_run"] / "font-selections.jsonl", [_font_payload("page.png#1")])
+    _write_replacement_quality(quality_run, "page.png#2")
+
+    run_dir = run_phase7_8_smoke(
+        detection_run_dir=fixture["detection_run"],
+        cleanup_run_dirs=[fixture["cleanup_a"], fixture["cleanup_b"]],
+        layout_run_dir=fixture["layout_run"],
+        font_selection_run_dir=fixture["font_run"],
+        output_root=tmp_path / "outputs",
+        run_id="integrated-quality-gate-smoke",
+        sample_limit=2,
+        phase6_gpt_quality_run_dir=quality_run,
+    )
+
+    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    preview_run = Path(manifest["outputs"]["phase7_preview_run_dir"])
+    export_run = Path(manifest["outputs"]["phase8_export_run_dir"])
+    preview_rows = _read_jsonl(preview_run / "preview-results.jsonl")
+    export_manifest = json.loads((export_run / "photoshop-manifest.json").read_text(encoding="utf-8"))
+    page_records = preview_rows[0]["records"]
+
+    assert manifest["inputs"]["phase6_gpt_quality_run_dir"] == str(quality_run)
+    assert manifest["summary"]["preview_record_count"] == 2
+    assert manifest["summary"]["exported_text_layer_count"] == 1
+    assert manifest["summary"]["effective_cleanup_methods"] == {
+        "bubble_mask_fill": 1,
+        "gpt_image2_masked_edit": 1,
+    }
+    assert page_records[1]["record_id"] == "page.png#2"
+    assert page_records[1]["text_overlay_required"] is False
+    assert page_records[1]["layout_preview_path"] == ""
+    assert page_records[1]["gpt_replacement_quality"]["accepted"] is True
+    assert [layer["record_id"] for layer in export_manifest["pages"][0]["layers"]] == ["page.png#1"]
+    assert export_manifest["pages"][0]["repair_sources"][1]["record_id"] == "page.png#2"
+    assert export_manifest["pages"][0]["repair_sources"][1]["gpt_replacement_quality"]["accepted"] is True
+
+
 def _write_integrated_smoke_inputs(tmp_path: Path) -> dict[str, Path]:
     page_path = _write_page(tmp_path / "page.png")
     paths = _make_input_dirs(tmp_path)
@@ -165,6 +218,21 @@ def _cleanup_payload(record_id: str, cleaned_path: Path, bbox: list[int]) -> dic
     }
 
 
+def _gpt_replacement_cleanup_payload(record_id: str, replacement_path: Path, bbox: list[int]) -> dict:
+    return {
+        "record_id": record_id,
+        "status": "cleaned",
+        "cleanup": {
+            "method": "bt_lama_large_inpaint",
+            "bbox": bbox,
+            "cleaned_crop_path": str(replacement_path),
+            "replacement_method": "gpt_image2_masked_edit",
+            "replacement_crop_path": str(replacement_path),
+            "text_overlay_required": False,
+        },
+    }
+
+
 def _layout_payload(record_id: str, layout_path: Path, orientation: str) -> dict:
     return {
         "record_id": record_id,
@@ -199,3 +267,26 @@ def _font_payload(record_id: str) -> dict:
 
 def _write_jsonl(path: Path, payloads: list[dict]) -> None:
     path.write_text("".join(json.dumps(payload, ensure_ascii=False) + "\n" for payload in payloads), encoding="utf-8")
+
+
+def _write_replacement_quality(run_dir: Path, record_id: str) -> None:
+    _write_jsonl(
+        run_dir / "replacement-quality.jsonl",
+        [
+            {
+                "record_id": record_id,
+                "status": "evaluated",
+                "usable": True,
+                "exact_text_correct": True,
+                "simplified_chinese_correct": True,
+                "no_japanese_remaining": True,
+                "region_correct": True,
+                "style_consistent": True,
+                "issues": [],
+            }
+        ],
+    )
+
+
+def _read_jsonl(path: Path) -> list[dict]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]

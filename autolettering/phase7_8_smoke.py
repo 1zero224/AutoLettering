@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from .cleanup_runs import CleanupRunInput, normalize_cleanup_run_dirs
+from .phase6_replacement_quality_gate import RunDirInput
 from .phase7 import run_phase7_preview
 from .phase7_evaluate import PreviewEvaluationClient, run_phase7_preview_evaluation
 from .phase8 import run_phase8_photoshop_export
@@ -22,6 +23,7 @@ def run_phase7_8_smoke(
     sample_limit: int = 2,
     evaluation_client: PreviewEvaluationClient | None = None,
     font_mapping_path: str | Path | None = None,
+    phase6_gpt_quality_run_dir: RunDirInput = None,
 ) -> Path:
     run_dir = Path(output_root) / (run_id or "phase7-8-smoke")
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -34,6 +36,7 @@ def run_phase7_8_smoke(
         output_root=run_dir / "runs",
         run_id="phase7-preview",
         sample_limit=sample_limit,
+        phase6_gpt_quality_run_dir=phase6_gpt_quality_run_dir,
     )
     evaluation_run = _run_evaluation_if_requested(phase7_run, run_dir, evaluation_client)
     phase8_run = run_phase8_photoshop_export(
@@ -46,6 +49,7 @@ def run_phase7_8_smoke(
         sample_limit=sample_limit,
         font_mapping_path=font_mapping_path,
         preview_run_dir=phase7_run,
+        phase6_gpt_quality_run_dir=phase6_gpt_quality_run_dir,
     )
 
     manifest = _manifest(
@@ -59,6 +63,7 @@ def run_phase7_8_smoke(
         phase8_run,
         sample_limit,
         font_mapping_path,
+        phase6_gpt_quality_run_dir,
     )
     _write_json(run_dir / "manifest.json", manifest)
     _write_report(run_dir / "reports" / "phase7-8-smoke-report.md", manifest)
@@ -92,6 +97,7 @@ def _manifest(
     phase8_run: Path,
     sample_limit: int,
     font_mapping_path: str | Path | None,
+    phase6_gpt_quality_run_dir: RunDirInput = None,
 ) -> dict:
     phase7_manifest = _read_json(phase7_run / "manifest.json")
     phase8_manifest = _read_json(phase8_run / "photoshop-manifest.json")
@@ -106,6 +112,7 @@ def _manifest(
             "layout_run_dir": str(layout_run_dir),
             "font_selection_run_dir": str(font_selection_run_dir),
             "font_mapping_path": str(font_mapping_path) if font_mapping_path else None,
+            "phase6_gpt_quality_run_dir": _serialize_run_dir(phase6_gpt_quality_run_dir),
             "sample_limit": sample_limit,
         },
         "outputs": {
@@ -142,10 +149,16 @@ def _cleanup_summary(phase8_manifest: dict) -> dict:
     missing_count = 0
     effective_methods: dict[str, int] = {}
     for page in phase8_manifest.get("pages", []):
+        for source in page.get("repair_sources", []):
+            method = source.get("effective_method")
+            if method:
+                effective_methods[method] = effective_methods.get(method, 0) + 1
         for layer in page.get("layers", []):
             cleanup = layer.get("cleanup", {})
             if cleanup.get("status") == "missing":
                 missing_count += 1
+            if page.get("repair_sources"):
+                continue
             method = cleanup.get("effective_method")
             if method:
                 effective_methods[method] = effective_methods.get(method, 0) + 1
@@ -193,6 +206,14 @@ def _format_counts(counts: dict[str, int]) -> str:
     if not counts:
         return "none"
     return ", ".join(f"`{name}={counts[name]}`" for name in sorted(counts))
+
+
+def _serialize_run_dir(run_dir: RunDirInput) -> str | list[str] | None:
+    if run_dir is None:
+        return None
+    if isinstance(run_dir, (str, Path)):
+        return str(run_dir)
+    return [str(path) for path in run_dir]
 
 
 def _read_json(path: Path) -> dict:
