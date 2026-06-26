@@ -151,6 +151,19 @@
           "outputs/runs/phase3-gbc06-03-batch-1-3-mimo-font-selection"
         ]
       }
+    },
+    "phase0-8-gbc06-v24-gbc06-03-layout-angle": {
+      "extends": "phase0-8-gbc06-v23-gbc06-03-font-selection",
+      "run_id": "phase0-8-gbc06-pipeline-coverage-v24-gbc06-03-layout-angle",
+      "next_limit": 12,
+      "append": {
+        "layout_run_dir": [
+          "outputs/runs/phase4-gbc06-03-batch-1-3-layout-v3"
+        ],
+        "angle_run_dir": [
+          "outputs/runs/phase5-gbc06-03-batch-1-3-angle"
+        ]
+      }
     }
   }
 }

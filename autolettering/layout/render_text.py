@@ -5,6 +5,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 from .models import LayoutResult
+from .measure import VERTICAL_OPTICAL_ADVANCE_RATIO
 from .vertical_text import vertical_digit_group_scale, vertical_text_tokens
 
 
@@ -174,13 +175,15 @@ def _vertical_column_metrics(
     boxes = [draw.textbbox((0, 0), char, font=token_font) for char, token_font in zip(chars, fonts)]
     widths = [box[2] - box[0] for box in boxes]
     heights = [box[3] - box[1] for box in boxes]
+    advances = [_vertical_token_advance(height, token_font) for height, token_font in zip(heights, fonts)]
     return {
         "fonts": fonts,
         "boxes": boxes,
         "widths": widths,
         "heights": heights,
+        "advances": advances,
         "width": max(widths),
-        "height": sum(heights) + line_spacing * max(0, len(chars) - 1),
+        "height": sum(advances) + line_spacing * max(0, len(chars) - 1),
     }
 
 
@@ -197,16 +200,17 @@ def _draw_vertical_column(
 ) -> None:
     y = 0 if vertical_align == "top" else max(0, (canvas_height - metrics["height"]) // 2)
     center_x = x_left + metrics["width"] // 2
-    for char, token_font, box, width, height in zip(
+    for char, token_font, box, width, _height, advance in zip(
         chars,
         metrics["fonts"],
         metrics["boxes"],
         metrics["widths"],
         metrics["heights"],
+        metrics["advances"],
     ):
         x = max(0, center_x - width // 2 - box[0])
         draw.text((x, y - box[1]), char, fill=text_color, font=token_font)
-        y += height + line_spacing
+        y += advance + line_spacing
 
 
 def _vertical_token_font(font: ImageFont.FreeTypeFont, token: str) -> ImageFont.FreeTypeFont:
@@ -214,3 +218,8 @@ def _vertical_token_font(font: ImageFont.FreeTypeFont, token: str) -> ImageFont.
     if scale >= 1.0:
         return font
     return font.font_variant(size=max(1, round(font.size * scale)))
+
+
+def _vertical_token_advance(ink_height: int, token_font: ImageFont.FreeTypeFont) -> int:
+    optical_cell = int(round(token_font.size * VERTICAL_OPTICAL_ADVANCE_RATIO))
+    return max(ink_height, optical_cell)

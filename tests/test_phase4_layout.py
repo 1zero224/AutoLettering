@@ -120,6 +120,16 @@ def test_search_fitting_layout_uses_vertical_for_tall_narrow_targets(tmp_path: P
     assert result.overflow_ratio <= 0.08
 
 
+def test_measure_vertical_text_uses_optical_cell_advance_to_keep_glyphs_readable(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+    font_size = 34
+
+    measured = measure_text_layout("你要去哪里？", font_path, font_size, line_spacing=0, orientation="vertical")
+
+    assert measured.height >= round(font_size * 0.95) * len("你要去哪里？")
+    assert measured.height < font_size * len("你要去哪里？")
+
+
 def test_search_fitting_layout_preserves_vertical_line_breaks_as_columns(tmp_path: Path):
     font_path = _copy_font(tmp_path)
 

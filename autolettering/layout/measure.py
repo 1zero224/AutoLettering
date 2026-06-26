@@ -9,6 +9,8 @@ from .candidates import generate_line_break_candidates
 from .models import LayoutResult, TextMeasurement
 from .vertical_text import vertical_digit_group_scale, vertical_text_tokens
 
+VERTICAL_OPTICAL_ADVANCE_RATIO = 0.95
+
 
 def measure_text_layout(
     text: str,
@@ -304,10 +306,18 @@ def _measure_vertical_column(
     font: ImageFont.FreeTypeFont,
     line_spacing: int,
 ) -> TextMeasurement:
-    boxes = [draw.textbbox((0, 0), char, font=_vertical_token_font(font, char)) for char in chars]
+    token_fonts = [_vertical_token_font(font, char) for char in chars]
+    boxes = [draw.textbbox((0, 0), char, font=token_font) for char, token_font in zip(chars, token_fonts)]
     width = max(box[2] - box[0] for box in boxes)
-    height = sum(box[3] - box[1] for box in boxes) + line_spacing * max(0, len(chars) - 1)
+    advances = [_vertical_token_advance(box, token_font) for box, token_font in zip(boxes, token_fonts)]
+    height = sum(advances) + line_spacing * max(0, len(chars) - 1)
     return TextMeasurement(width=width, height=height)
+
+
+def _vertical_token_advance(box: tuple[int, int, int, int], token_font: ImageFont.FreeTypeFont) -> int:
+    ink_height = box[3] - box[1]
+    optical_cell = int(round(token_font.size * VERTICAL_OPTICAL_ADVANCE_RATIO))
+    return max(ink_height, optical_cell)
 
 
 def _vertical_token_font(font: ImageFont.FreeTypeFont, token: str) -> ImageFont.FreeTypeFont:
