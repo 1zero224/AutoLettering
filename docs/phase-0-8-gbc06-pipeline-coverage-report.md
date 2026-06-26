@@ -173,6 +173,16 @@ listed run directory is missing its stage artifact:
 python experiments/pipeline_coverage_report.py --registry-file docs/pipeline-runs.gbc06.json --registry-entry phase0-8-gbc06-v20-gbc06-33-complete --output-root outputs/runs
 ```
 
+Current v21 keeps the same registry-backed structural scope, but adds
+`next_experiments` to the generated JSON and Markdown report. This keeps the
+old `next_records` meaning intact for records already in the detection base,
+while also surfacing Phase 1 parsed records that still need CTA detection as
+the next experiment queue:
+
+```powershell
+python experiments/pipeline_coverage_report.py --registry-file docs/pipeline-runs.gbc06.json --registry-entry phase0-8-gbc06-v20-gbc06-33-complete --output-root outputs/runs --run-id phase0-8-gbc06-pipeline-coverage-v21-next-experiments --next-limit 12
+```
+
 ## Generated Artifacts
 
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage/pipeline-coverage.json`
@@ -213,6 +223,8 @@ python experiments/pipeline_coverage_report.py --registry-file docs/pipeline-run
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v19-gbc06-29-complete/reports/pipeline-coverage-report.md`
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v20-gbc06-33-complete/pipeline-coverage.json`
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v20-gbc06-33-complete/reports/pipeline-coverage-report.md`
+- `outputs/runs/phase0-8-gbc06-pipeline-coverage-v21-next-experiments/pipeline-coverage.json`
+- `outputs/runs/phase0-8-gbc06-pipeline-coverage-v21-next-experiments/reports/pipeline-coverage-report.md`
 
 `outputs/` remains ignored by Git. The source-backed summary below records the key numbers so the experiment is traceable in the repository.
 
@@ -305,6 +317,16 @@ explicit:
 
 ```text
 phase1_pending_detection_count=145
+```
+
+The v21 report turns the first pending Phase 1 records into an explicit
+experiment queue while keeping `next_records=[]` for the current complete
+35-record detection base:
+
+```text
+next_experiments[0]=GBC06_02.png#14  action=run_cta_detection  stage=phase2_detection  reason=phase1_pending_detection
+next_experiments[1]=GBC06_03.png#1   action=run_cta_detection  stage=phase2_detection  reason=phase1_pending_detection
+next_experiments[2]=GBC06_03.png#2   action=run_cta_detection  stage=phase2_detection  reason=phase1_pending_detection
 ```
 
 The first `next-limit=12` Phase 1 records missing detection in v17 are:
@@ -467,6 +489,23 @@ phase7_preview evaluations=15 records=35 record_issues=0
 phase8_export audits=6 records=9 record_issues=0
 ```
 
+Fresh v21 next-experiments registry coverage generation:
+
+```powershell
+python experiments/pipeline_coverage_report.py --registry-file docs/pipeline-runs.gbc06.json --registry-entry phase0-8-gbc06-v20-gbc06-33-complete --output-root outputs/runs --run-id phase0-8-gbc06-pipeline-coverage-v21-next-experiments --next-limit 12
+```
+
+Observed result:
+
+```text
+outputs\runs\phase0-8-gbc06-pipeline-coverage-v21-next-experiments
+base_record_count=35 complete_record_count=35 incomplete_record_count=0
+phase1_pending_detection_count=145
+next_records=[]
+next_experiments[0].record_id=GBC06_02.png#14
+next_experiments[0].action=run_cta_detection
+```
+
 Fresh targeted verification for pipeline coverage, Phase 6/7/8 quality
 aggregation, and registry CLI behavior:
 
@@ -477,7 +516,7 @@ python -m pytest tests/test_pipeline_coverage.py tests/test_pipeline_quality_cov
 Observed result:
 
 ```text
-22 passed in 0.89s
+23 passed
 ```
 
 Full regression:

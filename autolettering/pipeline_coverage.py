@@ -69,6 +69,7 @@ def build_pipeline_coverage(
         "group_summary": _group_summary(base_ids, records),
         "records": records,
         "next_records": _next_records(base_ids, records, next_limit),
+        "next_experiments": _next_experiments(base_ids, records, phase1_pending_detection, next_limit),
         "phase1_pending_detection_count": max(0, len(phase1_ids) - len(set(detection_all))),
         "phase1_pending_detection_records": phase1_pending_detection,
     }
@@ -219,6 +220,87 @@ def _next_records(base_ids: list[str], records: dict[str, dict], limit: int) -> 
                 "first_quality_issue": row["quality_issues"][0],
             })
     return items[: max(0, limit)]
+
+
+def _next_experiments(
+    base_ids: list[str],
+    records: dict[str, dict],
+    phase1_pending_detection: list[dict],
+    limit: int,
+) -> list[dict]:
+    items: list[dict] = []
+    for record_id in base_ids:
+        row = records[record_id]
+        if row["missing_stages"]:
+            stage = row["missing_stages"][0]
+            items.append({
+                "record_id": record_id,
+                "group_name": row.get("group_name"),
+                "image_name": row.get("image_name"),
+                "kind": "stage_gap",
+                "recommended_stage": stage,
+                "reason": stage,
+                "action": _stage_action(stage),
+            })
+            continue
+        if row["quality_issues"]:
+            issue = row["quality_issues"][0]
+            items.append({
+                "record_id": record_id,
+                "group_name": row.get("group_name"),
+                "image_name": row.get("image_name"),
+                "kind": "quality_issue",
+                "recommended_stage": _quality_issue_stage(issue),
+                "reason": issue,
+                "action": _quality_issue_action(issue),
+            })
+    for row in phase1_pending_detection:
+        items.append({
+            "record_id": row["record_id"],
+            "group_name": row.get("group_name"),
+            "image_name": row.get("image_name"),
+            "kind": "coverage_expansion",
+            "recommended_stage": "phase2_detection",
+            "reason": "phase1_pending_detection",
+            "action": "run_cta_detection",
+        })
+    return items[: max(0, limit)]
+
+
+def _stage_action(stage: str) -> str:
+    return {
+        "phase2_detection": "run_cta_detection",
+        "phase3_font_selection": "run_font_selection",
+        "phase4_layout": "run_layout_search",
+        "phase5_angle": "run_angle_estimation",
+        "phase6_cleanup": "run_cleanup",
+        "phase7_preview": "run_preview",
+        "phase8_export": "run_photoshop_export",
+    }.get(stage, "inspect_stage_gap")
+
+
+def _quality_issue_stage(issue: str) -> str:
+    if issue.startswith("phase6_cleanup"):
+        return "phase6_cleanup"
+    if issue.startswith("phase6_gpt"):
+        return "phase6_cleanup"
+    if issue.startswith("phase7"):
+        return "phase7_preview"
+    if issue.startswith("missing_vertical") or issue.startswith("unexpected_vertical") or issue.startswith("missing_jsx"):
+        return "phase8_export"
+    return "quality_review"
+
+
+def _quality_issue_action(issue: str) -> str:
+    if issue.startswith("phase6_cleanup"):
+        return "rerun_cleanup_or_method_comparison"
+    if issue.startswith("phase6_gpt"):
+        return "rerun_gpt_replacement_quality_gate"
+    if issue.startswith("phase7"):
+        return "rerun_preview_evaluation_or_layout"
+    if issue.startswith("missing_vertical") or issue.startswith("unexpected_vertical") or issue.startswith("missing_jsx"):
+        return "rerun_export_audit_or_fix_ps_contract"
+    return "inspect_quality_issue"
 
 
 def _phase1_pending_detection_records(

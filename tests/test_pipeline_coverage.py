@@ -52,6 +52,26 @@ def test_build_pipeline_coverage_reports_stage_gaps_and_next_records(tmp_path: P
         {"record_id": "r2", "group_name": "框外", "first_missing_stage": "phase3_font_selection"},
         {"record_id": "r3", "group_name": "框内", "first_missing_stage": "phase2_detection"},
     ]
+    assert report["next_experiments"] == [
+        {
+            "record_id": "r2",
+            "group_name": "框外",
+            "image_name": "page1.png",
+            "kind": "stage_gap",
+            "recommended_stage": "phase3_font_selection",
+            "reason": "phase3_font_selection",
+            "action": "run_font_selection",
+        },
+        {
+            "record_id": "r3",
+            "group_name": "框内",
+            "image_name": "page2.png",
+            "kind": "stage_gap",
+            "recommended_stage": "phase2_detection",
+            "reason": "phase2_detection",
+            "action": "run_cta_detection",
+        },
+    ]
 
 
 def test_build_pipeline_coverage_merges_multiple_runs_per_stage(tmp_path: Path):
@@ -155,6 +175,26 @@ def test_build_pipeline_coverage_reports_phase1_records_missing_detection(tmp_pa
         {"record_id": "r2", "group_name": "框外", "image_name": "page1.png"},
         {"record_id": "r3", "group_name": "框内", "image_name": "page2.png"},
     ]
+    assert report["next_experiments"] == [
+        {
+            "record_id": "r2",
+            "group_name": "框外",
+            "image_name": "page1.png",
+            "kind": "coverage_expansion",
+            "recommended_stage": "phase2_detection",
+            "reason": "phase1_pending_detection",
+            "action": "run_cta_detection",
+        },
+        {
+            "record_id": "r3",
+            "group_name": "框内",
+            "image_name": "page2.png",
+            "kind": "coverage_expansion",
+            "recommended_stage": "phase2_detection",
+            "reason": "phase1_pending_detection",
+            "action": "run_cta_detection",
+        },
+    ]
 
 
 def test_write_pipeline_coverage_report_writes_json_and_markdown(tmp_path: Path):
@@ -174,6 +214,8 @@ def test_write_pipeline_coverage_report_writes_json_and_markdown(tmp_path: Path)
     markdown = (run_dir / "reports" / "pipeline-coverage-report.md").read_text(encoding="utf-8")
     assert payload["summary"]["base_record_count"] == 1
     assert "phase2_detection" in markdown
+    assert "## Next Experiments" in markdown
+    assert "run_cta_detection" in markdown
     assert "## Phase 1 Pending Detection" in markdown
     assert "`r2`" in markdown
 

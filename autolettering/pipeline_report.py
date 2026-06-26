@@ -21,6 +21,8 @@ def pipeline_markdown_lines(report: dict, stage_order: list[str]) -> list[str]:
         stage = report["stages"][name]
         lines.append(f"| `{name}` | {stage['covered_count']} | {stage['missing_count']} |")
     lines.extend(quality_markdown_lines(report.get("quality", {})))
+    lines.extend(["", "## Next Experiments", ""])
+    lines.extend(_next_experiment_lines(report.get("next_experiments", [])))
     lines.extend(["", "## Next Records", ""])
     lines.extend(_next_record_lines(report["next_records"]))
     lines.extend(["", "## Phase 1 Pending Detection", ""])
@@ -38,6 +40,17 @@ def _next_record_lines(records: list[dict]) -> list[str]:
 def _next_record_line(row: dict) -> str:
     label = row.get("first_missing_stage") or row.get("first_quality_issue")
     return f"- `{row['record_id']}` ({row.get('group_name') or 'unknown'}): `{label}`"
+
+
+def _next_experiment_lines(records: list[dict]) -> list[str]:
+    if not records:
+        return ["- None"]
+    return [
+        "- "
+        f"`{row['record_id']}` ({row.get('group_name') or 'unknown'}, {row.get('image_name') or 'unknown image'}): "
+        f"`{row.get('action')}` at `{row.get('recommended_stage')}` because `{row.get('reason')}`"
+        for row in records
+    ]
 
 
 def _phase1_pending_detection_lines(records: list[dict]) -> list[str]:

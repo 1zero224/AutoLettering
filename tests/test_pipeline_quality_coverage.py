@@ -162,6 +162,15 @@ def test_build_pipeline_coverage_marks_phase6_gpt_quality_failures_incomplete(tm
     assert report["next_records"] == [
         {"record_id": "r1", "group_name": "框内", "first_quality_issue": "phase6_gpt_image2_quality_unacceptable"}
     ]
+    assert report["next_experiments"][0] == {
+        "record_id": "r1",
+        "group_name": "框内",
+        "image_name": None,
+        "kind": "quality_issue",
+        "recommended_stage": "phase6_cleanup",
+        "reason": "phase6_gpt_image2_quality_unacceptable",
+        "action": "rerun_gpt_replacement_quality_gate",
+    }
 
 
 def test_build_pipeline_coverage_marks_phase6_cleanup_quality_failures_incomplete(tmp_path: Path):
