@@ -223,6 +223,8 @@ def _repair_source_payload(source: dict) -> dict:
         "gpt_image2_edit_status": source.get("gpt_image2_edit_status"),
         "text_overlay_required": bool(source.get("text_overlay_required", False)),
     }
+    if source.get("replacement_failure_reason") is not None:
+        payload["replacement_failure_reason"] = source.get("replacement_failure_reason")
     if source.get("gpt_replacement_quality") is not None:
         payload["gpt_replacement_quality"] = source.get("gpt_replacement_quality")
     return payload
@@ -364,6 +366,8 @@ def _cleanup_payload(cleanup_row: dict | None, image_size: tuple[int, int] | Non
         "effective_method": replacement_method if contains_final_replacement else method,
         "effective_crop_path": replacement_crop_path if contains_final_replacement else cleaned_crop_path,
     }
+    if cleanup.get("replacement_failure_reason") is not None:
+        payload["replacement_failure_reason"] = cleanup.get("replacement_failure_reason")
     if cleanup.get("gpt_replacement_quality") is not None:
         payload["gpt_replacement_quality"] = cleanup.get("gpt_replacement_quality")
     return payload

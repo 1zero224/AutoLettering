@@ -137,6 +137,21 @@ def test_run_quality_gate_smoke_consumes_fallback_cleaned_crop_without_gpt_repla
                     "text_overlay_required": True,
                     "replacement_failure_reason": "gpt_image2_replacement_not_completed",
                 },
+                "fallback_locator": {
+                    "status": "ok",
+                    "local_bbox_xyxy": [2, 2, 38, 48],
+                    "global_bbox_xyxy": [42, 22, 78, 68],
+                    "confidence": 0.86,
+                    "locator_image_path": str(tmp_path / "locator.png"),
+                },
+                "fallback_locator_validation": {
+                    "status": "accepted",
+                    "semantic_correct": True,
+                    "tight_enough": True,
+                    "validation_image_path": str(tmp_path / "validation.png"),
+                    "reasoning_summary": "bbox corresponds to the translated fallback text",
+                    "tightness_override": {"applied": True, "reason": "cv_refined_tight_bbox"},
+                },
                 "gpt_image2_edit": {"status": "dry_run"},
             }
         ],
@@ -164,7 +179,32 @@ def test_run_quality_gate_smoke_consumes_fallback_cleaned_crop_without_gpt_repla
     assert record["phase8_text_layer_exported"] is True
     assert record["phase8_text_overlay_required"] is True
 
+    phase7_rows = _load_jsonl(Path(summary["phase7_run_dir"]) / "preview-results.jsonl")
+    phase7_record = phase7_rows[0]["records"][0]
+    assert phase7_record["replacement_failure_reason"] == "gpt_image2_replacement_not_completed"
+    assert phase7_record["fallback_locator"]["global_bbox_xyxy"] == [42, 22, 78, 68]
+    assert phase7_record["fallback_locator_validation"]["reasoning_summary"] == (
+        "bbox corresponds to the translated fallback text"
+    )
+    assert phase7_record["gpt_image2_edit_status"] == "dry_run"
+
+    phase8_manifest = json.loads((Path(summary["phase8_run_dir"]) / "photoshop-manifest.json").read_text(encoding="utf-8"))
+    phase8_source = phase8_manifest["pages"][0]["repair_sources"][0]
+    phase8_cleanup = phase8_manifest["pages"][0]["layers"][0]["cleanup"]
+    assert phase8_source["replacement_failure_reason"] == "gpt_image2_replacement_not_completed"
+    assert phase8_source["fallback_locator"]["global_bbox_xyxy"] == [42, 22, 78, 68]
+    assert phase8_source["fallback_locator_validation"]["tightness_override"] == {
+        "applied": True,
+        "reason": "cv_refined_tight_bbox",
+    }
+    assert phase8_source["gpt_image2_edit_status"] == "dry_run"
+    assert phase8_cleanup["replacement_failure_reason"] == "gpt_image2_replacement_not_completed"
+
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8")
+
+
+def _load_jsonl(path: Path) -> list[dict]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]

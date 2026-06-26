@@ -127,9 +127,24 @@ def _preview_record(detection: dict, cleanup: dict, layout: dict | None, effecti
         "layout_preview_path": layout_payload.get("preview_path", ""),
         "text_overlay_required": text_overlay_required,
     }
+    record.update(_preview_provenance(cleanup, cleanup_payload))
     if cleanup_payload.get("gpt_replacement_quality") is not None:
         record["gpt_replacement_quality"] = cleanup_payload.get("gpt_replacement_quality")
     return record
+
+
+def _preview_provenance(cleanup_row: dict, cleanup_payload: dict) -> dict:
+    payload: dict = {}
+    for key in ("replacement_failure_reason", "route", "text_region_source", "source_mask_path"):
+        if cleanup_payload.get(key) is not None:
+            payload[key] = cleanup_payload.get(key)
+    for key in ("fallback_locator", "fallback_locator_validation"):
+        if cleanup_row.get(key) is not None:
+            payload[key] = cleanup_row.get(key)
+    gpt_status = (cleanup_row.get("gpt_image2_edit") or {}).get("status")
+    if gpt_status is not None:
+        payload["gpt_image2_edit_status"] = gpt_status
+    return payload
 
 
 def _text_overlay_bbox(cleanup: dict, layout: dict, bbox: list[int]) -> list[int]:
@@ -177,9 +192,28 @@ def _record_summary(record: dict) -> dict:
         "text_overlay_required": record.get("text_overlay_required", True),
         "preview_before_after_path": record.get("preview_before_after_path", ""),
     }
+    _copy_optional_fields(
+        payload,
+        record,
+        (
+            "replacement_failure_reason",
+            "route",
+            "text_region_source",
+            "source_mask_path",
+            "fallback_locator",
+            "fallback_locator_validation",
+            "gpt_image2_edit_status",
+        ),
+    )
     if record.get("gpt_replacement_quality") is not None:
         payload["gpt_replacement_quality"] = record.get("gpt_replacement_quality")
     return payload
+
+
+def _copy_optional_fields(target: dict, source: dict, keys: tuple[str, ...]) -> None:
+    for key in keys:
+        if source.get(key) is not None:
+            target[key] = source.get(key)
 
 
 def _cleanup_crop_path(cleanup: dict) -> str:

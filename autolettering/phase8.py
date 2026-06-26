@@ -126,6 +126,7 @@ def _cleanup_record_for_page(detection: dict, cleanup_row: dict) -> dict | None:
         "fallback_locator": cleanup_row.get("fallback_locator"),
         "fallback_locator_validation": cleanup_row.get("fallback_locator_validation"),
         "gpt_image2_edit_status": (cleanup_row.get("gpt_image2_edit") or {}).get("status"),
+        "replacement_failure_reason": cleanup.get("replacement_failure_reason"),
         "layout_preview_path": "",
         "text_overlay_required": _cleanup_needs_text_overlay(cleanup, contains_final_replacement),
         "gpt_replacement_quality": cleanup.get("gpt_replacement_quality"),
@@ -214,6 +215,8 @@ def _repair_source_payload(record: dict) -> dict:
         "gpt_image2_edit_status": record.get("gpt_image2_edit_status"),
         "text_overlay_required": bool(record.get("text_overlay_required", False)),
     }
+    if record.get("replacement_failure_reason") is not None:
+        payload["replacement_failure_reason"] = record.get("replacement_failure_reason")
     if record.get("gpt_replacement_quality") is not None:
         payload["gpt_replacement_quality"] = record.get("gpt_replacement_quality")
     return payload
@@ -234,12 +237,16 @@ def _compact_locator_payload(locator: object) -> dict | None:
 def _compact_validation_payload(validation: object) -> dict | None:
     if not isinstance(validation, dict):
         return None
-    return {
+    payload = {
         "status": validation.get("status"),
         "semantic_correct": validation.get("semantic_correct"),
         "tight_enough": validation.get("tight_enough"),
         "validation_image_path": validation.get("validation_image_path"),
     }
+    for key in ("failure_reason", "reasoning_summary", "tightness_override"):
+        if validation.get(key) is not None:
+            payload[key] = validation.get(key)
+    return payload
 
 
 def _safe_name(value: str) -> str:
@@ -314,6 +321,8 @@ def _preview_repair_sources(page: dict) -> list[dict]:
             "gpt_image2_edit_status": record.get("gpt_image2_edit_status"),
             "text_overlay_required": bool(record.get("text_overlay_required", True)),
         }
+        if record.get("replacement_failure_reason") is not None:
+            payload["replacement_failure_reason"] = record.get("replacement_failure_reason")
         if record.get("gpt_replacement_quality") is not None:
             payload["gpt_replacement_quality"] = record.get("gpt_replacement_quality")
         sources.append(payload)
