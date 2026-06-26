@@ -45,6 +45,23 @@ def test_run_phase6_nonbubble_gpt_replace_uses_context_mask_and_target_text(tmp_
         assert any(value == 0 for value in mask.getchannel("A").getdata())
         assert mask.getpixel((0, 0))[3] == 255
     assert (run_dir / "visuals" / "gpt-replace-bt-grid.png").exists()
+    cleanup_rows = _read_jsonl(run_dir / "cleanup-results.jsonl")
+    cleanup_row = cleanup_rows[0]
+    cleanup = cleanup_row["cleanup"]
+    assert cleanup_row["status"] == "cleaned"
+    assert cleanup["method"] == "gpt_image2_text_pixel_masked_edit"
+    assert cleanup["replacement_method"] == "gpt_image2_masked_edit"
+    assert cleanup["text_overlay_required"] is False
+    assert cleanup["replacement_crop_path"] == row["gpt_image2_replace"]["context_replacement_crop_path"]
+    assert cleanup["cleaned_crop_path"] != cleanup["replacement_crop_path"]
+    assert cleanup["bbox"] == [10, 5, 100, 85]
+    assert cleanup["text_bbox"] == [20, 15, 90, 75]
+    assert cleanup["mask_bbox"] == [19, 14, 91, 76]
+    assert cleanup["layout_text_bbox"] == [20, 15, 90, 75]
+    assert Path(row["gpt_image2_replace"]["target_crop_path"]).exists()
+    with Image.open(cleanup["cleaned_crop_path"]) as cleaned, Image.open(cleanup["replacement_crop_path"]) as replacement:
+        assert cleaned.size == replacement.size == (90, 80)
+    assert cleanup_row["gpt_image2_edit"]["status"] == "ok"
 
 
 def test_run_phase6_nonbubble_gpt_replace_masks_text_pixels_inside_large_bbox(tmp_path: Path, monkeypatch):
@@ -80,6 +97,17 @@ def test_run_phase6_nonbubble_gpt_replace_masks_text_pixels_inside_large_bbox(tm
         # The text strokes inside the same bbox are editable.
         assert alpha.getpixel((local[0] + 73, local[1] + 14)) == 0
     assert row["gpt_context"]["mask_strategy"] == "text_pixels_within_bbox"
+    cleanup_row = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]
+    cleanup = cleanup_row["cleanup"]
+    assert cleanup_row["status"] == "cleaned"
+    assert cleanup["text_overlay_required"] is True
+    assert cleanup["replacement_method"] is None
+    assert cleanup["replacement_crop_path"] is None
+    assert cleanup["cleaned_crop_path"] != cleanup["replacement_crop_path"]
+    assert cleanup["bbox"] == [6, 11, 124, 94]
+    assert cleanup["text_bbox"] == [10, 15, 120, 90]
+    assert cleanup["mask_bbox"] == [9, 14, 121, 91]
+    assert cleanup["layout_text_bbox"] == [10, 15, 120, 90]
 
 
 def test_light_on_dark_text_pixel_mask_excludes_bright_crop_edge():

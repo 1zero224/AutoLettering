@@ -56,6 +56,7 @@ def run_phase6_nonbubble_gpt_replace(
         for detection in detections
     ]
     _write_jsonl(run_dir / "gpt-replace-results.jsonl", rows)
+    _write_jsonl(run_dir / "cleanup-results.jsonl", _cleanup_rows(rows))
     grid_path = _write_comparison_grid(run_dir / "visuals" / "gpt-replace-bt-grid.png", rows)
     mimo_result = _write_mimo_evaluation(run_dir, grid_path, rows, mimo_client) if mimo_client else None
     _write_manifest(run_dir / "manifest.json", detection_run_dir, methods, rows, grid_path, mimo_result)
@@ -98,6 +99,7 @@ def _process_one(
         rect_mask_expand_px=rect_mask_expand_px,
     )
     bt_results = [_bt_cleanup_payload(run_dir, detection, bbox, method, polarity) for method in bt_methods]
+    cleanup_context = _write_cleanup_context_package(run_dir, detection["record_id"], context, bt_results)
     prompt = gpt_image_edit_prompt(detection.get("translated_text", ""))
     gpt_payload = _gpt_replace_payload(run_dir, detection["record_id"], context, prompt, gpt_config, gpt_client)
     return {
@@ -111,9 +113,70 @@ def _process_one(
         "polarity": polarity,
         "status": "processed",
         "gpt_context": {key: str(value) if isinstance(value, Path) else value for key, value in context.items()},
+        "cleanup_context": cleanup_context,
         "gpt_image2_replace": gpt_payload,
         "bt_repairs": bt_results,
     }
+
+
+def _cleanup_rows(rows: list[dict]) -> list[dict]:
+    return [_cleanup_row(row) for row in rows]
+
+
+def _cleanup_row(row: dict) -> dict:
+    gpt = row.get("gpt_image2_replace") or {}
+    context = row.get("gpt_context") or {}
+    cleanup_context = row.get("cleanup_context") or {}
+    replacement_crop_path = gpt.get("context_replacement_crop_path")
+    cleaned_crop_path = cleanup_context.get("cleaned_crop_path") or context.get("input_path")
+    ok = gpt.get("status") == "ok" and bool(replacement_crop_path)
+    context_bbox = _global_context_bbox(row)
+    mask_bbox = _global_target_bbox(row)
+    cleanup = {
+        "method": "gpt_image2_text_pixel_masked_edit",
+        "bbox": context_bbox,
+        "text_bbox": row.get("bbox"),
+        "mask_bbox": mask_bbox,
+        "layout_text_bbox": row.get("bbox"),
+        "cleaned_crop_path": cleaned_crop_path,
+        "cleanup_mask_path": cleanup_context.get("cleanup_mask_path"),
+        "before_after_path": cleanup_context.get("before_after_path") or cleaned_crop_path,
+        "text_overlay_required": not ok,
+        "replacement_method": "gpt_image2_masked_edit" if ok else None,
+        "replacement_crop_path": replacement_crop_path if ok else None,
+        "source_mask_path": context.get("text_mask_path"),
+        "gpt_mask_path": context.get("mask_path"),
+        "mask_strategy": context.get("mask_strategy"),
+        "editable_pixel_count": context.get("editable_pixel_count"),
+        "route": "gpt_image2_text_pixel_masked_edit",
+        "text_region_source": "phase6_nonbubble_gpt_replace_text_pixels",
+        "background_repair_method": cleanup_context.get("background_repair_method"),
+        "background_repair_crop_path": cleanup_context.get("background_repair_crop_path"),
+    }
+    if not ok:
+        cleanup["replacement_failure_reason"] = gpt.get("failure_reason") or "gpt_image2_replacement_not_completed"
+    return {
+        "record_id": row["record_id"],
+        "image_name": row.get("image_name"),
+        "translated_text": row.get("translated_text"),
+        "status": "cleaned",
+        "cleanup": cleanup,
+        "gpt_context": context,
+        "gpt_image2_edit": gpt,
+    }
+
+
+def _global_context_bbox(row: dict) -> list[int]:
+    context_bbox = row.get("context_bbox") or (0, 0, 0, 0)
+    return [int(value) for value in context_bbox]
+
+
+def _global_target_bbox(row: dict) -> list[int]:
+    context_bbox = row.get("context_bbox") or (0, 0, 0, 0)
+    local_bbox = row.get("local_target_bbox") or row.get("bbox") or (0, 0, 0, 0)
+    cx1, cy1, _, _ = [int(value) for value in context_bbox]
+    x1, y1, x2, y2 = [int(value) for value in local_bbox]
+    return [cx1 + x1, cy1 + y1, cx1 + x2, cy1 + y2]
 
 
 def _write_gpt_context_package(
@@ -127,6 +190,7 @@ def _write_gpt_context_package(
     with Image.open(detection["image_path"]) as image:
         source = image.convert("RGB")
     context_bbox = _expand_bbox(bbox, source.size, context_padding)
+    local_text = _offset_bbox(bbox, context_bbox)
     local_target = _offset_bbox(_expand_bbox(bbox, source.size, rect_mask_expand_px), context_bbox)
     context_crop = source.crop(context_bbox)
     mask_result = build_text_pixel_gpt_mask(context_crop, local_target, polarity=polarity, expand_px=rect_mask_expand_px)
@@ -152,10 +216,44 @@ def _write_gpt_context_package(
         "mask_path": mask_path,
         "mask_overlay_path": overlay_path,
         "context_bbox": context_bbox,
+        "local_text_bbox": local_text,
         "local_target_bbox": local_target,
         "mask_strategy": mask_result.strategy,
         "editable_pixel_count": mask_result.editable_pixel_count,
     }
+
+
+def _write_cleanup_context_package(run_dir: Path, record_id: str, context: dict, bt_results: list[dict]) -> dict:
+    safe_id = _safe_name(record_id)
+    cleaned_path = run_dir / "gpt_replace_cleaned_context" / f"{safe_id}.png"
+    before_after_path = run_dir / "gpt_replace_cleaned_before_after" / f"{safe_id}.png"
+    cleaned_path.parent.mkdir(parents=True, exist_ok=True)
+    before_after_path.parent.mkdir(parents=True, exist_ok=True)
+    with Image.open(context["input_path"]) as image:
+        cleaned = image.convert("RGB")
+        before = cleaned.copy()
+    repair = _first_successful_bt_repair(bt_results)
+    if repair and repair.get("cleaned_crop_path"):
+        local_text = tuple(int(value) for value in context.get("local_text_bbox") or context["local_target_bbox"])
+        with Image.open(repair["cleaned_crop_path"]) as patch_image:
+            patch = patch_image.convert("RGB").resize((local_text[2] - local_text[0], local_text[3] - local_text[1]))
+        cleaned.paste(patch, local_text[:2])
+    cleaned.save(cleaned_path)
+    _save_before_after_images(before, cleaned, before_after_path)
+    return {
+        "cleaned_crop_path": str(cleaned_path),
+        "cleanup_mask_path": None,
+        "before_after_path": str(before_after_path),
+        "background_repair_method": repair.get("requested_method") if repair else "original_context",
+        "background_repair_crop_path": repair.get("cleaned_crop_path") if repair else None,
+    }
+
+
+def _first_successful_bt_repair(bt_results: list[dict]) -> dict | None:
+    for repair in bt_results:
+        if repair.get("status") == "ok" and repair.get("cleaned_crop_path"):
+            return repair
+    return None
 
 
 def _bt_cleanup_payload(
@@ -207,12 +305,18 @@ def _gpt_replace_payload(
             _image_size(context["input_path"]),
             run_dir / "gpt_image2_replace_normalized" / f"{_safe_name(record_id)}.png",
         )
-        target_crop = _crop_gpt_target(
+        context_replacement = _write_context_replacement_crop(
+            context["input_path"],
             normalized["normalized_output_path"],
+            context["mask_path"],
+            run_dir / "gpt_image2_replace_context_crop" / f"{_safe_name(record_id)}.png",
+        )
+        target_crop = _crop_gpt_target(
+            context_replacement["context_replacement_crop_path"],
             context["local_target_bbox"],
             run_dir / "gpt_image2_replace_target_crop" / f"{_safe_name(record_id)}.png",
         )
-        return {"request": summary, **response, **normalized, **target_crop}
+        return {"request": summary, **response, **normalized, **context_replacement, **target_crop}
     except Exception as exc:
         return {"status": "failed", "request": summary, "failure_reason": f"{type(exc).__name__}:{str(exc)[:500]}"}
 
@@ -319,6 +423,7 @@ def _write_report(
         "## Artifacts",
         "",
         "- `gpt-replace-results.jsonl`",
+        "- `cleanup-results.jsonl`",
         f"- Grid: `{grid_path}`",
         "- `gpt_replace_input/*.png`",
         "- `gpt_replace_mask/*.png`",
@@ -448,6 +553,34 @@ def _crop_gpt_target(
     with Image.open(image_path) as image:
         image.convert("RGB").crop(tuple(int(v) for v in bbox)).save(output)
     return {"target_crop_path": str(output)}
+
+
+def _write_context_replacement_crop(
+    original_context_path: str | Path,
+    edited_context_path: str | Path,
+    mask_path: str | Path,
+    output_path: str | Path,
+) -> dict:
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with Image.open(original_context_path) as original_image, Image.open(edited_context_path) as edited_image:
+        original = original_image.convert("RGB")
+        edited = edited_image.convert("RGB").resize(original.size)
+    with Image.open(mask_path) as mask_image:
+        editable_alpha = ImageChops.invert(mask_image.convert("RGBA").getchannel("A")).resize(original.size)
+    composed = original.copy()
+    composed.paste(edited, (0, 0), editable_alpha)
+    composed.save(output)
+    return {"context_replacement_crop_path": str(output)}
+
+
+def _save_before_after_images(before: Image.Image, after: Image.Image, output_path: str | Path) -> None:
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    canvas = Image.new("RGB", (before.width + after.width, max(before.height, after.height)), "white")
+    canvas.paste(before.convert("RGB"), (0, 0))
+    canvas.paste(after.convert("RGB"), (before.width, 0))
+    canvas.save(output)
 
 
 def _expand_bbox(

@@ -664,6 +664,8 @@ def test_run_phase7_preview_does_not_require_or_overlay_layout_for_gpt_direct_re
     assert rows[0]["status"] == "page_preview_generated"
     assert rows[0]["records"][0]["layout_preview_path"] == ""
     assert rows[0]["records"][0]["text_overlay_required"] is False
+    assert rows[0]["records"][0]["replacement_method"] == "gpt_image2_masked_edit"
+    assert rows[0]["records"][0]["effective_crop_path"] == str(replacement_path)
     with Image.open(rows[0]["preview"]["page_preview_path"]).convert("RGB") as preview:
         assert preview.getpixel((50, 30)) == (255, 0, 0)
         assert preview.getpixel((60, 45)) == (0, 0, 255)
@@ -782,6 +784,8 @@ def test_run_phase7_preview_uses_cleaned_crop_when_gpt_replacement_quality_fails
     assert record["cleanup_method"] == "bubble_fill"
     assert record["cleanup_crop_path"] == str(cleaned_path)
     assert record["text_overlay_required"] is True
+    assert "replacement_method" not in record
+    assert record["effective_crop_path"] == str(cleaned_path)
     with Image.open(rows[0]["preview"]["page_preview_path"]).convert("RGB") as preview:
         assert preview.getpixel((50, 30)) == (255, 255, 255)
 

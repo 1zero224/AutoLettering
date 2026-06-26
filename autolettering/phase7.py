@@ -126,6 +126,8 @@ def _preview_record(detection: dict, cleanup: dict, layout: dict | None, effecti
         "cleanup_mask_path": _cleanup_mask_path(cleanup_payload),
         "layout_preview_path": layout_payload.get("preview_path", ""),
         "text_overlay_required": text_overlay_required,
+        "replacement_method": cleanup_payload.get("replacement_method"),
+        "effective_crop_path": _cleanup_crop_path(cleanup_payload),
     }
     record.update(_preview_provenance(cleanup, cleanup_payload))
     if cleanup_payload.get("gpt_replacement_quality") is not None:
@@ -204,6 +206,8 @@ def _record_summary(record: dict) -> dict:
             "fallback_locator",
             "fallback_locator_validation",
             "gpt_image2_edit_status",
+            "replacement_method",
+            "effective_crop_path",
         ),
     )
     if record.get("gpt_replacement_quality") is not None:

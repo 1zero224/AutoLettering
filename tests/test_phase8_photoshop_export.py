@@ -738,6 +738,185 @@ def test_run_phase8_photoshop_export_uses_phase7_manifest_for_repaired_page_with
     assert "- Expected page-level repaired image layers: 1" in checklist
 
 
+def test_run_phase8_photoshop_export_preserves_phase7_gpt_direct_replacement_provenance(tmp_path: Path):
+    image_path = tmp_path / "page.png"
+    Image.new("RGB", (120, 160), "white").save(image_path)
+    repaired_page = tmp_path / "cleaned-page.png"
+    replacement_path = tmp_path / "gpt-replacement.png"
+    source_mask_path = tmp_path / "text-mask.png"
+    Image.new("RGB", (120, 160), "gray").save(repaired_page)
+    Image.new("RGB", (70, 70), "gray").save(replacement_path)
+    Image.new("L", (70, 70), 255).save(source_mask_path)
+    detection_run = _mkdir(tmp_path / "phase2")
+    font_run = _mkdir(tmp_path / "phase3")
+    layout_run = _mkdir(tmp_path / "phase4")
+    cleanup_run = _mkdir(tmp_path / "phase6")
+    preview_run = _mkdir(tmp_path / "phase7")
+    _write_jsonl(detection_run / "detections.jsonl", [_detection_payload(image_path)])
+    _write_jsonl(font_run / "font-selections.jsonl", [_font_payload(tmp_path / "font.ttf")])
+    _write_jsonl(layout_run / "layout-results.jsonl", [_layout_payload()])
+    _write_jsonl(cleanup_run / "cleanup-results.jsonl", [_cleanup_payload(tmp_path / "local.png", replacement_path)])
+    (preview_run / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "autolettering.phase7.preview.v1",
+                "pages": [
+                    {
+                        "image_name": "page.png",
+                        "original_page_path": str(image_path),
+                        "cleaned_page_path": str(repaired_page),
+                        "record_count": 1,
+                        "records": [
+                            {
+                                "record_id": "page.png#1",
+                                "bbox": [10, 20, 80, 90],
+                                "cleanup_method": "gpt_image2_masked_edit",
+                                "replacement_method": "gpt_image2_masked_edit",
+                                "effective_crop_path": str(replacement_path),
+                                "route": "gpt_image2_text_pixel_masked_edit",
+                                "text_region_source": "phase6_nonbubble_gpt_replace_text_pixels",
+                                "source_mask_path": str(source_mask_path),
+                                "gpt_image2_edit_status": "ok",
+                                "text_overlay_required": False,
+                            }
+                        ],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    run_dir = run_phase8_photoshop_export(
+        detection_run,
+        font_run,
+        layout_run,
+        cleanup_run,
+        tmp_path / "outputs",
+        sample_limit=1,
+        preview_run_dir=preview_run,
+    )
+
+    manifest = json.loads((run_dir / "photoshop-manifest.json").read_text(encoding="utf-8"))
+    page = manifest["pages"][0]
+    assert manifest["summary"] == {"record_count": 0, "page_count": 1}
+    assert page["repaired_image_path"] == str(repaired_page)
+    assert page["layers"] == []
+    assert page["repair_sources"] == [
+        {
+            "record_id": "page.png#1",
+            "bbox_xyxy": [10, 20, 80, 90],
+            "cleanup_method": "gpt_image2_masked_edit",
+            "replacement_method": "gpt_image2_masked_edit",
+            "effective_method": "gpt_image2_masked_edit",
+            "effective_crop_path": str(replacement_path),
+            "route": "gpt_image2_text_pixel_masked_edit",
+            "text_region_source": "phase6_nonbubble_gpt_replace_text_pixels",
+            "source_mask_path": str(source_mask_path),
+            "fallback_locator": None,
+            "fallback_locator_validation": None,
+            "gpt_image2_edit_status": "ok",
+            "text_overlay_required": False,
+        }
+    ]
+    report = (run_dir / "reports" / "phase8-report.md").read_text(encoding="utf-8")
+    assert "`gpt_image2_masked_edit=1`" in report
+    checklist = (run_dir / "reports" / "photoshop-validation-checklist.md").read_text(encoding="utf-8")
+    assert "- Expected editable text layers: 0" in checklist
+    assert "- Expected page-level repaired image layers: 1" in checklist
+
+
+def test_run_phase8_photoshop_export_uses_phase7_rejected_gpt_fallback_provenance(tmp_path: Path):
+    image_path = tmp_path / "page.png"
+    Image.new("RGB", (120, 160), "white").save(image_path)
+    repaired_page = tmp_path / "cleaned-page.png"
+    cleaned_path = tmp_path / "cleaned-crop.png"
+    bad_replacement_path = tmp_path / "bad-gpt-replacement.png"
+    Image.new("RGB", (120, 160), "gray").save(repaired_page)
+    Image.new("RGB", (70, 70), "white").save(cleaned_path)
+    Image.new("RGB", (70, 70), "red").save(bad_replacement_path)
+    detection_run = _mkdir(tmp_path / "phase2")
+    font_run = _mkdir(tmp_path / "phase3")
+    layout_run = _mkdir(tmp_path / "phase4")
+    cleanup_run = _mkdir(tmp_path / "phase6")
+    preview_run = _mkdir(tmp_path / "phase7")
+    quality_run = tmp_path / "phase6-replacement-quality"
+    _write_jsonl(detection_run / "detections.jsonl", [_detection_payload(image_path)])
+    _write_jsonl(font_run / "font-selections.jsonl", [_font_payload(tmp_path / "font.ttf")])
+    _write_jsonl(layout_run / "layout-results.jsonl", [_layout_payload()])
+    _write_jsonl(cleanup_run / "cleanup-results.jsonl", [_cleanup_payload(cleaned_path, bad_replacement_path)])
+    _write_replacement_quality(quality_run, "page.png#1", usable=False, exact_text_correct=False)
+    (preview_run / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "autolettering.phase7.preview.v1",
+                "pages": [
+                    {
+                        "image_name": "page.png",
+                        "original_page_path": str(image_path),
+                        "cleaned_page_path": str(repaired_page),
+                        "record_count": 1,
+                        "records": [
+                            {
+                                "record_id": "page.png#1",
+                                "bbox": [10, 20, 80, 90],
+                                "cleanup_method": "local_diffusion_inpaint",
+                                "cleanup_crop_path": str(cleaned_path),
+                                "effective_crop_path": str(cleaned_path),
+                                "text_overlay_required": True,
+                                "gpt_replacement_quality": {
+                                    "accepted": False,
+                                    "failure_reason": "quality_rejected",
+                                },
+                            }
+                        ],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    run_dir = run_phase8_photoshop_export(
+        detection_run,
+        font_run,
+        layout_run,
+        cleanup_run,
+        tmp_path / "outputs",
+        sample_limit=1,
+        preview_run_dir=preview_run,
+        phase6_gpt_quality_run_dir=quality_run,
+    )
+
+    manifest = json.loads((run_dir / "photoshop-manifest.json").read_text(encoding="utf-8"))
+    page = manifest["pages"][0]
+    assert page["repaired_image_path"] == str(repaired_page)
+    assert page["layers"][0]["cleanup"]["effective_crop_path"] == str(cleaned_path)
+    assert page["repair_sources"] == [
+        {
+            "record_id": "page.png#1",
+            "bbox_xyxy": [10, 20, 80, 90],
+            "cleanup_method": "local_diffusion_inpaint",
+            "replacement_method": None,
+            "effective_method": "local_diffusion_inpaint",
+            "effective_crop_path": str(cleaned_path),
+            "route": None,
+            "text_region_source": None,
+            "source_mask_path": None,
+            "fallback_locator": None,
+            "fallback_locator_validation": None,
+            "gpt_image2_edit_status": None,
+            "text_overlay_required": True,
+            "gpt_replacement_quality": {
+                "accepted": False,
+                "failure_reason": "quality_rejected",
+            },
+        }
+    ]
+
+
 def test_run_phase8_photoshop_export_names_text_layers_sequentially_per_page(tmp_path: Path):
     image_path = tmp_path / "page.png"
     Image.new("RGB", (120, 160), "white").save(image_path)
