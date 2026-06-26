@@ -56,7 +56,7 @@ def load_pipeline_registry_entry(
     if entry_name not in entries:
         available = ", ".join(sorted(entries))
         raise KeyError(f"pipeline_registry_entry_not_found:{entry_name}; available={available}")
-    entry = dict(entries[entry_name])
+    entry = _resolve_registry_entry(entries, entry_name)
     entry.setdefault("schema_version", payload.get("schema_version"))
     base_dir = (path.parent / payload.get("base_dir", ".")).resolve()
     normalized = _normalize_entry_paths(entry, base_dir)
@@ -82,6 +82,35 @@ def validate_pipeline_registry_entry(entry: dict[str, Any]) -> None:
     if missing:
         details = "\n".join(f"- {item}" for item in missing)
         raise PipelineRegistryValidationError(f"pipeline_registry_missing_artifacts:\n{details}")
+
+
+def _resolve_registry_entry(
+    entries: dict[str, Any],
+    entry_name: str,
+    stack: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    if entry_name in stack:
+        chain = " -> ".join((*stack, entry_name))
+        raise ValueError(f"pipeline_registry_inheritance_cycle:{chain}")
+    raw = dict(entries[entry_name])
+    parent_name = raw.pop("extends", None)
+    append = raw.pop("append", {})
+    if parent_name:
+        if parent_name not in entries:
+            raise KeyError(f"pipeline_registry_parent_not_found:{parent_name}")
+        merged = _resolve_registry_entry(entries, parent_name, (*stack, entry_name))
+        merged.update(raw)
+    else:
+        merged = raw
+    _append_entry_fields(merged, append)
+    return merged
+
+
+def _append_entry_fields(entry: dict[str, Any], append: dict[str, Any]) -> None:
+    for field, value in append.items():
+        if field not in RUN_DIR_FIELDS:
+            raise ValueError(f"pipeline_registry_append_field_not_supported:{field}")
+        entry[field] = [*_as_list(entry.get(field)), *_as_list(value)]
 
 
 def _normalize_entry_paths(entry: dict[str, Any], base_dir: Path) -> dict[str, Any]:

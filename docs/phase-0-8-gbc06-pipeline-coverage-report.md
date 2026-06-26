@@ -183,6 +183,15 @@ the next experiment queue:
 python experiments/pipeline_coverage_report.py --registry-file docs/pipeline-runs.gbc06.json --registry-entry phase0-8-gbc06-v20-gbc06-33-complete --output-root outputs/runs --run-id phase0-8-gbc06-pipeline-coverage-v21-next-experiments --next-limit 12
 ```
 
+Current v22 keeps v20 as the accepted complete baseline, uses registry
+inheritance to append one new CTA detection run, and promotes
+`GBC06_03.png#1-#3` into the detection base without copying the long v20 run
+list:
+
+```powershell
+python experiments/pipeline_coverage_report.py --registry-file docs/pipeline-runs.gbc06.json --registry-entry phase0-8-gbc06-v22-gbc06-03-detection --output-root outputs/runs --next-limit 12
+```
+
 ## Generated Artifacts
 
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage/pipeline-coverage.json`
@@ -225,6 +234,13 @@ python experiments/pipeline_coverage_report.py --registry-file docs/pipeline-run
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v20-gbc06-33-complete/reports/pipeline-coverage-report.md`
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v21-next-experiments/pipeline-coverage.json`
 - `outputs/runs/phase0-8-gbc06-pipeline-coverage-v21-next-experiments/reports/pipeline-coverage-report.md`
+- `outputs/runs/phase2-gbc06-03-batch-1-3-cta-detection-v1/detections.jsonl`
+- `outputs/runs/phase2-gbc06-03-batch-1-3-cta-detection-v1/debug/detection/GBC06_03-1.png`
+- `outputs/runs/phase2-gbc06-03-batch-1-3-cta-detection-v1/debug/detection/GBC06_03-2.png`
+- `outputs/runs/phase2-gbc06-03-batch-1-3-cta-detection-v1/debug/detection/GBC06_03-3.png`
+- `outputs/runs/phase2-gbc06-03-batch-1-3-cta-detection-v1/debug/detection/GBC06_03-1-3-grid.png`
+- `outputs/runs/phase0-8-gbc06-pipeline-coverage-v22-gbc06-03-detection/pipeline-coverage.json`
+- `outputs/runs/phase0-8-gbc06-pipeline-coverage-v22-gbc06-03-detection/reports/pipeline-coverage-report.md`
 
 `outputs/` remains ignored by Git. The source-backed summary below records the key numbers so the experiment is traceable in the repository.
 
@@ -233,22 +249,22 @@ python experiments/pipeline_coverage_report.py --registry-file docs/pipeline-run
 Base stage: `phase2_detection`
 
 ```text
-base_record_count=35
+base_record_count=38
 complete_record_count=35
-incomplete_record_count=0
+incomplete_record_count=3
 ```
 
 Stage counts:
 
 ```text
-phase1_labelplus       covered=35 missing=0
-phase2_detection       covered=35 missing=0
-phase3_font_selection  covered=35 missing=0
-phase4_layout          covered=35 missing=0
-phase5_angle           covered=35 missing=0
-phase6_cleanup         covered=35 missing=0
-phase7_preview         covered=35 missing=0
-phase8_export          covered=35 missing=0
+phase1_labelplus       covered=38 missing=0
+phase2_detection       covered=38 missing=0
+phase3_font_selection  covered=35 missing=3
+phase4_layout          covered=35 missing=3
+phase5_angle           covered=35 missing=3
+phase6_cleanup         covered=35 missing=3
+phase7_preview         covered=35 missing=3
+phase8_export          covered=35 missing=3
 ```
 
 Quality audits:
@@ -261,7 +277,7 @@ phase8_export audits=6 passed=6/6 records=9 vertical_top_layers=8 missing_anchor
 Group coverage:
 
 ```text
-框内: base=30 complete=30
+框内: base=33 complete=30
 框外: base=5  complete=5
 ```
 
@@ -329,6 +345,25 @@ next_experiments[1]=GBC06_03.png#1   action=run_cta_detection  stage=phase2_dete
 next_experiments[2]=GBC06_03.png#2   action=run_cta_detection  stage=phase2_detection  reason=phase1_pending_detection
 ```
 
+The v22 report adds a real CTA detection batch for `GBC06_03.png#1-#3`.
+All three records have unique CTA/CTD mask matches within the 20px threshold:
+
+```text
+GBC06_03.png#1  bbox=[1207,236,1244,425]  distance_px=8.062   translated_text=你要去哪里？
+GBC06_03.png#2  bbox=[657,237,693,367]    distance_px=10.198  translated_text=我要回家
+GBC06_03.png#3  bbox=[1205,768,1243,891]  distance_px=14.000  translated_text=差不多得了
+```
+
+The three newly detected records are now the first structural gaps in the
+coverage report:
+
+```text
+next_records[0]=GBC06_03.png#1  first_missing_stage=phase3_font_selection
+next_records[1]=GBC06_03.png#2  first_missing_stage=phase3_font_selection
+next_records[2]=GBC06_03.png#3  first_missing_stage=phase3_font_selection
+phase1_pending_detection_count=142
+```
+
 The first `next-limit=12` Phase 1 records missing detection in v17 are:
 
 ```text
@@ -359,11 +394,13 @@ The two current authoritative artifacts used for that selection, `phase1-gbc06-s
 
 ## Interpretation
 
-The current detection prototype has produced 35 candidate records across the
-core `GBC06_01.png`/`GBC06_02.png` batches plus the diverse expansion records.
-The v20 coverage report is generated from `docs/pipeline-runs.gbc06.json`, can
-merge multiple detection run directories, counts all 35 records as complete
-across Phase 1 through Phase 8, and additionally treats Phase 7 MIMO preview
+The current detection prototype has produced 38 candidate records across the
+core `GBC06_01.png`/`GBC06_02.png` batches, the diverse expansion records, and
+the first three `GBC06_03.png` CTA matches. The v20 registry entry remains the
+accepted 35-record complete baseline. The v22 registry entry extends that
+baseline and appends `phase2-gbc06-03-batch-1-3-cta-detection-v1`, so coverage
+now reports 35 complete records and 3 newly detected records waiting for Phase 3
+font selection. The coverage report additionally treats Phase 7 MIMO preview
 evaluation failures plus Phase 8 export audit failures as quality issues that
 make affected records incomplete.
 
@@ -506,6 +543,22 @@ next_experiments[0].record_id=GBC06_02.png#14
 next_experiments[0].action=run_cta_detection
 ```
 
+Fresh v22 registry extension coverage generation:
+
+```powershell
+python experiments/pipeline_coverage_report.py --registry-file docs/pipeline-runs.gbc06.json --registry-entry phase0-8-gbc06-v22-gbc06-03-detection --output-root outputs/runs --next-limit 12
+```
+
+Observed result:
+
+```text
+outputs\runs\phase0-8-gbc06-pipeline-coverage-v22-gbc06-03-detection
+base_record_count=38 complete_record_count=35 incomplete_record_count=3
+phase1_pending_detection_count=142
+next_records[0].record_id=GBC06_03.png#1
+next_records[0].first_missing_stage=phase3_font_selection
+```
+
 Fresh targeted verification for pipeline coverage, Phase 6/7/8 quality
 aggregation, and registry CLI behavior:
 
@@ -516,7 +569,7 @@ python -m pytest tests/test_pipeline_coverage.py tests/test_pipeline_quality_cov
 Observed result:
 
 ```text
-23 passed
+25 passed
 ```
 
 Full regression:
@@ -528,7 +581,7 @@ python -m pytest -q
 Observed result:
 
 ```text
-332 passed in 51.86s
+368 passed in 88.41s (0:01:28)
 ```
 
 Diff hygiene:

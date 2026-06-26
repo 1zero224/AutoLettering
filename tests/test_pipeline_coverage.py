@@ -331,6 +331,47 @@ def test_load_pipeline_registry_entry_normalizes_paths(tmp_path: Path):
     assert entry["next_limit"] == 4
 
 
+def test_load_pipeline_registry_entry_extends_parent_and_appends_run_dirs(tmp_path: Path):
+    registry = tmp_path / "registry.json"
+    registry.write_text(
+        json.dumps(
+            {
+                "schema_version": "autolettering.pipeline_registry.v1",
+                "base_dir": ".",
+                "entries": {
+                    "base": {
+                        "run_id": "coverage-base",
+                        "phase1_run_dir": "phase1",
+                        "detection_run_dir": ["phase2a"],
+                        "font_selection_run_dir": ["phase3"],
+                        "cleanup_run_dirs": ["phase6a"],
+                        "next_limit": 4,
+                    },
+                    "expanded": {
+                        "extends": "base",
+                        "run_id": "coverage-expanded",
+                        "next_limit": 8,
+                        "append": {
+                            "detection_run_dir": ["phase2b"],
+                            "cleanup_run_dirs": ["phase6b"],
+                        },
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    entry = load_pipeline_registry_entry(registry, "expanded")
+
+    assert entry["run_id"] == "coverage-expanded"
+    assert entry["phase1_run_dir"] == tmp_path / "phase1"
+    assert entry["detection_run_dir"] == [tmp_path / "phase2a", tmp_path / "phase2b"]
+    assert entry["font_selection_run_dir"] == [tmp_path / "phase3"]
+    assert entry["cleanup_run_dirs"] == [tmp_path / "phase6a", tmp_path / "phase6b"]
+    assert entry["next_limit"] == 8
+
+
 def test_load_pipeline_registry_entry_validates_required_artifacts(tmp_path: Path):
     phase1 = tmp_path / "phase1"
     phase2 = tmp_path / "phase2"
@@ -409,6 +450,90 @@ def test_pipeline_coverage_cli_accepts_registry_entry(tmp_path: Path, monkeypatc
     payload = json.loads((output_root / "registry-coverage" / "pipeline-coverage.json").read_text(encoding="utf-8"))
     assert payload["summary"]["base_record_count"] == 1
     assert payload["stages"]["phase3_font_selection"]["covered_record_ids"] == ["r1"]
+
+
+def test_pipeline_coverage_cli_extends_registry_and_reports_new_detection_stage_gaps(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+):
+    phase1 = tmp_path / "phase1"
+    phase2a = tmp_path / "phase2a"
+    phase2b = tmp_path / "phase2b"
+    phase3 = tmp_path / "phase3"
+    output_root = tmp_path / "outputs"
+    registry = tmp_path / "registry.json"
+    _write_phase1_manifest(phase1 / "manifest.json")
+    _write_jsonl(phase2a / "detections.jsonl", [_row("r1", "ok")])
+    _write_jsonl(phase2b / "detections.jsonl", [_row("r2", "ok"), _row("r3", "ok")])
+    _write_jsonl(phase3 / "font-selections.jsonl", [_row("r1", "selected")])
+    registry.write_text(
+        json.dumps(
+            {
+                "schema_version": "autolettering.pipeline_registry.v1",
+                "base_dir": ".",
+                "entries": {
+                    "base": {
+                        "run_id": "registry-base",
+                        "phase1_run_dir": "phase1",
+                        "detection_run_dir": ["phase2a"],
+                        "font_selection_run_dir": ["phase3"],
+                    },
+                    "expanded": {
+                        "extends": "base",
+                        "run_id": "registry-expanded",
+                        "next_limit": 3,
+                        "append": {"detection_run_dir": ["phase2b"]},
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "pipeline_coverage_report.py",
+            "--registry-file",
+            str(registry),
+            "--registry-entry",
+            "expanded",
+            "--output-root",
+            str(output_root),
+        ],
+    )
+
+    pipeline_coverage_report.main()
+
+    captured = capsys.readouterr()
+    assert "registry-expanded" in captured.out
+    payload = json.loads((output_root / "registry-expanded" / "pipeline-coverage.json").read_text(encoding="utf-8"))
+    assert payload["summary"]["base_record_count"] == 3
+    assert payload["summary"]["complete_record_count"] == 1
+    assert payload["next_records"] == [
+        {"record_id": "r2", "group_name": "框外", "first_missing_stage": "phase3_font_selection"},
+        {"record_id": "r3", "group_name": "框内", "first_missing_stage": "phase3_font_selection"},
+    ]
+    assert payload["next_experiments"][:2] == [
+        {
+            "record_id": "r2",
+            "group_name": "框外",
+            "image_name": "page1.png",
+            "kind": "stage_gap",
+            "recommended_stage": "phase3_font_selection",
+            "reason": "phase3_font_selection",
+            "action": "run_font_selection",
+        },
+        {
+            "record_id": "r3",
+            "group_name": "框内",
+            "image_name": "page2.png",
+            "kind": "stage_gap",
+            "recommended_stage": "phase3_font_selection",
+            "reason": "phase3_font_selection",
+            "action": "run_font_selection",
+        },
+    ]
 
 
 def _row(record_id: str, status: str) -> dict:

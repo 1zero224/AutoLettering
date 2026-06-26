@@ -131,6 +131,16 @@
         "outputs/runs/phase8-gbc06-29-2-cta-lama-large-title-audit-v3",
         "outputs/runs/phase8-gbc06-33-1-context-font-export-audit-v1"
       ]
+    },
+    "phase0-8-gbc06-v22-gbc06-03-detection": {
+      "extends": "phase0-8-gbc06-v20-gbc06-33-complete",
+      "run_id": "phase0-8-gbc06-pipeline-coverage-v22-gbc06-03-detection",
+      "next_limit": 12,
+      "append": {
+        "detection_run_dir": [
+          "outputs/runs/phase2-gbc06-03-batch-1-3-cta-detection-v1"
+        ]
+      }
     }
   }
 }
