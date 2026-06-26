@@ -67,8 +67,10 @@ def _cleanup_rows(rows: list[dict]) -> list[dict]:
     cleanup_rows: list[dict] = []
     for row in rows:
         replacement = row.get("segmented_gpt_replace") or {}
-        target_crop_path = replacement.get("target_crop_path")
-        ok = replacement.get("status") == "ok" and bool(target_crop_path)
+        context = row.get("context") or {}
+        cleaned_crop_path = context.get("input_path")
+        replacement_crop_path = replacement.get("composed_context_path")
+        ok = replacement.get("status") == "ok" and bool(replacement_crop_path)
         cleanup_rows.append(
             {
                 "record_id": row["record_id"],
@@ -77,15 +79,15 @@ def _cleanup_rows(rows: list[dict]) -> list[dict]:
                 "status": "cleaned" if ok else "failed",
                 "cleanup": {
                     "method": replacement.get("method") or "segmented_gpt_image2_masked_edit",
-                    "bbox": row.get("bbox"),
+                    "bbox": context.get("context_bbox") or row.get("bbox"),
                     "text_bbox": row.get("bbox"),
                     "mask_bbox": row.get("bbox"),
                     "layout_text_bbox": row.get("bbox"),
-                    "cleaned_crop_path": target_crop_path,
-                    "before_after_path": target_crop_path,
-                    "text_overlay_required": False,
+                    "cleaned_crop_path": cleaned_crop_path,
+                    "before_after_path": replacement_crop_path if ok else cleaned_crop_path,
+                    "text_overlay_required": not ok,
                     "replacement_method": "gpt_image2_masked_edit" if ok else None,
-                    "replacement_crop_path": target_crop_path if ok else None,
+                    "replacement_crop_path": replacement_crop_path if ok else None,
                 },
                 "segmented_gpt_replace": replacement,
             }

@@ -53,10 +53,19 @@ def test_run_phase6_segmented_gpt_replace_splits_tall_vertical_target(tmp_path: 
     assert manifest["mimo"]["quality"]["segmented_gpt_status"] == "acceptable"
     cleanup_rows = _read_jsonl(run_dir / "cleanup-results.jsonl")
     assert cleanup_rows[0]["status"] == "cleaned"
-    assert cleanup_rows[0]["cleanup"]["method"] == "segmented_gpt_image2_masked_edit"
-    assert cleanup_rows[0]["cleanup"]["replacement_method"] == "gpt_image2_masked_edit"
-    assert cleanup_rows[0]["cleanup"]["replacement_crop_path"] == row["segmented_gpt_replace"]["target_crop_path"]
-    assert cleanup_rows[0]["cleanup"]["text_overlay_required"] is False
+    cleanup = cleanup_rows[0]["cleanup"]
+    assert cleanup["method"] == "segmented_gpt_image2_masked_edit"
+    assert cleanup["replacement_method"] == "gpt_image2_masked_edit"
+    assert cleanup["cleaned_crop_path"] == row["context"]["input_path"]
+    assert cleanup["replacement_crop_path"] == row["segmented_gpt_replace"]["composed_context_path"]
+    assert cleanup["cleaned_crop_path"] != cleanup["replacement_crop_path"]
+    assert cleanup["bbox"] == [80, 22, 140, 878]
+    assert cleanup["text_bbox"] == [88, 30, 132, 870]
+    assert cleanup["mask_bbox"] == [88, 30, 132, 870]
+    assert cleanup["layout_text_bbox"] == [88, 30, 132, 870]
+    assert cleanup["text_overlay_required"] is False
+    with Image.open(cleanup["cleaned_crop_path"]) as cleaned, Image.open(cleanup["replacement_crop_path"]) as replacement:
+        assert cleaned.size == replacement.size == (60, 856)
 
 
 def test_segmented_gpt_prompt_rejects_unjustified_black_outline():
@@ -66,6 +75,33 @@ def test_segmented_gpt_prompt_rejects_unjustified_black_outline():
     assert "Do not add a black outline" in prompt
     assert "unless the original local segment already has it" in prompt
     assert "white or pale text on a colored banner" in prompt
+
+
+def test_run_phase6_segmented_gpt_replace_dry_run_keeps_background_baseline(tmp_path: Path):
+    image_path = _write_tall_banner(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    _write_detection(detection_run / "detections.jsonl", image_path)
+
+    run_dir = run_phase6_segmented_gpt_replace(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="segmented-gpt-dry-run-test",
+        sample_limit=1,
+        call_gpt_image=False,
+        context_padding=8,
+        rect_mask_expand_px=1,
+        max_segment_chars=8,
+    )
+
+    row = _read_jsonl(run_dir / "segmented-gpt-replace-results.jsonl")[0]
+    cleanup_row = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]
+    cleanup = cleanup_row["cleanup"]
+    assert row["segmented_gpt_replace"]["status"] == "failed"
+    assert cleanup_row["status"] == "failed"
+    assert cleanup["cleaned_crop_path"] == row["context"]["input_path"]
+    assert cleanup["replacement_crop_path"] is None
+    assert cleanup["replacement_method"] is None
+    assert cleanup["text_overlay_required"] is True
 
 
 class FakeGptClient:
