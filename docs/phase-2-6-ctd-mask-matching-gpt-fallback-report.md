@@ -565,7 +565,7 @@ Important artifacts:
 Current conclusion for this sample:
 
 - The fallback locator path is now usable enough to produce a tight target region for manual inspection and controlled GPT calls.
-- `gpt-image-2` direct replacement is still not usable for this sound-effect sample. Across real calls it either generates the wrong Chinese characters or edits the wrong/too-low region when the locator is unstable.
+- `gpt-image-2` direct replacement was not usable in the v3/v4/v5 trial set because those runs either generated the wrong Chinese characters or edited the wrong/too-low region when the locator was unstable. A later `v3-sfx-recovery` run, recorded below, is the first accepted GPT direct-replacement result for this sample.
 - MIMO replacement evaluation is useful as evidence but not sufficient as an automatic acceptance gate. It correctly rejected v3/v5, but falsely accepted v4, so manual review or an additional OCR/shape check is still required before consuming GPT direct replacements.
 
 ### 2026-06-26 Follow-up: GPT Replacement Quality Gate For Phase 7/8 Consumption
@@ -769,6 +769,91 @@ Downstream result:
 - Phase 8 set `phase8_effective_method=bt_lama_large_inpaint` and
   `phase8_replacement_method=null`, so dry-run GPT output is not represented as
   a completed replacement.
+
+### 2026-06-27 Follow-up: `GBC06_02.png#14` GPT v3 SFX Recovery Accepted
+
+The latest user direction changed the fallback bbox policy: do not over-optimize
+the crop to exclude passerby/background content. The box only needs to contain
+the intended original text; `gpt-image-2` receives a text-pixel mask and a prompt
+that says to modify only the original Japanese lettering.
+
+Two narrow fixes were required before calling GPT again:
+
+- MIMO validator rejections that only object to Japanese sound-effect semantics
+  can be overridden when the visible original text is kana-like SFX, the bbox is
+  not blank, and the reasoning says the bbox covers the sound effect.
+- Anchor recovery now tries the light-background sound-effect band before the
+  dark vertical-column recovery when the translation or MIMO reasoning indicates
+  an SFX target. This prevents a nearby dark vertical decoy from stealing the
+  bbox while preserving dark-column recovery for ordinary vertical non-bubble
+  text.
+
+Real Phase 6 command:
+
+```powershell
+python experiments/phase6_nonbubble_cleanup.py --detection-run-dir outputs/runs/phase2-gbc06-02-14-cta-detection-v1 --output-root outputs/runs --run-id phase6-gbc06-02-14-fallback-gpt-image2-v3-sfx-recovery --sample-limit 1 --record-id "GBC06_02.png#14" --call-gpt-image --fallback-gpt-mask-shape text_pixels --fallback-edit-padding-px 16 --fallback-mask-expand-px 0
+```
+
+Output:
+
+- Run directory: `outputs/runs/phase6-gbc06-02-14-fallback-gpt-image2-v3-sfx-recovery`
+- Locator overlay: `debug/fallback_locator_overlays/GBC06-02-png-14.png`
+- Replacement grid: `visuals/fallback-replacement-grid.png`
+- GPT output: `gpt_image2/GBC06-02-png-14.png`
+- Normalized GPT output: `gpt_image2_normalized/GBC06-02-png-14.png`
+- Replacement crop: `fallback_replacement_crop/GBC06-02-png-14.png`
+
+Key result:
+
+- `status=cleaned`
+- `fallback_locator.local_bbox_xyxy=[38,398,652,496]`
+- `fallback_locator.refinement.method=recover_light_text_ink_band_near_labelplus_anchor`
+- `fallback_locator_validation.status=accepted`
+- `gpt_image2_edit.status=ok`
+- `cleanup.replacement_method=gpt_image2_masked_edit`
+- `text_overlay_required=false`
+
+MIMO replacement-quality command:
+
+```powershell
+python experiments/phase6_replacement_quality.py --cleanup-run-dir outputs/runs/phase6-gbc06-02-14-fallback-gpt-image2-v3-sfx-recovery --output-root outputs/runs --run-id phase6-gbc06-02-14-gpt-v3-sfx-recovery-quality --sample-limit 1 --record-id "GBC06_02.png#14"
+```
+
+MIMO result:
+
+- Run directory: `outputs/runs/phase6-gbc06-02-14-gpt-v3-sfx-recovery-quality`
+- Quality sheet: `debug/replacement_quality_sheets/GBC06-02-png-14.png`
+- `score=10`
+- `usable=true`
+- `exact_text_correct=true`
+- `simplified_chinese_correct=true`
+- `no_japanese_remaining=true`
+- `region_correct=true`
+- `style_consistent=true`
+- `outside_mask_preserved=true`
+- `issues=[]`
+
+Downstream Phase 7/8 quality-gate smoke command:
+
+```powershell
+python experiments/phase7_8_gpt_quality_gate_smoke.py --detection-run-dir outputs/runs/phase2-gbc06-02-14-cta-detection-v1 --cleanup-run-dir outputs/runs/phase6-gbc06-02-14-fallback-gpt-image2-v3-sfx-recovery --phase6-gpt-quality-run-dir outputs/runs/phase6-gbc06-02-14-gpt-v3-sfx-recovery-quality --output-root outputs/runs --run-id phase7-8-gbc06-02-14-gpt-v3-sfx-quality-gate --sample-limit 1
+```
+
+Downstream result:
+
+- Run directory: `outputs/runs/phase7-8-gbc06-02-14-gpt-v3-sfx-quality-gate`
+- Evidence grid: `visuals/quality-gate-evidence-grid.png`
+- `gpt_quality_accepted=true`
+- Phase 7 used `fallback_replacement_crop/GBC06-02-png-14.png`
+- Phase 7 kept `phase7_text_overlay_required=false`
+- Phase 8 wrote no editable text layer for this record.
+- Phase 8 repair source uses `effective_method=gpt_image2_masked_edit` and
+  `effective_crop_path=outputs\runs\phase6-gbc06-02-14-fallback-gpt-image2-v3-sfx-recovery\fallback_replacement_crop\GBC06-02-png-14.png`
+
+Manual-review caveat: this is the first accepted direct GPT result for this SFX
+sample, but prior v4 showed a false-positive MIMO score. The compact quality
+sheet and evidence grid should remain part of manual review before treating the
+style/readability as final.
 
 ## Current Recommendation
 

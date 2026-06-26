@@ -1871,6 +1871,35 @@ def test_fallback_validation_normalizes_non_text_context_rejection_when_target_t
     assert validation["failure_reason"] is None
 
 
+def test_fallback_validation_accepts_japanese_sound_effect_when_rejected_only_by_sound_semantics(tmp_path: Path):
+    response = {
+        "raw_text": "{}",
+        "request": {"kind": "phase6_fallback_text_locator_validation"},
+        "response": {"status": "ok"},
+    }
+    payload = {
+        "semantic_correct": False,
+        "tight_enough": False,
+        "bbox_on_blank_area": False,
+        "bbox_targets_unrelated_text": True,
+        "visible_original_text": "スパスパスパ",
+        "recommendation": "reject",
+        "reasoning_summary": (
+            "The yellow bounding box targets the large 'スパスパスパ' sound effect. "
+            "The provided Chinese translation '啪嗒啪嗒啪嗒' corresponds to a different sound effect."
+        ),
+    }
+
+    validation = _fallback_validation_payload(payload, response, tmp_path / "validation.png")
+
+    assert validation["status"] == "accepted"
+    assert validation["semantic_correct"] is True
+    assert validation["recommendation"] == "accept"
+    assert validation["needs_tighter_edit_mask"] is True
+    assert validation["semantic_correct_overridden_from_sound_effect_context"] is True
+    assert validation["failure_reason"] is None
+
+
 def test_run_phase6_nonbubble_cleanup_fallback_does_not_call_gpt_when_semantic_validation_rejects(
     tmp_path: Path,
     monkeypatch,
@@ -2234,6 +2263,95 @@ def test_anchor_recovery_tightens_sparse_right_screentone_component(tmp_path: Pa
     assert recovered["local_bbox_xyxy"][2] <= 530
     assert recovered["refinement"]["method"] == "recover_light_text_ink_band_near_labelplus_anchor"
     assert recovered["refinement"]["right_trim_method"] == "trim_sparse_right_screentone_component"
+
+
+def test_anchor_recovery_prefers_light_sound_effect_band_for_invalid_sfx_locator(tmp_path: Path):
+    image_path = _write_light_sound_effect_panel(tmp_path / "page.png")
+    detection = {
+        "record_id": "page.png#2",
+        "translated_text": "啪嗒啪嗒啪嗒",
+        "fallback": {"context_labelplus_point_xy": [410, 472]},
+    }
+    locator = {
+        "status": "failed",
+        "failure_reason": "invalid_mimo_bbox:ValueError",
+        "raw_text": json.dumps(
+            {
+                "bbox_xyxy": [20, 543, 638, 737],
+                "bbox_percent_xyxy": [3.07, 83.28, 97.85, 113.04],
+                "confidence": 0.95,
+                "reasoning_summary": "The bbox encloses the Japanese sound effect text for 啪嗒啪嗒啪嗒.",
+            },
+            ensure_ascii=False,
+        ),
+        "retry_raw_text": json.dumps(
+            {
+                "bbox_xyxy": [18, 541, 573, 726],
+                "bbox_percent_xyxy": [2.76, 82.98, 87.88, 111.35],
+                "confidence": 0.95,
+                "reasoning_summary": "The bbox encloses the complete Japanese sound effect text.",
+            },
+            ensure_ascii=False,
+        ),
+    }
+    validation = {
+        "status": "rejected",
+        "failure_reason": "fallback_locator_semantic_rejected",
+    }
+
+    recovered = _recover_locator_from_labelplus_anchor(
+        detection,
+        image_path,
+        (0, 0, 660, 660),
+        locator,
+        validation,
+    )
+
+    assert recovered["status"] == "ok"
+    assert recovered["refinement"]["method"] == "recover_light_text_ink_band_near_labelplus_anchor"
+    assert recovered["local_bbox_xyxy"][1] < 450
+    assert recovered["local_bbox_xyxy"][3] < 540
+
+
+def test_anchor_recovery_prefers_sound_effect_band_over_dark_vertical_decoy(tmp_path: Path):
+    image_path = _write_light_sound_effect_panel_with_dark_vertical_decoy(tmp_path / "page.png")
+    detection = {
+        "record_id": "page.png#2",
+        "translated_text": "啪嗒啪嗒啪嗒",
+        "fallback": {"context_labelplus_point_xy": [410, 472]},
+    }
+    locator = {
+        "status": "failed",
+        "failure_reason": "invalid_mimo_bbox:ValueError",
+        "retry_raw_text": json.dumps(
+            {
+                "bbox_xyxy": [18, 541, 573, 726],
+                "bbox_percent_xyxy": [2.76, 82.98, 87.88, 111.35],
+                "confidence": 0.95,
+                "reasoning_summary": "The bbox encloses the complete Japanese sound effect text.",
+            },
+            ensure_ascii=False,
+        ),
+    }
+    validation = {
+        "status": "rejected",
+        "failure_reason": "fallback_locator_semantic_rejected",
+    }
+
+    recovered = _recover_locator_from_labelplus_anchor(
+        detection,
+        image_path,
+        (0, 0, 660, 660),
+        locator,
+        validation,
+    )
+
+    assert recovered["status"] == "ok"
+    assert recovered["refinement"]["method"] == "recover_light_text_ink_band_near_labelplus_anchor"
+    x1, y1, x2, y2 = recovered["local_bbox_xyxy"]
+    assert x2 - x1 > 240
+    assert y1 < 450
+    assert y2 < 540
 
 
 def test_anchor_recovery_caps_right_edge_before_panel_divider(tmp_path: Path):
@@ -3197,6 +3315,19 @@ def _write_light_sound_effect_panel_with_right_panel_divider(path: Path) -> Path
     for x in range(90, 620, 34):
         draw.line((x, 542, x - 42, 655), fill=(92, 92, 92), width=2)
     draw.arc((118, 520, 552, 1040), start=192, end=346, fill=(36, 36, 36), width=3)
+    image.save(path)
+    return path
+
+
+def _write_light_sound_effect_panel_with_dark_vertical_decoy(path: Path) -> Path:
+    image_path = _write_light_sound_effect_panel(path)
+    with Image.open(image_path) as source:
+        image = source.convert("RGB")
+    draw = ImageDraw.Draw(image)
+    for offset, y in enumerate(range(438, 548, 18)):
+        x = 402 + (offset % 2) * 8
+        draw.line((x, y, x, y + 12), fill=(8, 8, 8), width=4)
+        draw.line((x - 5, y + 6, x + 6, y + 6), fill=(8, 8, 8), width=2)
     image.save(path)
     return path
 

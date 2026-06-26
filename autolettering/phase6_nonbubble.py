@@ -757,11 +757,19 @@ def _recover_locator_from_labelplus_anchor(
     try:
         with Image.open(context_path) as image:
             rgb = image.convert("RGB")
-            recovered = _recover_dark_text_ink_column_near_anchor(rgb, anchor, tuple(local_bbox))
-            recovery_method = "recover_dark_text_ink_column_near_labelplus_anchor"
-            if recovered is None:
+            prefer_light_band = _anchor_recovery_prefers_light_sound_effect_band(detection, locator)
+            if prefer_light_band:
                 recovered = _recover_light_text_ink_band_near_anchor(rgb, anchor, tuple(local_bbox))
                 recovery_method = "recover_light_text_ink_band_near_labelplus_anchor"
+                if recovered is None:
+                    recovered = _recover_dark_text_ink_column_near_anchor(rgb, anchor, tuple(local_bbox))
+                    recovery_method = "recover_dark_text_ink_column_near_labelplus_anchor"
+            else:
+                recovered = _recover_dark_text_ink_column_near_anchor(rgb, anchor, tuple(local_bbox))
+                recovery_method = "recover_dark_text_ink_column_near_labelplus_anchor"
+                if recovered is None:
+                    recovered = _recover_light_text_ink_band_near_anchor(rgb, anchor, tuple(local_bbox))
+                    recovery_method = "recover_light_text_ink_band_near_labelplus_anchor"
     except (FileNotFoundError, OSError, ValueError):
         return {"status": "failed", "failure_reason": "anchor_recovery_image_unavailable"}
     if recovered is None:
@@ -786,6 +794,20 @@ def _recover_locator_from_labelplus_anchor(
         refinement["right_trim_method"] = right_trim_method
     result["refinement"] = refinement
     return result
+
+
+def _anchor_recovery_prefers_light_sound_effect_band(detection: dict, locator: dict) -> bool:
+    translated_text = str(detection.get("translated_text") or "")
+    if _looks_repeated_chinese_sound_effect_text(translated_text):
+        return True
+    locator_text_parts = [
+        locator.get("reasoning_summary"),
+        locator.get("raw_text"),
+        locator.get("retry_raw_text"),
+        locator.get("first_raw_text"),
+    ]
+    locator_text = " ".join(str(part or "") for part in locator_text_parts).lower()
+    return any(marker in locator_text for marker in ("sound effect", "onomatopoeia", "sfx"))
 
 
 def _recover_dark_text_locator_from_labelplus_anchor(
@@ -1444,7 +1466,14 @@ def _fallback_validation_payload(payload: dict, response: dict, validation_image
         visible_original_text=visible_original_text,
         reasoning_summary=reasoning_summary,
     )
-    if semantic_overridden:
+    sound_effect_overridden = _sound_effect_rejection_mentions_visible_target(
+        semantic_correct=semantic_correct,
+        bbox_on_blank_area=bbox_on_blank_area,
+        bbox_targets_unrelated_text=bbox_targets_unrelated_text,
+        visible_original_text=visible_original_text,
+        reasoning_summary=reasoning_summary,
+    )
+    if semantic_overridden or sound_effect_overridden:
         semantic_correct = True
         recommendation = "accept"
     hard_reject = semantic_correct is False or bbox_on_blank_area is True
@@ -1469,6 +1498,8 @@ def _fallback_validation_payload(payload: dict, response: dict, validation_image
     }
     if semantic_overridden:
         validation["semantic_correct_overridden_from_non_text_context"] = True
+    if sound_effect_overridden:
+        validation["semantic_correct_overridden_from_sound_effect_context"] = True
     return validation
 
 
@@ -1521,6 +1552,72 @@ def _mentions_only_non_text_context(summary: str) -> bool:
         "context",
     )
     return any(marker in summary for marker in non_text_markers)
+
+
+def _sound_effect_rejection_mentions_visible_target(
+    semantic_correct: bool | None,
+    bbox_on_blank_area: bool | None,
+    bbox_targets_unrelated_text: bool | None,
+    visible_original_text: str | None,
+    reasoning_summary: object,
+) -> bool:
+    if (
+        semantic_correct is not False
+        or bbox_on_blank_area is True
+        or bbox_targets_unrelated_text is not True
+        or not visible_original_text
+        or not _looks_japanese_sound_effect_text(visible_original_text)
+    ):
+        return False
+    summary = str(reasoning_summary or "").lower()
+    sound_markers = (
+        "sound effect",
+        "onomatopoeia",
+        "sfx",
+    )
+    target_markers = (
+        "targets the large",
+        "targets the",
+        "bounding box targets",
+        "bbox targets",
+        "yellow bbox targets",
+        "covers the",
+        "contains the",
+    )
+    semantic_mismatch_markers = (
+        "different sound effect",
+        "does not match",
+        "doesn't match",
+        "does not correspond",
+        "doesn't correspond",
+    )
+    return (
+        any(marker in summary for marker in sound_markers)
+        and any(marker in summary for marker in target_markers)
+        and any(marker in summary for marker in semantic_mismatch_markers)
+    )
+
+
+def _looks_japanese_sound_effect_text(text: str) -> bool:
+    compact = "".join(ch for ch in text if not ch.isspace())
+    if len(compact) < 3:
+        return False
+    kana_count = sum(1 for ch in compact if "\u3040" <= ch <= "\u30ff" or ch == "\u30fc")
+    return kana_count >= 3 and kana_count / max(1, len(compact)) >= 0.6
+
+
+def _looks_repeated_chinese_sound_effect_text(text: str) -> bool:
+    compact = "".join(ch for ch in text if not ch.isspace())
+    if len(compact) < 4:
+        return False
+    cjk_count = sum(1 for ch in compact if "\u4e00" <= ch <= "\u9fff")
+    if cjk_count / max(1, len(compact)) < 0.75:
+        return False
+    for unit_len in range(1, min(4, len(compact) // 2) + 1):
+        unit = compact[:unit_len]
+        if len(unit) * 2 <= len(compact) and unit * (len(compact) // len(unit)) == compact:
+            return True
+    return False
 
 
 def _should_retry_fallback_validation(validation: dict) -> bool:
