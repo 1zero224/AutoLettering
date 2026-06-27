@@ -60,6 +60,7 @@ def gpt_image_edit_prompt(translated_text: str) -> str:
         "The output text must exactly match the target string below, character for character.",
         "Do not write text anywhere outside the transparent masked area.",
         "Do not use speech bubbles, margins, or unmasked areas for the replacement text.",
+        "Do not move the replacement text to a cleaner nearby speech bubble, margin, caption, or empty background.",
         "Do not create gray boxes, shaded rectangles, glow, blur, gradients, or dark overlays around the replacement text.",
         "Keep the manga background tone inside the edited area consistent with nearby black-and-white line art.",
         "Use clean black manga lettering unless the original local text is visibly light-on-dark.",

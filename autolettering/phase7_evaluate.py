@@ -70,6 +70,7 @@ def build_preview_evaluation_prompt(row: dict) -> str:
             "Long vertical records may be split into numbered segments; combine all segments for the page-level verdict.",
             "If the image is split into segments, do not treat repeated panel borders, columns, or multiple segments as duplicated lettering.",
             "Judge the combined sequence of segments in segment order.",
+            "Vertical Chinese lettering reads top-to-bottom inside each column and right-to-left across columns, as in manga.",
             "For top-aligned vertical lettering, later bottom segments may be intentionally blank after the translated text ends; do not mark text missing only because bottom segments are blank.",
             "The green AFTER RESULT panel is the AFTER preview; the gray BEFORE reference panel is the BEFORE original.",
             "Score only the large green AFTER RESULT panel.",
@@ -365,7 +366,7 @@ def _review_font(size: int) -> ImageFont.ImageFont:
 def _split_tall_review_pair(
     before: Image.Image,
     after: Image.Image,
-    max_segment_height: int = 260,
+    max_segment_height: int = 420,
 ) -> list[tuple[Image.Image, Image.Image]]:
     if after.height <= max_segment_height:
         return [(before, after)]

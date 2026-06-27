@@ -82,6 +82,7 @@ def test_gpt_image_prompt_preserves_non_text_art_inside_wide_mask():
     assert "person, face, hair, clothing, hands, body" in prompt
     assert "background line art, screentone, panel borders, texture, and motion lines" in prompt
     assert "Do not repaint, erase, blur, white out, or simplify any non-text artwork" in prompt
+    assert "Do not move the replacement text to a cleaner nearby speech bubble" in prompt
     assert "single ellipsis glyph `…`" in prompt
     assert "Do not replace `…` with three periods `...`" in prompt
 

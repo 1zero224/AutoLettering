@@ -586,6 +586,40 @@ def test_run_phase4_ignores_small_bubble_vertical_rotation_angle(tmp_path: Path)
     assert layout["angle_degrees"] == 0.0
 
 
+def test_run_phase4_infers_vertical_from_low_confidence_multicolumn_cta_components(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+    source_crop_path = tmp_path / "source-crop.png"
+    Image.new("RGB", (154, 136), "white").save(source_crop_path)
+    phase2_run = tmp_path / "phase2-detection"
+    phase3_run = tmp_path / "phase3-selection"
+    phase5_run = tmp_path / "phase5-angle"
+    for path in [phase2_run, phase3_run, phase5_run]:
+        path.mkdir()
+    _write_font_selection(
+        phase3_run / "font-selections.jsonl",
+        font_path,
+        source_crop_path,
+        translated_text="我可是什么经验都没有啊！？",
+    )
+    _write_detection_like_gbc06_03_record_9(phase2_run / "detections.jsonl")
+    _write_low_confidence_horizontal_angle_result(phase5_run / "angle-results.jsonl")
+
+    run_dir = run_phase4(
+        selection_run_dir=phase3_run,
+        angle_run_dir=phase5_run,
+        detection_run_dir=phase2_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase4-gbc06-03-9-multicolumn",
+        sample_limit=1,
+    )
+
+    layout = _read_jsonl(run_dir / "layout-results.jsonl")[0]["layout"]
+    assert layout["target_bbox"] == [804, 1738, 958, 1874]
+    assert layout["orientation"] == "vertical"
+    assert layout["angle_degrees"] == 0.0
+    assert layout["vertical_align"] == "top"
+
+
 def test_run_phase4_prefers_high_confidence_angle_orientation_for_wide_multicolumn_text(tmp_path: Path):
     font_path = _copy_font(tmp_path)
     source_crop_path = tmp_path / "source-crop.png"
@@ -1067,6 +1101,19 @@ def _write_horizontal_angle_result(path: Path) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def _write_low_confidence_horizontal_angle_result(path: Path) -> None:
+    payload = {
+        "record_id": "page.png#1",
+        "status": "angle_estimated",
+        "orientation": {
+            "detected_orientation": "horizontal",
+            "selected_angle_degrees": -0.6,
+            "confidence": 0.611,
+        },
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
 def _write_high_confidence_vertical_angle_result(path: Path) -> None:
     payload = {
         "record_id": "page.png#1",
@@ -1143,6 +1190,29 @@ def _write_bubble_vertical_detection(path: Path) -> None:
         "selected_text_body_xyxy": [1157, 1341, 1272, 1560],
         "candidate_boxes": [
             {"xyxy": [1157, 1341, 1272, 1560], "area": 25185, "score": 1.0, "polarity": "ctd_mask"},
+        ],
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _write_detection_like_gbc06_03_record_9(path: Path) -> None:
+    payload = {
+        "record_id": "page.png#1",
+        "status": "ok",
+        "image_name": "page.png",
+        "group_name": "框内",
+        "detection_method": "cta_mask",
+        "selected_text_box_xyxy": [804, 1738, 958, 1874],
+        "selected_text_full_xyxy": [804, 1738, 958, 1874],
+        "selected_text_body_xyxy": [804, 1738, 958, 1874],
+        "candidate_boxes": [
+            {"xyxy": [804, 1738, 958, 1874], "area": 20944, "score": 1.0, "polarity": "ctd_mask"},
+            {"xyxy": [921, 1738, 958, 1775], "area": 1369, "score": 0.96, "polarity": "ctd_mask"},
+            {"xyxy": [923, 1779, 957, 1874], "area": 3230, "score": 0.95, "polarity": "ctd_mask"},
+            {"xyxy": [881, 1738, 920, 1836], "area": 3822, "score": 0.94, "polarity": "ctd_mask"},
+            {"xyxy": [845, 1739, 877, 1773], "area": 1088, "score": 0.93, "polarity": "ctd_mask"},
+            {"xyxy": [844, 1773, 878, 1835], "area": 2108, "score": 0.92, "polarity": "ctd_mask"},
+            {"xyxy": [804, 1741, 839, 1865], "area": 4340, "score": 0.91, "polarity": "ctd_mask"},
         ],
     }
     path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")

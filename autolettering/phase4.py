@@ -133,7 +133,7 @@ def _search_layout(
     detection: dict | None,
     target_bbox: list[int] | None,
 ):
-    orientation = _selected_orientation(target_size, angle)
+    orientation = _selected_orientation(target_size, angle, detection, target_bbox)
     angle_degrees = _selected_angle_degrees(orientation, angle, detection)
     max_font_size = _max_font_size(orientation, detection, target_bbox, row.get("translated_text", ""))
     line_spacing_values = _line_spacing_values_for_record(orientation, detection, target_bbox)
@@ -477,11 +477,90 @@ def _orientation_override(angle: dict | None) -> str | None:
     return orientation if orientation in {"horizontal", "vertical"} else None
 
 
-def _selected_orientation(target_size: tuple[int, int], angle: dict | None) -> str:
+def _selected_orientation(
+    target_size: tuple[int, int],
+    angle: dict | None,
+    detection: dict | None = None,
+    target_bbox: list[int] | tuple[int, int, int, int] | None = None,
+) -> str:
     angle_orientation = _orientation_override(angle)
     if angle_orientation and _angle_confidence(angle) >= 0.8:
         return angle_orientation
+    component_orientation = _component_structure_orientation(detection, target_bbox)
+    if component_orientation:
+        return component_orientation
     return _target_orientation(target_size) or angle_orientation or "horizontal"
+
+
+def _component_structure_orientation(
+    detection: dict | None,
+    target_bbox: list[int] | tuple[int, int, int, int] | None,
+) -> str | None:
+    if detection is None or target_bbox is None:
+        return None
+    bbox = tuple(int(value) for value in target_bbox)
+    if _looks_like_vertical_multicolumn_components(detection, bbox):
+        return "vertical"
+    return None
+
+
+def _looks_like_vertical_multicolumn_components(
+    detection: dict,
+    target_bbox: tuple[int, int, int, int],
+) -> bool:
+    candidates = _component_candidate_bboxes(detection, target_bbox)
+    if len(candidates) < 3:
+        return False
+    target_width = _width(target_bbox)
+    if target_width <= 0:
+        return False
+    tall = [bbox for bbox in candidates if _height(bbox) >= _width(bbox) * 1.45 and _width(bbox) <= target_width * 0.4]
+    if len(tall) < 3:
+        return False
+    centers = [(_center_x(bbox), _center_y(bbox)) for bbox in tall]
+    x_spread = max(x for x, _ in centers) - min(x for x, _ in centers)
+    return x_spread >= max(36, target_width * 0.35)
+
+
+def _component_candidate_bboxes(
+    detection: dict,
+    target_bbox: tuple[int, int, int, int],
+) -> list[tuple[int, int, int, int]]:
+    rows: list[tuple[int, int, int, int]] = []
+    seen: set[tuple[int, int, int, int]] = set()
+
+    def add(bbox: tuple[int, int, int, int] | None) -> None:
+        if bbox is None or bbox in seen:
+            return
+        if not _inside(bbox, target_bbox):
+            return
+        if _area(bbox) <= 0 or _area(bbox) > _area(target_bbox) * 0.8:
+            return
+        seen.add(bbox)
+        rows.append(bbox)
+
+    for item in detection.get("candidate_boxes") or []:
+        add(_candidate_bbox(item))
+    for diagnostics_key in ("cta_match_diagnostics", "ctd_match_diagnostics"):
+        diagnostics = detection.get(diagnostics_key) or {}
+        for item in diagnostics.get("top_candidates") or []:
+            add(_bbox_from_key(item, "component_bbox_xyxy"))
+    return rows
+
+
+def _bbox_from_key(item: dict, key: str) -> tuple[int, int, int, int] | None:
+    xyxy = item.get(key)
+    if not isinstance(xyxy, list) or len(xyxy) != 4:
+        return None
+    return tuple(int(value) for value in xyxy)
+
+
+def _center_x(bbox: tuple[int, int, int, int]) -> float:
+    return (bbox[0] + bbox[2]) / 2
+
+
+def _center_y(bbox: tuple[int, int, int, int]) -> float:
+    return (bbox[1] + bbox[3]) / 2
 
 
 def _angle_confidence(angle: dict | None) -> float:

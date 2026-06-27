@@ -1172,3 +1172,62 @@ Observed result:
 ```text
 409 passed in 71.07s (0:01:11)
 ```
+
+Fresh v31 registry extension for `GBC06_03.png#9`:
+
+```powershell
+python experiments/phase2_detect_text_regions.py --labelplus-file "GBC06 (已翻 斗笠)\翻译_0.txt" --output-root outputs/runs --run-id phase2-gbc06-03-9-cta-detection-v1 --sample-limit 1 --record-id "GBC06_03.png#9" --detection-strategy cta_mask --ctd-max-edge-distance-px 20
+python experiments/phase2_detect_text_regions.py --labelplus-file "GBC06 (已翻 斗笠)\翻译_0.txt" --output-root outputs/runs --run-id phase2-gbc06-03-9-cta-detection-v2-threshold45 --sample-limit 1 --record-id "GBC06_03.png#9" --detection-strategy cta_mask --ctd-max-edge-distance-px 45
+python experiments/phase3_font_comparison.py --labelplus-file "GBC06 (已翻 斗笠)\翻译_0.txt" --detection-run-dir outputs/runs/phase2-gbc06-03-9-cta-detection-v2-threshold45 --font-dir "工具箱漫画字体V2.5" --output-root outputs/runs --run-id phase3-gbc06-03-9-font-comparison --sample-limit 1 --font-limit 12 --record-id "GBC06_03.png#9"
+python experiments/phase5_orientation_angle.py --detection-run-dir outputs/runs/phase2-gbc06-03-9-cta-detection-v2-threshold45 --output-root outputs/runs --run-id phase5-gbc06-03-9-angle --sample-limit 1 --record-id "GBC06_03.png#9"
+python experiments/phase3_mimo_font_selection.py --input-run-dir outputs/runs/phase3-gbc06-03-9-font-comparison --output-root outputs/runs --run-id phase3-gbc06-03-9-mimo-font-selection --sample-limit 1 --record-id "GBC06_03.png#9"
+python experiments/phase4_layout_search.py --selection-run-dir outputs/runs/phase3-gbc06-03-9-mimo-font-selection --angle-run-dir outputs/runs/phase5-gbc06-03-9-angle --detection-run-dir outputs/runs/phase2-gbc06-03-9-cta-detection-v2-threshold45 --output-root outputs/runs --run-id phase4-gbc06-03-9-layout-v2-multicolumn --sample-limit 1 --record-id "GBC06_03.png#9"
+python experiments/phase6_bubble_cleanup.py --detection-run-dir outputs/runs/phase2-gbc06-03-9-cta-detection-v2-threshold45 --layout-run-dir outputs/runs/phase4-gbc06-03-9-layout-v2-multicolumn --output-root outputs/runs --run-id phase6-gbc06-03-9-region-fill-v1 --sample-limit 1 --cleanup-method region_fill --record-id "GBC06_03.png#9"
+python experiments/phase7_8_integrated_smoke.py --detection-run-dir outputs/runs/phase2-gbc06-03-9-cta-detection-v2-threshold45 --cleanup-run-dir outputs/runs/phase6-gbc06-03-9-region-fill-v1 --layout-run-dir outputs/runs/phase4-gbc06-03-9-layout-v2-multicolumn --font-selection-run-dir outputs/runs/phase3-gbc06-03-9-mimo-font-selection --output-root outputs/runs --run-id phase7-8-gbc06-03-9-preview-v2-eval-sheet --sample-limit 1
+python experiments/phase8_export_quality_audit.py --phase8-run-dir outputs/runs/phase7-8-gbc06-03-9-preview-v2-eval-sheet/runs/phase8-export --output-root outputs/runs --run-id phase8-gbc06-03-9-export-audit-v1
+```
+
+Observed result:
+
+```text
+phase2 first attempt status=fallback_required threshold=20 nearest_edge_distance=26.077
+phase2 retry status=ok threshold=45 bbox=[804,1738,958,1874] route=cta_mask_lama_large_512px
+font=[toolbox]拙黑体-简体(v2.4).ttf confidence=0.85
+phase5 detected_orientation=horizontal confidence=0.611 selected_angle=-0.6
+phase4 final orientation=vertical angle=0.0 vertical_align=top font_size=28 target=154x136 measured=84x135
+phase6 cleanup_method=bubble_region_fill bbox=[804,1738,958,1874]
+phase7 MIMO score=10 usable=true original_text_removed=true art_preserved=true lettering_readable=true issues=[]
+phase8 audit passed=true vertical_top_layer_count=1 record_issue_count=0 anchor_y=1738
+```
+
+Two fixes were needed for this record:
+
+- Phase 4 now uses CTA/CTD component structure as low-confidence orientation evidence. `GBC06_03.png#9` has a low-confidence horizontal angle estimate, but the matched mask diagnostics contain multiple narrow vertical components inside the target bbox, so final layout is vertical and top-aligned with no rotation.
+- Phase 7 evaluation contact sheets no longer split medium-height context crops that fit inside the review panel. The first v1 evaluation split this bubble into top/bottom segments and MIMO incorrectly scored it `2`; the v2 single-panel sheet scored `10`.
+
+Review artifacts:
+
+```text
+outputs/runs/phase4-gbc06-03-9-layout-v2-multicolumn/debug/layout_candidates/GBC06-03-png-9.png
+outputs/runs/phase6-gbc06-03-9-region-fill-v1/crops/before_after/GBC06-03-png-9.png
+outputs/runs/phase7-8-gbc06-03-9-preview-v2-eval-sheet/runs/phase7-preview/crops/context_before_after/GBC06-03-png-9.png
+outputs/runs/phase7-8-gbc06-03-9-preview-v2-eval-sheet/runs/phase7-preview/debug/evaluation_contact_sheets/GBC06-03-png.png
+outputs/runs/phase7-8-gbc06-03-9-preview-v2-eval-sheet/runs/phase7-preview/pages/GBC06-03-png.png
+```
+
+Fresh v31 registry coverage generation:
+
+```powershell
+python experiments/pipeline_coverage_report.py --registry-file docs/pipeline-runs.gbc06.json --registry-entry phase0-8-gbc06-v31-gbc06-03-9-multicolumn-eval-sheet --output-root outputs/runs --next-limit 12
+```
+
+Observed result:
+
+```text
+outputs\runs\phase0-8-gbc06-pipeline-coverage-v31-gbc06-03-9-multicolumn-eval-sheet
+base_record_count=45 complete_record_count=45 incomplete_record_count=0
+phase7_preview evaluations=22 usable=22/22 failed=0 low_score=0 records=45 record_issues=0
+phase8_export audits=12 passed=12/12 records=14 record_issues=0
+phase1_pending_detection_count=135
+next_experiments[0].record_id=GBC06_03.png#10
+```

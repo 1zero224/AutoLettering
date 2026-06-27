@@ -167,6 +167,7 @@ def test_build_preview_evaluation_prompt_lists_records_and_methods():
     assert "not as same-size score targets" in prompt
     assert "Do not penalize missing full speech-bubble outlines" in prompt
     assert "Long vertical records may be split into numbered segments" in prompt
+    assert "Vertical Chinese lettering reads top-to-bottom inside each column" in prompt
     assert "do not treat repeated panel borders, columns, or multiple segments as duplicated lettering" in prompt
     assert "Judge the combined sequence of segments in segment order" in prompt
     assert "bottom segments may be intentionally blank" in prompt
@@ -258,6 +259,33 @@ def test_evaluation_contact_sheet_splits_tall_vertical_crops_into_readable_grid(
         assert 0.45 <= ratio <= 2.3
         assert sheet.height < 1300
         assert sheet.getpixel((11, 144)) == (0, 160, 80)
+
+
+def test_evaluation_contact_sheet_keeps_medium_context_crop_unsplit(tmp_path: Path):
+    preview_run = tmp_path / "phase7"
+    preview_page = preview_run / "pages" / "page.png"
+    preview_page.parent.mkdir(parents=True)
+    Image.new("RGB", (64, 64), "white").save(preview_page)
+    medium_before_after = tmp_path / "before-after-medium.png"
+    Image.new("RGB", (512, 356), "white").save(medium_before_after)
+    row = {
+        "image_name": "page.png",
+        "status": "page_preview_generated",
+        "records": [
+            {
+                "record_id": "page.png#9",
+                "translated_text": "我可是什么经验都没有啊！？",
+                "cleanup_method": "bubble_region_fill",
+                "preview_context_before_after_path": str(medium_before_after),
+            }
+        ],
+        "preview": {"page_preview_path": str(preview_page), "record_count": 1},
+    }
+
+    sheet_path = Path(_build_evaluation_contact_sheet(row))
+
+    with Image.open(sheet_path).convert("RGB") as sheet:
+        assert sheet.width < 600
 
 
 def test_evaluation_contact_sheet_prefers_context_crop_when_available(tmp_path: Path):
