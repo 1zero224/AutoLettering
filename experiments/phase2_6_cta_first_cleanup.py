@@ -25,7 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--record-id", action="append", dest="record_ids", default=None)
     parser.add_argument("--radius-x", type=int, default=220)
     parser.add_argument("--radius-y", type=int, default=180)
-    parser.add_argument("--ctd-max-edge-distance-px", type=float, default=20.0)
+    parser.add_argument("--ctd-max-edge-distance-px", type=float, default=30.0)
     parser.add_argument("--phase6-gpt-quality-run-dir", action="append", default=None)
     parser.add_argument("--call-gpt-image", action="store_true")
     parser.add_argument("--skip-mimo", action="store_true")

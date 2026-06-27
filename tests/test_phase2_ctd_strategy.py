@@ -109,7 +109,7 @@ def test_run_phase2_cta_strategy_writes_mask_component_as_primary_text_region(tm
         "record_id": "page.png#1",
         "match_status": "matched",
         "failure_reason": None,
-        "threshold_px": 20.0,
+        "threshold_px": 30.0,
         "candidate_count": 1,
         "within_threshold_count": 1,
         "nearest_component_id": "component-0001",
@@ -150,7 +150,7 @@ def test_run_phase2_cta_strategy_writes_mask_component_as_primary_text_region(tm
             "component_mask_path": str(component_mask),
             "edge_distance_px": 14.0,
             "within_threshold": True,
-            "threshold_px": 20.0,
+            "threshold_px": 30.0,
         }
     ]
     with (run_dir / "reports" / "manual-review.csv").open("r", encoding="utf-8", newline="") as handle:
@@ -390,7 +390,7 @@ def test_run_phase2_fallback_context_groups_nearby_ctd_candidates_for_large_soun
     ]
 
 
-def test_run_phase2_defaults_ctd_mask_edge_distance_to_twenty(tmp_path: Path, monkeypatch):
+def test_run_phase2_defaults_ctd_mask_edge_distance_to_thirty(tmp_path: Path, monkeypatch):
     project_dir = tmp_path / "sample_project"
     project_dir.mkdir()
     image_path = project_dir / "page.png"
@@ -417,7 +417,7 @@ def test_run_phase2_defaults_ctd_mask_edge_distance_to_twenty(tmp_path: Path, mo
         detection_strategy="ctd_mask",
     )
 
-    assert captured["max_edge_distance_px"] == 20.0
+    assert captured["max_edge_distance_px"] == 30.0
 
 
 def _write_project_image(path: Path, size: tuple[int, int] = (240, 240)) -> None:

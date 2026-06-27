@@ -282,7 +282,7 @@ def _is_adjacent_tall_bubble_text_column(
         return False
     if _width(bbox) > max(_width(seed) * 0.72, _width(seed) + 12):
         return False
-    return _height(bbox) <= max(_height(seed) * 1.7, _height(seed) + 120)
+    return _height(bbox) <= max(_height(seed) * 1.7, _height(seed) + 140, _height(cluster) + 40)
 
 
 def _merged_component(group: list[CtdMaskComponent]) -> CtdMaskComponent:

@@ -33,7 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--ctd-max-edge-distance-px",
         type=float,
-        default=20.0,
+        default=30.0,
         help="Maximum LabelPlus-point to CTD component edge distance for unique matching.",
     )
     return parser

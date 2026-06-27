@@ -70,7 +70,7 @@ def test_phase2_detection_cli_defaults_ctd_mask_edge_distance_for_real_mask_edge
 
     args = parser.parse_args([])
 
-    assert args.ctd_max_edge_distance_px == 20.0
+    assert args.ctd_max_edge_distance_px == 30.0
 
 
 def test_phase2_cta_threshold_sweep_cli_accepts_repeatable_thresholds():
@@ -113,7 +113,7 @@ def test_phase2_6_cta_first_cleanup_cli_defaults_to_cta_first_contract():
     assert args.sample_limit == 5
     assert args.radius_x == 220
     assert args.radius_y == 180
-    assert args.ctd_max_edge_distance_px == 20.0
+    assert args.ctd_max_edge_distance_px == 30.0
     assert args.phase6_gpt_quality_run_dir is None
 
 

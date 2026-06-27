@@ -27,7 +27,7 @@ def run_cta_first_cleanup_pipeline(
     record_ids: list[str] | None = None,
     radius_x: int = 220,
     radius_y: int = 180,
-    ctd_max_edge_distance_px: float = 20.0,
+    ctd_max_edge_distance_px: float = 30.0,
     gpt_config: GptImageConfig | None = None,
     call_gpt_image: bool = False,
     mimo_client: MimoVisionClient | None = None,

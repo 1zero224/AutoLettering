@@ -1423,3 +1423,74 @@ phase8_export audits=15 passed=15/15 records=17 record_issues=0
 phase1_pending_detection_count=132
 next_experiments[0].record_id=GBC06_04.png#2
 ```
+
+Fresh v35 registry extension for `GBC06_04.png#2`:
+
+```powershell
+python experiments/phase2_detect_text_regions.py --labelplus-file "GBC06 (已翻 斗笠)\翻译_0.txt" --output-root outputs/runs --run-id phase2-gbc06-04-2-cta-detection-v1 --sample-limit 1 --record-id "GBC06_04.png#2" --detection-strategy cta_mask --ctd-max-edge-distance-px 20
+python experiments/phase2_detect_text_regions.py --labelplus-file "GBC06 (已翻 斗笠)\翻译_0.txt" --output-root outputs/runs --run-id phase2-gbc06-04-2-cta-detection-v2-threshold30-probe --sample-limit 1 --record-id "GBC06_04.png#2" --detection-strategy cta_mask --ctd-max-edge-distance-px 30
+python experiments/phase2_detect_text_regions.py --labelplus-file "GBC06 (已翻 斗笠)\翻译_0.txt" --output-root outputs/runs --run-id phase2-gbc06-04-2-cta-detection-v3-nearby-bubble-columns --sample-limit 1 --record-id "GBC06_04.png#2" --detection-strategy cta_mask
+python experiments/phase3_font_comparison.py --labelplus-file "GBC06 (已翻 斗笠)\翻译_0.txt" --detection-run-dir outputs/runs/phase2-gbc06-04-2-cta-detection-v3-nearby-bubble-columns --font-dir "工具箱漫画字体V2.5" --output-root outputs/runs --run-id phase3-gbc06-04-2-font-comparison-v1 --sample-limit 1 --font-limit 12 --record-id "GBC06_04.png#2"
+python experiments/phase5_orientation_angle.py --detection-run-dir outputs/runs/phase2-gbc06-04-2-cta-detection-v3-nearby-bubble-columns --output-root outputs/runs --run-id phase5-gbc06-04-2-angle-v1 --sample-limit 1 --record-id "GBC06_04.png#2"
+python experiments/phase3_mimo_font_selection.py --input-run-dir outputs/runs/phase3-gbc06-04-2-font-comparison-v1 --output-root outputs/runs --run-id phase3-gbc06-04-2-mimo-font-selection-v1 --sample-limit 1 --record-id "GBC06_04.png#2"
+python experiments/phase4_layout_search.py --selection-run-dir outputs/runs/phase3-gbc06-04-2-mimo-font-selection-v1 --angle-run-dir outputs/runs/phase5-gbc06-04-2-angle-v1 --detection-run-dir outputs/runs/phase2-gbc06-04-2-cta-detection-v3-nearby-bubble-columns --output-root outputs/runs --run-id phase4-gbc06-04-2-layout-v1 --sample-limit 1 --record-id "GBC06_04.png#2"
+python experiments/phase6_bubble_cleanup.py --detection-run-dir outputs/runs/phase2-gbc06-04-2-cta-detection-v3-nearby-bubble-columns --layout-run-dir outputs/runs/phase4-gbc06-04-2-layout-v1 --output-root outputs/runs --run-id phase6-gbc06-04-2-region-fill-v1 --sample-limit 1 --cleanup-method region_fill --record-id "GBC06_04.png#2"
+python experiments/phase7_8_integrated_smoke.py --detection-run-dir outputs/runs/phase2-gbc06-04-2-cta-detection-v3-nearby-bubble-columns --cleanup-run-dir outputs/runs/phase6-gbc06-04-2-region-fill-v1 --layout-run-dir outputs/runs/phase4-gbc06-04-2-layout-v1 --font-selection-run-dir outputs/runs/phase3-gbc06-04-2-mimo-font-selection-v1 --output-root outputs/runs --run-id phase7-8-gbc06-04-2-preview-v1 --sample-limit 1
+python experiments/phase8_export_quality_audit.py --phase8-run-dir outputs/runs/phase7-8-gbc06-04-2-preview-v1/runs/phase8-export --output-root outputs/runs --run-id phase8-gbc06-04-2-export-audit-v1
+```
+
+Observed result:
+
+```text
+record_id=GBC06_04.png#2 translated_text=那么 仁菜 / 你来弹吉他吗？
+phase2 v1 threshold=20 -> fallback_required nearest_edge_distance=25.179; top candidates were component-0004, component-0003, component-0005
+phase2 v2 threshold=30 probe -> ok but only selected component-0004+component-0005, which still risked missing the left column "ギターやるか？"
+phase2 v3 status=ok default_threshold=30 bbox=[727,437,802,656] selected_component_id=component-0003+component-0004+component-0005 route=cta_mask_lama_large_512px
+phase2 visual/subagent QA: accepted because the bbox contains the complete bubble source text "じゃあ / 仁菜が / ギターやるか？"; bbox purity was not treated as the success criterion
+font=[toolbox]伪角明-简体-Bold(v2.4).ttf confidence=0.95
+phase5 detected_orientation=vertical confidence=0.913 selected_angle=-1.0
+phase4 final orientation=vertical angle=0.0 vertical_align=top font_size=28 target=75x219 measured=57x195
+phase4 line_breaks=那么 仁菜 / 你来弹吉他吗？
+phase6 cleanup_method=bubble_region_fill bbox=[727,437,802,656]
+phase7 MIMO score=9 usable=true original_text_removed=true art_preserved=true lettering_readable=true issues=[]
+phase8 audit passed=true vertical_top_layer_count=1 record_issue_count=0 anchor_y=437
+```
+
+Two detection changes came from this record:
+
+- CTA/CTD default point-to-mask-edge threshold is now `30px` for the CTA-first route. The `20px` threshold was too strict for normal LabelPlus points placed just outside a nearby speech-bubble text column.
+- Adjacent frame-in bubble columns can merge when the seed component is shorter than a neighboring same-bubble column. This covers `component-0003+component-0004+component-0005`, so the selected region contains `じゃあ / 仁菜が / ギターやるか？` as one semantic source string.
+
+This follows the current detection acceptance rule: do not over-optimize box purity. A loose region is acceptable if it contains the intended source text; a region that misses a semantic source column is not acceptable.
+
+Review artifacts:
+
+```text
+outputs/runs/phase2-gbc06-04-2-cta-detection-v1/debug/detection/GBC06_04-2.png
+outputs/runs/phase2-gbc06-04-2-cta-detection-v2-threshold30-probe/debug/detection/GBC06_04-2.png
+outputs/runs/phase2-gbc06-04-2-cta-detection-v3-nearby-bubble-columns/debug/detection/GBC06_04-2.png
+outputs/runs/phase3-gbc06-04-2-font-comparison-v1/debug/font_comparison/GBC06-04-png-2.png
+outputs/runs/phase4-gbc06-04-2-layout-v1/debug/layout_candidates/GBC06-04-png-2.png
+outputs/runs/phase6-gbc06-04-2-region-fill-v1/crops/before_after/GBC06-04-png-2.png
+outputs/runs/phase7-8-gbc06-04-2-preview-v1/runs/phase7-preview/crops/context_before_after/GBC06-04-png-2.png
+outputs/runs/phase7-8-gbc06-04-2-preview-v1/runs/phase7-preview/debug/evaluation_contact_sheets/GBC06-04-png.png
+outputs/runs/phase7-8-gbc06-04-2-preview-v1/runs/phase7-preview/pages/GBC06-04-png.png
+outputs/runs/phase8-gbc06-04-2-export-audit-v1/phase8-export-audit.json
+```
+
+Fresh v35 registry coverage generation:
+
+```powershell
+python experiments/pipeline_coverage_report.py --registry-file docs/pipeline-runs.gbc06.json --registry-entry phase0-8-gbc06-v35-gbc06-04-2-nearby-bubble-columns --output-root outputs/runs --next-limit 12
+```
+
+Observed result:
+
+```text
+outputs\runs\phase0-8-gbc06-pipeline-coverage-v35-gbc06-04-2-nearby-bubble-columns
+base_record_count=49 complete_record_count=49 incomplete_record_count=0
+phase7_preview evaluations=26 usable=26/26 failed=0 low_score=0 records=49 record_issues=0
+phase8_export audits=16 passed=16/16 records=18 record_issues=0
+phase1_pending_detection_count=131
+next_experiments[0].record_id=GBC06_04.png#3
+```

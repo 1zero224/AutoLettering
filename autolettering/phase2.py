@@ -40,7 +40,7 @@ def run_phase2(
     radius_y: int = 180,
     record_ids: Iterable[str] | None = None,
     detection_strategy: str = "cta_mask",
-    ctd_max_edge_distance_px: float = 20.0,
+    ctd_max_edge_distance_px: float = 30.0,
 ) -> Path:
     manifest = parse_labelplus_project(labelplus_file)
     run_dir = Path(output_root) / (run_id or _timestamp_run_id().replace("phase1", "phase2"))
