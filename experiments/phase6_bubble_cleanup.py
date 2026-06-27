@@ -34,6 +34,12 @@ def main() -> None:
         default=3,
         help="Text-mask dilation size for cleanup-method=text_mask_inpaint.",
     )
+    parser.add_argument("--mask-adjust-dilate-px", type=int, default=0)
+    parser.add_argument("--mask-adjust-erode-px", type=int, default=0)
+    parser.add_argument("--mask-extend-left-px", type=int, default=0)
+    parser.add_argument("--mask-extend-right-px", type=int, default=0)
+    parser.add_argument("--mask-extend-up-px", type=int, default=0)
+    parser.add_argument("--mask-extend-down-px", type=int, default=0)
     parser.add_argument("--record-id", action="append", dest="record_ids", default=None)
     args = parser.parse_args()
 
@@ -47,6 +53,12 @@ def main() -> None:
         record_ids=args.record_ids,
         inpaint_method=args.inpaint_method,
         mask_dilate_px=args.mask_dilate_px,
+        mask_adjust_dilate_px=args.mask_adjust_dilate_px,
+        mask_adjust_erode_px=args.mask_adjust_erode_px,
+        mask_extend_left_px=args.mask_extend_left_px,
+        mask_extend_right_px=args.mask_extend_right_px,
+        mask_extend_up_px=args.mask_extend_up_px,
+        mask_extend_down_px=args.mask_extend_down_px,
     )
     print(run_dir)
 

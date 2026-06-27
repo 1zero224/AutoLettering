@@ -1091,6 +1091,59 @@ def test_run_phase8_photoshop_export_applies_font_mapping_file(tmp_path: Path):
     assert f"Font mapping file: `{mapping_path}`" in report
 
 
+def test_photoshop_import_jsx_tries_font_name_candidates_in_order(tmp_path: Path):
+    run_dir = _run_standard_phase8_export(tmp_path)
+
+    jsx = (run_dir / "photoshop-import.jsx").read_text(encoding="utf-8")
+
+    assert "function setTextFont(textItem, fontInfo)" in jsx
+    assert "fontInfo.font_name_candidates" in jsx
+    assert "for (var i = 0; i < candidates.length; i++)" in jsx
+    assert "var resolved = findFontPostScriptName(candidates[i]) || candidates[i]" in jsx
+    assert "textItem.font = resolved" in jsx
+    assert "return resolved" in jsx
+    assert "setTextFont(item, layerData.font)" in jsx
+
+
+def test_photoshop_import_jsx_resolves_font_candidates_to_postscript_names(tmp_path: Path):
+    run_dir = _run_standard_phase8_export(tmp_path)
+
+    jsx = (run_dir / "photoshop-import.jsx").read_text(encoding="utf-8")
+
+    assert "function findFontPostScriptName(fontName)" in jsx
+    assert "var fonts = app.fonts" in jsx
+    assert "fontField(fonts[i], 'postScriptName')" in jsx
+    assert "fontField(fonts[i], 'name')" in jsx
+    assert "fontField(fonts[i], 'family')" in jsx
+    assert "var resolved = findFontPostScriptName(candidates[i]) || candidates[i]" in jsx
+    assert "textItem.font = resolved" in jsx
+    assert "return resolved" in jsx
+
+
+def test_photoshop_import_jsx_normalizes_labelplus_line_break_tokens(tmp_path: Path):
+    run_dir = _run_standard_phase8_export(tmp_path)
+
+    jsx = (run_dir / "photoshop-import.jsx").read_text(encoding="utf-8")
+
+    assert "function textContents(value, orientation)" in jsx
+    assert "replace(/\\s*(\\[|【)BR(\\]|】)\\s*/gi, '\\r')" in jsx
+    assert "replace(/[\\r\\n\\u2028\\u2029\\v\\f]+/g, '\\r')" in jsx
+    assert "textContents(layerData.text, layerData.layout.orientation)" in jsx
+
+
+def test_photoshop_import_jsx_preprocesses_vertical_punctuation(tmp_path: Path):
+    run_dir = _run_standard_phase8_export(tmp_path)
+
+    jsx = (run_dir / "photoshop-import.jsx").read_text(encoding="utf-8")
+
+    assert "function verticalTextContents(text, orientation)" in jsx
+    assert "if (orientation != 'vertical') { return text; }" in jsx
+    assert ".replace(/！？/g, '⁉')" in jsx
+    assert ".replace(/!\\?/g, '⁉')" in jsx
+    assert ".replace(/!/g, '！')" in jsx
+    assert ".replace(/\\?/g, '？')" in jsx
+
+
 def test_run_phase8_photoshop_export_skips_records_without_font_selection(tmp_path: Path):
     image_path = tmp_path / "page.png"
     Image.new("RGB", (120, 160), "white").save(image_path)
@@ -1165,7 +1218,9 @@ def _assert_rich_jsx_importer(jsx: str) -> None:
         "textItem.color = color",
         "textItem.leading",
         "textItem.tracking",
-        "layerData.font.photoshop_font_name || layerData.font.family_name",
+        "fontInfo.font_name_candidates",
+        "textItem.font = resolved",
+        "setTextFont(item, layerData.font)",
     ]:
         assert expected in jsx
     assert jsx.index("layer.rotate(layerData.layout.angle_degrees)") < jsx.rindex("applyVerticalTopAnchor(layer, layerData)")

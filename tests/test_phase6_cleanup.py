@@ -381,6 +381,50 @@ def test_run_phase6_bubble_cleanup_records_custom_text_mask_dilation(tmp_path: P
     assert rows[0]["cleanup"]["mask_dilate_px"] == 5
 
 
+def test_run_phase6_bubble_cleanup_records_mask_refinement_artifacts(tmp_path: Path):
+    image_path = _write_sample_image(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    layout_run = tmp_path / "phase4"
+    detection_run.mkdir()
+    layout_run.mkdir()
+    _write_detection(detection_run / "detections.jsonl", image_path)
+    _write_layout(layout_run / "layout-results.jsonl")
+
+    run_dir = run_phase6_bubble_cleanup(
+        detection_run_dir=detection_run,
+        layout_run_dir=layout_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-mask-refinement",
+        sample_limit=1,
+        cleanup_method="mask_fill",
+        mask_adjust_dilate_px=2,
+        mask_extend_right_px=4,
+    )
+
+    cleanup = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]["cleanup"]
+    refinement = cleanup["mask_refinement"]
+    assert refinement["schema_version"] == "autolettering.mask_refinement.v1"
+    assert refinement["operations"] == {
+        "dilate_px": 2,
+        "erode_px": 0,
+        "extend_left_px": 0,
+        "extend_right_px": 4,
+        "extend_up_px": 0,
+        "extend_down_px": 0,
+    }
+    assert refinement["output_mask_pixel_count"] > refinement["input_mask_pixel_count"]
+    assert cleanup["cleanup_mask_path"] == refinement["refined_mask_path"]
+    assert cleanup["cleaned_crop_path"] == refinement["refined_cleaned_crop_path"]
+    assert Path(refinement["source_mask_path"]).exists()
+    assert Path(refinement["refined_mask_path"]).exists()
+    assert Path(refinement["mask_overlay_path"]).exists()
+    assert Path(refinement["before_after_path"]).exists()
+    with Image.open(refinement["refined_mask_path"]).convert("L") as mask:
+        assert mask.getpixel((mask.width - 1, 60 - 25)) == 255
+    report = (run_dir / "reports" / "phase6-report.md").read_text(encoding="utf-8")
+    assert "Mask refinement applied: 1" in report
+
+
 def test_run_phase6_bubble_cleanup_can_use_soft_region_fill_for_comparison(tmp_path: Path):
     image_path = _write_sample_image(tmp_path / "page.png")
     detection_run = tmp_path / "phase2"

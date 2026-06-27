@@ -3,6 +3,10 @@ from __future__ import annotations
 
 JSX_SOURCE = """#target photoshop
 (function () {
+    try {
+        app.preferences.rulerUnits = Units.PIXELS;
+        app.preferences.typeUnits = TypeUnits.PIXELS;
+    } catch (err) {}
     function readText(path) {
         var file = new File(path);
         file.encoding = 'UTF-8';
@@ -12,11 +16,94 @@ JSX_SOURCE = """#target photoshop
         return text;
     }
     function parseJson(text) { return (new Function('return ' + text))(); }
-    function textContents(value) { return String(value || '').replace(/\\n/g, '\\r'); }
+    function verticalTextContents(text, orientation) {
+        if (orientation != 'vertical') { return text; }
+        return String(text || '')
+            .replace(/！？/g, '⁉')
+            .replace(/？！/g, '⁈')
+            .replace(/！！/g, '‼')
+            .replace(/？？/g, '⁇')
+            .replace(/!\\?/g, '⁉')
+            .replace(/\\?!/g, '⁈')
+            .replace(/!!/g, '‼')
+            .replace(/\\?\\?/g, '⁇')
+            .replace(/!/g, '！')
+            .replace(/\\?/g, '？');
+    }
+    function textContents(value, orientation) {
+        var text = String(value || '')
+            .replace(/\\s*(\\[|【)BR(\\]|】)\\s*/gi, '\\r')
+            .replace(/[\\r\\n\\u2028\\u2029\\v\\f]+/g, '\\r');
+        return verticalTextContents(text, orientation);
+    }
     function baseName(name) { return String(name).replace(/\\.[^\\.]+$/, ''); }
-    function setTextFont(textItem, fontName) {
-        if (!fontName) { return; }
-        try { textItem.font = fontName; } catch (err) {}
+    function fontField(font, fieldName) {
+        try { return String(font[fieldName] || ''); } catch (err) { return ''; }
+    }
+    function findFontPostScriptName(fontName) {
+        if (!fontName) { return null; }
+        var lowerName = String(fontName).toLowerCase();
+        var fonts = app.fonts;
+        for (var i = 0; i < fonts.length; i++) {
+            if (fontField(fonts[i], 'postScriptName').toLowerCase() == lowerName) {
+                return fontField(fonts[i], 'postScriptName');
+            }
+        }
+        for (var i = 0; i < fonts.length; i++) {
+            if (fontField(fonts[i], 'name').toLowerCase() == lowerName) {
+                return fontField(fonts[i], 'postScriptName');
+            }
+        }
+        for (var i = 0; i < fonts.length; i++) {
+            if (fontField(fonts[i], 'family').toLowerCase() == lowerName) {
+                return fontField(fonts[i], 'postScriptName');
+            }
+        }
+        for (var i = 0; i < fonts.length; i++) {
+            var psName = fontField(fonts[i], 'postScriptName').toLowerCase();
+            var name = fontField(fonts[i], 'name').toLowerCase();
+            var family = fontField(fonts[i], 'family').toLowerCase();
+            if (psName.indexOf(lowerName) != -1 || name.indexOf(lowerName) != -1 || family.indexOf(lowerName) != -1) {
+                return fontField(fonts[i], 'postScriptName');
+            }
+        }
+        for (var i = 0; i < fonts.length; i++) {
+            var reversePsName = fontField(fonts[i], 'postScriptName').toLowerCase();
+            var reverseName = fontField(fonts[i], 'name').toLowerCase();
+            var reverseFamily = fontField(fonts[i], 'family').toLowerCase();
+            if ((reversePsName && lowerName.indexOf(reversePsName) != -1) ||
+                (reverseName && lowerName.indexOf(reverseName) != -1) ||
+                (reverseFamily && lowerName.indexOf(reverseFamily) != -1)) {
+                return fontField(fonts[i], 'postScriptName');
+            }
+        }
+        return null;
+    }
+    function appendFontCandidate(candidates, name) {
+        if (!name) { return; }
+        for (var i = 0; i < candidates.length; i++) {
+            if (candidates[i] == name) { return; }
+        }
+        candidates.push(name);
+    }
+    function setTextFont(textItem, fontInfo) {
+        if (!fontInfo) { return null; }
+        var candidates = [];
+        appendFontCandidate(candidates, fontInfo.photoshop_font_name);
+        for (var i = 0; fontInfo.font_name_candidates && i < fontInfo.font_name_candidates.length; i++) {
+            appendFontCandidate(candidates, fontInfo.font_name_candidates[i]);
+        }
+        appendFontCandidate(candidates, fontInfo.postscript_name);
+        appendFontCandidate(candidates, fontInfo.family_name);
+        for (var i = 0; i < candidates.length; i++) {
+            if (!candidates[i]) { continue; }
+            try {
+                var resolved = findFontPostScriptName(candidates[i]) || candidates[i];
+                textItem.font = resolved;
+                return resolved;
+            } catch (err) {}
+        }
+        return null;
     }
     function setTextDirection(textItem, orientation) {
         try {
@@ -40,6 +127,7 @@ JSX_SOURCE = """#target photoshop
     }
     function setTextSpacing(textItem, layout) {
         if (layout.line_spacing !== null && layout.line_spacing !== undefined) {
+            try { textItem.useAutoLeading = false; } catch (err) {}
             textItem.leading = UnitValue((layout.font_size || 24) + layout.line_spacing, 'px');
         }
         if (layout.letter_spacing !== null && layout.letter_spacing !== undefined) {
@@ -108,9 +196,9 @@ JSX_SOURCE = """#target photoshop
         item.kind = TextType.PARAGRAPHTEXT;
         item.width = UnitValue(layerData.text_bbox.width, 'px');
         item.height = UnitValue(layerData.text_bbox.height, 'px');
-        item.contents = textContents(layerData.text);
+        item.contents = textContents(layerData.text, layerData.layout.orientation);
         item.size = UnitValue(layerData.layout.font_size || 24, 'px');
-        setTextFont(item, layerData.font.photoshop_font_name || layerData.font.family_name);
+        setTextFont(item, layerData.font);
         setTextDirection(item, layerData.layout.orientation);
         setTextColor(item, layerData.layout.text_color);
         setTextSpacing(item, layerData.layout);
@@ -151,6 +239,9 @@ JSX_SOURCE = """#target photoshop
         }
         var saveFile = new File(outputFolder.fsName + '/' + baseName(page.image_name) + '.psd');
         var options = new PhotoshopSaveOptions();
+        try { options.layers = true; } catch (err) {}
+        try { options.alphaChannels = true; } catch (err2) {}
+        try { options.embedColorProfile = true; } catch (err3) {}
         doc.saveAs(saveFile, options, false, Extension.LOWERCASE);
         doc.close(SaveOptions.DONOTSAVECHANGES);
     }

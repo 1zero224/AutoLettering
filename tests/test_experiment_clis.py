@@ -73,6 +73,29 @@ def test_phase2_detection_cli_defaults_ctd_mask_edge_distance_for_real_mask_edge
     assert args.ctd_max_edge_distance_px == 30.0
 
 
+def test_phase2_detection_cli_accepts_direct_mimo_recognition_flags():
+    parser = phase2_detect_text_regions.build_parser()
+
+    args = parser.parse_args(["--call-mimo-recognition", "--env-file", "local.env"])
+
+    assert args.call_mimo_recognition is True
+    assert args.env_file == "local.env"
+
+
+def test_phase2_detection_cli_builds_mimo_config_from_env(monkeypatch):
+    monkeypatch.setenv("MIMO_BASE_URL", "https://mimo.example/v1")
+    monkeypatch.setenv("MIMO_API_KEY", "secret-value")
+    monkeypatch.setenv("MIMO_VISION_MODEL", "mimo-v2.5")
+
+    config = phase2_detect_text_regions._mimo_config_from_env()
+
+    assert config.base_url == "https://mimo.example/v1"
+    assert config.api_key == "secret-value"
+    assert config.model == "mimo-v2.5"
+    assert config.max_completion_tokens == 1024
+    assert config.thinking_type == "disabled"
+
+
 def test_phase2_cta_threshold_sweep_cli_accepts_repeatable_thresholds():
     parser = phase2_cta_threshold_sweep.build_parser()
 

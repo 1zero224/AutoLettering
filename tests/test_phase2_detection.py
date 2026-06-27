@@ -298,6 +298,70 @@ Comment
     assert review_row["selected_text_body_xyxy"] == json.dumps(record["selected_text_body_xyxy"])
 
 
+def test_run_phase2_can_record_direct_model_text_region_recognition(tmp_path: Path):
+    project_dir = tmp_path / "sample_project"
+    project_dir.mkdir()
+
+    image_path = project_dir / "page.png"
+    image = Image.new("RGB", (240, 240), "white")
+    ImageDraw.Draw(image).rectangle((90, 72, 115, 150), fill="black")
+    image.save(image_path)
+
+    (project_dir / "翻译_0.txt").write_text(
+        """1,0
+-
+框内
+-
+Comment
+
+>>>>>>>>[page.png]<<<<<<<<
+----------------[1]----------------[0.417,0.417,1]
+测试
+""",
+        encoding="utf-8",
+    )
+
+    client = _FakeModelTextRegionClient(
+        {
+            "found": True,
+            "bbox_xyxy": [62, 64, 91, 142],
+            "source_text": "テスト",
+            "orientation": "vertical",
+            "confidence": 0.76,
+            "reasoning_summary": "Text column near the LabelPlus point.",
+        }
+    )
+
+    run_dir = run_phase2(
+        project_dir / "翻译_0.txt",
+        output_root=tmp_path / "outputs",
+        run_id="phase2-model-recognition-test",
+        sample_limit=1,
+        radius_x=70,
+        radius_y=90,
+        detection_strategy="cv",
+        call_model_text_recognition=True,
+        model_text_recognition_client=client,
+    )
+
+    record = json.loads((run_dir / "detections.jsonl").read_text(encoding="utf-8").strip())
+    recognition = record["model_text_recognition"]
+
+    assert recognition["status"] == "ok"
+    assert recognition["local_bbox_xyxy"] == [62, 64, 91, 142]
+    assert recognition["global_bbox_xyxy"] == [92, 74, 121, 152]
+    assert recognition["source_text"] == "テスト"
+    assert recognition["orientation"] == "vertical"
+    assert recognition["confidence"] == 0.76
+    assert Path(recognition["context_image_path"]).exists()
+    assert client.calls[0]["kind"] == "phase2_model_text_region_recognition"
+    assert client.calls[0]["image_path"] == Path(recognition["context_image_path"])
+    assert "X-AnyLabeling" not in client.calls[0]["prompt"]
+    assert "LabelPlus point in this crop: [70, 90]" in client.calls[0]["prompt"]
+    assert record["recognized_source_text"] == "テスト"
+    assert record["recognized_orientation"] == "vertical"
+
+
 def test_run_phase2_can_filter_by_record_id(tmp_path: Path):
     project_dir = tmp_path / "sample_project"
     project_dir.mkdir()
@@ -339,3 +403,24 @@ Comment
 
     assert [record["record_id"] for record in records] == ["page.png#2"]
     assert records[0]["translated_text"] == "第二条"
+
+
+class _FakeModelTextRegionClient:
+    def __init__(self, payload: dict) -> None:
+        self.payload = payload
+        self.calls: list[dict] = []
+
+    def analyze_image(self, image_path: str | Path, prompt: str, kind: str, max_completion_tokens: int) -> dict:
+        self.calls.append(
+            {
+                "image_path": Path(image_path),
+                "prompt": prompt,
+                "kind": kind,
+                "max_completion_tokens": max_completion_tokens,
+            }
+        )
+        return {
+            "raw_text": json.dumps(self.payload, ensure_ascii=False),
+            "request": {"kind": kind},
+            "response": {"status": "ok"},
+        }

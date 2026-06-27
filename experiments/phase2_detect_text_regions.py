@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -9,6 +10,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from autolettering.phase2 import run_phase2
+from autolettering.models.mimo import MimoVisionClient, MimoVisionConfig
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -36,11 +38,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=30.0,
         help="Maximum LabelPlus-point to CTD component edge distance for unique matching.",
     )
+    parser.add_argument(
+        "--call-mimo-recognition",
+        action="store_true",
+        help="Directly call MIMO vision to recognize the source text region for each Phase 2 record.",
+    )
+    parser.add_argument("--env-file", default=".env", help="Load API environment variables from this file.")
     return parser
 
 
 def main() -> None:
     args = build_parser().parse_args()
+    _load_env_file(Path(args.env_file))
 
     run_dir = run_phase2(
         Path(args.labelplus_file),
@@ -52,8 +61,37 @@ def main() -> None:
         record_ids=args.record_ids,
         detection_strategy=args.detection_strategy,
         ctd_max_edge_distance_px=args.ctd_max_edge_distance_px,
+        call_model_text_recognition=args.call_mimo_recognition,
+        model_text_recognition_client=MimoVisionClient(_mimo_config_from_env())
+        if args.call_mimo_recognition
+        else None,
     )
     print(run_dir)
+
+
+def _load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        name, value = stripped.split("=", 1)
+        os.environ.setdefault(name.strip(), value.strip().strip('"').strip("'"))
+
+
+def _mimo_config_from_env() -> MimoVisionConfig:
+    required = ["MIMO_BASE_URL", "MIMO_API_KEY", "MIMO_VISION_MODEL"]
+    missing = [name for name in required if not os.environ.get(name)]
+    if missing:
+        raise SystemExit(f"Missing required environment variables: {', '.join(missing)}")
+    return MimoVisionConfig(
+        base_url=os.environ["MIMO_BASE_URL"],
+        api_key=os.environ["MIMO_API_KEY"],
+        model=os.environ["MIMO_VISION_MODEL"],
+        max_completion_tokens=1024,
+        thinking_type="disabled",
+    )
 
 
 if __name__ == "__main__":

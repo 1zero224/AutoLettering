@@ -7,6 +7,7 @@ from pathlib import Path
 from PIL import Image
 
 from .inpaint.bubble_fill import mask_fill_text_pixels, region_fill_text_area, soft_region_fill_text_area, text_mask_inpaint
+from .inpaint.mask_refinement import MaskRefinementOptions, refine_cleanup_artifacts
 from .record_selection import normalize_record_ids, row_matches_record_ids
 from .text_bbox import selected_text_bbox
 from .text_mask_bbox import selected_text_mask_bbox
@@ -22,12 +23,36 @@ def run_phase6_bubble_cleanup(
     record_ids: list[str] | None = None,
     inpaint_method: str = "opencv_telea",
     mask_dilate_px: int = 3,
+    mask_adjust_dilate_px: int = 0,
+    mask_adjust_erode_px: int = 0,
+    mask_extend_left_px: int = 0,
+    mask_extend_right_px: int = 0,
+    mask_extend_up_px: int = 0,
+    mask_extend_down_px: int = 0,
 ) -> Path:
     run_dir = Path(output_root) / (run_id or "phase6-bubble-cleanup")
     run_dir.mkdir(parents=True, exist_ok=True)
     detections = _load_detection_rows(Path(detection_run_dir) / "detections.jsonl")
     layouts = _load_layout_rows(Path(layout_run_dir) / "layout-results.jsonl")
-    rows = _cleanup_rows(run_dir, detections, layouts, sample_limit, cleanup_method, record_ids, inpaint_method, mask_dilate_px)
+    refinement_options = MaskRefinementOptions(
+        dilate_px=mask_adjust_dilate_px,
+        erode_px=mask_adjust_erode_px,
+        extend_left_px=mask_extend_left_px,
+        extend_right_px=mask_extend_right_px,
+        extend_up_px=mask_extend_up_px,
+        extend_down_px=mask_extend_down_px,
+    )
+    rows = _cleanup_rows(
+        run_dir,
+        detections,
+        layouts,
+        sample_limit,
+        cleanup_method,
+        record_ids,
+        inpaint_method,
+        mask_dilate_px,
+        refinement_options,
+    )
     _write_jsonl(run_dir / "cleanup-results.jsonl", rows)
     _write_report(run_dir / "reports" / "phase6-report.md", detection_run_dir, layout_run_dir, rows)
     return run_dir
@@ -62,6 +87,7 @@ def _cleanup_rows(
     record_ids: list[str] | None = None,
     inpaint_method: str = "opencv_telea",
     mask_dilate_px: int = 3,
+    refinement_options: MaskRefinementOptions | None = None,
 ) -> list[dict]:
     wanted = normalize_record_ids(record_ids)
     rows: list[dict] = []
@@ -74,11 +100,19 @@ def _cleanup_rows(
         if detection is None:
             rows.append(_skipped_row(layout, "missing_detection"))
             continue
-        rows.append(_cleanup_one(run_dir, detection, layout, cleanup_method, inpaint_method, mask_dilate_px))
+        rows.append(_cleanup_one(run_dir, detection, layout, cleanup_method, inpaint_method, mask_dilate_px, refinement_options))
     return rows
 
 
-def _cleanup_one(run_dir: Path, detection: dict, layout: dict, cleanup_method: str, inpaint_method: str, mask_dilate_px: int) -> dict:
+def _cleanup_one(
+    run_dir: Path,
+    detection: dict,
+    layout: dict,
+    cleanup_method: str,
+    inpaint_method: str,
+    mask_dilate_px: int,
+    refinement_options: MaskRefinementOptions | None,
+) -> dict:
     if detection.get("group_name") != "框内":
         return _skipped_row(layout, "not_bubble_group")
 
@@ -95,12 +129,13 @@ def _cleanup_one(run_dir: Path, detection: dict, layout: dict, cleanup_method: s
         inpaint_method=inpaint_method,
         mask_dilate_px=mask_dilate_px,
     )
+    refinement = _refine_cleanup_result(run_dir, result, detection["record_id"], refinement_options)
     return {
         "record_id": detection["record_id"],
         "image_name": detection.get("image_name"),
         "translated_text": detection.get("translated_text", ""),
         "status": "cleaned",
-        "cleanup": _cleanup_payload(result, cleanup_method, text_bbox, mask_bbox, mask_dilate_px),
+        "cleanup": _cleanup_payload(result, cleanup_method, text_bbox, mask_bbox, mask_dilate_px, refinement),
     }
 
 
@@ -170,6 +205,7 @@ def _cleanup_payload(
     text_bbox: tuple[int, int, int, int] | None = None,
     mask_bbox: tuple[int, int, int, int] | None = None,
     mask_dilate_px: int = 3,
+    refinement=None,
 ) -> dict:
     payload = asdict(result)
     payload["bbox"] = list(result.bbox)
@@ -178,6 +214,11 @@ def _cleanup_payload(
     payload["cleaned_crop_path"] = str(result.cleaned_crop_path)
     payload["cleanup_mask_path"] = str(result.cleanup_mask_path) if result.cleanup_mask_path else None
     payload["before_after_path"] = str(result.before_after_path)
+    if refinement is not None:
+        payload["cleaned_crop_path"] = str(refinement.refined_cleaned_crop_path)
+        payload["cleanup_mask_path"] = str(refinement.refined_mask_path)
+        payload["before_after_path"] = str(refinement.before_after_path)
+        payload["mask_refinement"] = _mask_refinement_payload(refinement)
     if text_bbox is not None:
         payload["text_bbox"] = list(text_bbox)
     if mask_bbox is not None:
@@ -188,6 +229,34 @@ def _cleanup_payload(
     if layout_text_bbox is not None:
         payload["layout_text_bbox"] = list(layout_text_bbox)
     return payload
+
+
+def _refine_cleanup_result(run_dir: Path, result, record_id: str, options: MaskRefinementOptions | None):
+    if options is None or not options.enabled() or result.cleanup_mask_path is None:
+        return None
+    return refine_cleanup_artifacts(
+        before_crop_path=result.before_crop_path,
+        cleaned_crop_path=result.cleaned_crop_path,
+        source_mask_path=result.cleanup_mask_path,
+        fill_color=result.fill_color,
+        output_dir=run_dir / "mask_refinement",
+        record_id=record_id,
+        options=options,
+    )
+
+
+def _mask_refinement_payload(refinement) -> dict:
+    return {
+        "schema_version": refinement.schema_version,
+        "operations": refinement.operations,
+        "source_mask_path": str(refinement.source_mask_path),
+        "refined_mask_path": str(refinement.refined_mask_path),
+        "mask_overlay_path": str(refinement.mask_overlay_path),
+        "refined_cleaned_crop_path": str(refinement.refined_cleaned_crop_path),
+        "before_after_path": str(refinement.before_after_path),
+        "input_mask_pixel_count": refinement.input_mask_pixel_count,
+        "output_mask_pixel_count": refinement.output_mask_pixel_count,
+    }
 
 
 def _layout_text_bbox(
@@ -235,6 +304,7 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
 def _write_report(output_path: Path, detection_run_dir: str | Path, layout_run_dir: str | Path, rows: list[dict]) -> None:
     cleaned = sum(1 for row in rows if row["status"] == "cleaned")
     skipped = len(rows) - cleaned
+    refined = sum(1 for row in rows if (row.get("cleanup") or {}).get("mask_refinement"))
     lines = [
         "# Phase 6 Bubble Cleanup Report",
         "",
@@ -246,6 +316,7 @@ def _write_report(output_path: Path, detection_run_dir: str | Path, layout_run_d
         f"- Records processed: {len(rows)}",
         f"- Cleaned: {cleaned}",
         f"- Skipped: {skipped}",
+        f"- Mask refinement applied: {refined}",
         "",
         "## Generated Artifacts",
         "",

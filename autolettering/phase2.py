@@ -4,6 +4,7 @@ import csv
 import json
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
 
 from .detection.cv_text import detect_text_region, detection_result_to_dict, draw_detection_debug
 from .detection.ctd_masks import (
@@ -14,6 +15,10 @@ from .detection.ctd_masks import (
     ctd_mask_component_rows,
     detect_ctd_mask_components_for_image,
     labelplus_ctd_mask_distance_rows,
+)
+from .detection.model_text_recognition import (
+    recognize_text_region_with_model,
+    write_text_region_context_crop,
 )
 from .detection.models import CandidateBox, DetectionResult
 from .detection.regions import build_search_region
@@ -41,6 +46,8 @@ def run_phase2(
     record_ids: Iterable[str] | None = None,
     detection_strategy: str = "cta_mask",
     ctd_max_edge_distance_px: float = 30.0,
+    call_model_text_recognition: bool = False,
+    model_text_recognition_client: Any | None = None,
 ) -> Path:
     manifest = parse_labelplus_project(labelplus_file)
     run_dir = Path(output_root) / (run_id or _timestamp_run_id().replace("phase1", "phase2"))
@@ -55,6 +62,8 @@ def run_phase2(
         radius_y,
         detection_strategy=strategy,
         ctd_max_edge_distance_px=ctd_max_edge_distance_px,
+        call_model_text_recognition=call_model_text_recognition,
+        model_text_recognition_client=model_text_recognition_client,
     )
 
     _write_phase2_report(
@@ -66,6 +75,7 @@ def run_phase2(
         radius_x=radius_x,
         radius_y=radius_y,
         detection_strategy=strategy,
+        call_model_text_recognition=call_model_text_recognition,
     )
     return run_dir
 
@@ -95,6 +105,8 @@ def _write_detections(
     radius_y: int,
     detection_strategy: str,
     ctd_max_edge_distance_px: float,
+    call_model_text_recognition: bool,
+    model_text_recognition_client: Any | None,
 ) -> tuple[int, int]:
     ok_count = failed_count = 0
     rows: list[dict] = []
@@ -115,6 +127,8 @@ def _write_detections(
                 ctd_match=ctd_matches.get(label.id),
                 ctd_match_diagnostics=ctd_diagnostics.get(label.id),
                 ctd_max_edge_distance_px=ctd_max_edge_distance_px,
+                call_model_text_recognition=call_model_text_recognition,
+                model_text_recognition_client=model_text_recognition_client,
             )
             rows.append(payload)
             ok_count += int(payload["status"] == "ok")
@@ -134,6 +148,8 @@ def _detect_record(
     ctd_match: CtdMaskMatch | None = None,
     ctd_match_diagnostics: dict | None = None,
     ctd_max_edge_distance_px: float | None = None,
+    call_model_text_recognition: bool = False,
+    model_text_recognition_client: Any | None = None,
 ) -> dict:
     result = _detect_with_strategy(
         image,
@@ -178,6 +194,14 @@ def _detect_record(
         )
     payload["lettering_route"] = _lettering_route_payload(payload, detection_strategy)
     payload.update(_text_region_payload(payload, detection_strategy))
+    if call_model_text_recognition:
+        _add_model_text_recognition(
+            payload,
+            run_dir,
+            image,
+            label,
+            model_text_recognition_client,
+        )
     full_bbox, body_bbox = _add_derived_text_bboxes(payload)
     draw_detection_debug(
         image.image_path,
@@ -188,6 +212,110 @@ def _detect_record(
         selected_text_body_xyxy=body_bbox,
     )
     return payload
+
+
+def _add_model_text_recognition(
+    payload: dict,
+    run_dir: Path,
+    image: ManifestImage,
+    label: ManifestLabel,
+    client: Any | None,
+) -> None:
+    if client is None:
+        payload["model_text_recognition"] = {
+            "status": "skipped",
+            "failure_reason": "model_text_recognition_client_required",
+        }
+        return
+
+    context_bbox = _model_text_context_bbox(payload)
+    context_path = (
+        run_dir
+        / "debug"
+        / "model_text_recognition"
+        / f"{Path(image.image_name).stem}-{label.record_index}.png"
+    )
+    write_text_region_context_crop(image.image_path, context_bbox, context_path)
+    labelpoint_in_context = (label.x_px - context_bbox[0], label.y_px - context_bbox[1])
+    candidate_boxes = _model_text_candidate_boxes(payload, context_bbox)
+
+    try:
+        recognition = recognize_text_region_with_model(
+            client=client,
+            context_image_path=context_path,
+            context_bbox_xyxy=context_bbox,
+            labelplus_point_xy=labelpoint_in_context,
+            translated_text=label.translated_text,
+            candidate_boxes=candidate_boxes,
+        )
+    except Exception as exc:  # pragma: no cover - real API failures are recorded, not re-raised.
+        recognition = {
+            "status": "failed",
+            "failure_reason": f"model_text_recognition_error:{type(exc).__name__}",
+        }
+
+    recognition.update(
+        {
+            "context_image_path": str(context_path),
+            "context_bbox_xyxy": list(context_bbox),
+            "context_labelplus_point_xy": list(labelpoint_in_context),
+            "candidate_boxes_xyxy": candidate_boxes,
+        }
+    )
+    payload["model_text_recognition"] = recognition
+    if recognition.get("status") == "ok":
+        payload["recognized_source_text"] = recognition.get("source_text")
+        payload["recognized_orientation"] = recognition.get("orientation")
+        payload["model_text_region_bbox_xyxy"] = recognition.get("global_bbox_xyxy")
+
+
+def _model_text_context_bbox(payload: dict) -> tuple[int, int, int, int]:
+    fallback = payload.get("fallback") or {}
+    bbox = fallback.get("context_bbox_xyxy") or payload.get("search_region_xyxy")
+    if not _is_bbox_like(bbox):
+        raise ValueError("missing_model_text_context_bbox")
+    return _bbox_tuple(bbox)
+
+
+def _model_text_candidate_boxes(payload: dict, context_bbox: tuple[int, int, int, int]) -> list[list[int]]:
+    boxes: list[list[int]] = []
+    seen: set[tuple[int, int, int, int]] = set()
+    for bbox in _model_text_global_candidate_bboxes(payload):
+        local = _bbox_to_context(bbox, context_bbox)
+        key = tuple(local)
+        if key in seen:
+            continue
+        seen.add(key)
+        boxes.append(local)
+    return boxes
+
+
+def _model_text_global_candidate_bboxes(payload: dict) -> list[tuple[int, int, int, int]]:
+    boxes: list[tuple[int, int, int, int]] = []
+    selected = payload.get("selected_text_box_xyxy")
+    if _is_bbox_like(selected):
+        boxes.append(_bbox_tuple(selected))
+    for candidate in payload.get("candidate_boxes", []):
+        bbox = candidate.get("xyxy") if isinstance(candidate, dict) else None
+        if _is_bbox_like(bbox):
+            boxes.append(_bbox_tuple(bbox))
+    fallback = payload.get("fallback") or {}
+    for bbox in fallback.get("context_candidate_bboxes_xyxy") or []:
+        if _is_bbox_like(bbox):
+            boxes.append(_bbox_tuple(bbox))
+    return boxes
+
+
+def _bbox_to_context(
+    bbox: tuple[int, int, int, int],
+    context_bbox: tuple[int, int, int, int],
+) -> list[int]:
+    return [
+        bbox[0] - context_bbox[0],
+        bbox[1] - context_bbox[1],
+        bbox[2] - context_bbox[0],
+        bbox[3] - context_bbox[1],
+    ]
 
 
 def _detect_with_strategy(
@@ -711,6 +839,7 @@ def _write_phase2_report(
     radius_x: int,
     radius_y: int,
     detection_strategy: str,
+    call_model_text_recognition: bool = False,
 ) -> None:
     lines = [
         "# Phase 2 Detection Report",
@@ -724,6 +853,7 @@ def _write_phase2_report(
         f"- Failed records: {failed_count}",
         f"- Search radius: `{radius_x} x {radius_y}`",
         f"- Detection strategy: `{detection_strategy}`",
+        f"- Direct model text-region recognition: `{call_model_text_recognition}`",
         "- CTA strategy note: `cta_mask` is the user-facing CTA-first route; the actual BallonsTranslator detector module is `ctd` / `ComicTextDetector`.",
         "- CTD mask matching: split `ctd-refined-mask.png` into connected components, then uniquely match LabelPlus points by point-to-mask-edge distance.",
         "",
