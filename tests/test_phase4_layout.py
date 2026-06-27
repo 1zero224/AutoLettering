@@ -559,6 +559,33 @@ def test_run_phase4_ignores_high_confidence_micro_rotation_angle(tmp_path: Path)
     assert layout["angle_degrees"] == 0.0
 
 
+def test_run_phase4_ignores_small_bubble_vertical_rotation_angle(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+    source_crop_path = tmp_path / "source-crop.png"
+    Image.new("RGB", (115, 219), "white").save(source_crop_path)
+    phase2_run = tmp_path / "phase2-detection"
+    phase3_run = tmp_path / "phase3-selection"
+    phase5_run = tmp_path / "phase5-angle"
+    for path in [phase2_run, phase3_run, phase5_run]:
+        path.mkdir()
+    _write_font_selection(phase3_run / "font-selections.jsonl", font_path, source_crop_path, translated_text="并不是这样的！")
+    _write_bubble_vertical_detection(phase2_run / "detections.jsonl")
+    _write_small_slant_vertical_angle_result(phase5_run / "angle-results.jsonl")
+
+    run_dir = run_phase4(
+        selection_run_dir=phase3_run,
+        angle_run_dir=phase5_run,
+        detection_run_dir=phase2_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase4-small-bubble-vertical-angle",
+        sample_limit=1,
+    )
+
+    layout = _read_jsonl(run_dir / "layout-results.jsonl")[0]["layout"]
+    assert layout["orientation"] == "vertical"
+    assert layout["angle_degrees"] == 0.0
+
+
 def test_run_phase4_prefers_high_confidence_angle_orientation_for_wide_multicolumn_text(tmp_path: Path):
     font_path = _copy_font(tmp_path)
     source_crop_path = tmp_path / "source-crop.png"
@@ -1066,6 +1093,19 @@ def _write_micro_angle_result(path: Path) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def _write_small_slant_vertical_angle_result(path: Path) -> None:
+    payload = {
+        "record_id": "page.png#1",
+        "status": "angle_estimated",
+        "orientation": {
+            "detected_orientation": "vertical",
+            "selected_angle_degrees": -6.3,
+            "confidence": 0.823,
+        },
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
 def _write_low_confidence_vertical_angle_result(path: Path) -> None:
     payload = {
         "record_id": "page.png#1",
@@ -1088,6 +1128,21 @@ def _write_detection_with_tight_candidates(path: Path) -> None:
             {"xyxy": [674, 0, 1049, 342], "area": 87035},
             {"xyxy": [840, 145, 874, 300], "area": 3858},
             {"xyxy": [799, 145, 837, 271], "area": 3481},
+        ],
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _write_bubble_vertical_detection(path: Path) -> None:
+    payload = {
+        "record_id": "page.png#1",
+        "status": "ok",
+        "group_name": "框内",
+        "selected_text_box_xyxy": [1157, 1341, 1272, 1560],
+        "selected_text_full_xyxy": [1157, 1341, 1272, 1560],
+        "selected_text_body_xyxy": [1157, 1341, 1272, 1560],
+        "candidate_boxes": [
+            {"xyxy": [1157, 1341, 1272, 1560], "area": 25185, "score": 1.0, "polarity": "ctd_mask"},
         ],
     }
     path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")

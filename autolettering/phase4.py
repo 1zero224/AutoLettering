@@ -15,6 +15,7 @@ from .text_body_bbox import selected_text_body_bbox
 from .text_mask_bbox import selected_text_mask_bbox
 
 MIN_APPLIED_ANGLE_DEGREES = 3.0
+BUBBLE_VERTICAL_ANGLE_SNAP_DEGREES = 6.5
 
 
 def run_phase4(
@@ -133,7 +134,7 @@ def _search_layout(
     target_bbox: list[int] | None,
 ):
     orientation = _selected_orientation(target_size, angle)
-    angle_degrees = _selected_angle_degrees(orientation, angle)
+    angle_degrees = _selected_angle_degrees(orientation, angle, detection)
     max_font_size = _max_font_size(orientation, detection, target_bbox, row.get("translated_text", ""))
     line_spacing_values = _line_spacing_values_for_record(orientation, detection, target_bbox)
     return search_fitting_layout(
@@ -498,11 +499,22 @@ def _angle_override(angle: dict | None) -> float:
     return float(angle.get("selected_angle_degrees") or 0.0)
 
 
-def _selected_angle_degrees(orientation: str, angle: dict | None) -> float:
+def _selected_angle_degrees(orientation: str, angle: dict | None, detection: dict | None = None) -> float:
     if orientation != _orientation_override(angle) or _angle_confidence(angle) < 0.8:
         return 0.0
     value = _angle_override(angle)
+    if _should_snap_bubble_vertical_angle(orientation, value, detection):
+        return 0.0
     return 0.0 if abs(value) < MIN_APPLIED_ANGLE_DEGREES else value
+
+
+def _should_snap_bubble_vertical_angle(orientation: str, angle_degrees: float, detection: dict | None) -> bool:
+    return (
+        orientation == "vertical"
+        and detection is not None
+        and detection.get("group_name") == "框内"
+        and abs(angle_degrees) <= BUBBLE_VERTICAL_ANGLE_SNAP_DEGREES
+    )
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:

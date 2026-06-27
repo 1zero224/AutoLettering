@@ -315,6 +315,40 @@
         ]
       }
     },
+    "phase0-8-gbc06-v30-gbc06-03-8-angle-snap": {
+      "extends": "phase0-8-gbc06-v29-gbc06-02-14-gpt-sfx",
+      "run_id": "phase0-8-gbc06-pipeline-coverage-v30-gbc06-03-8-angle-snap",
+      "next_limit": 12,
+      "append": {
+        "detection_run_dir": [
+          "outputs/runs/phase2-gbc06-03-8-cta-detection-v1"
+        ],
+        "font_selection_run_dir": [
+          "outputs/runs/phase3-gbc06-03-8-mimo-font-selection"
+        ],
+        "layout_run_dir": [
+          "outputs/runs/phase4-gbc06-03-8-layout-v2-angle-snap"
+        ],
+        "angle_run_dir": [
+          "outputs/runs/phase5-gbc06-03-8-angle"
+        ],
+        "cleanup_run_dirs": [
+          "outputs/runs/phase6-gbc06-03-8-region-fill-v2-angle-snap"
+        ],
+        "preview_run_dir": [
+          "outputs/runs/phase7-8-gbc06-03-8-preview-v2-angle-snap/runs/phase7-preview"
+        ],
+        "export_run_dir": [
+          "outputs/runs/phase7-8-gbc06-03-8-preview-v2-angle-snap/runs/phase8-export"
+        ],
+        "phase7_preview_evaluation_run_dir": [
+          "outputs/runs/phase7-8-gbc06-03-8-preview-v2-angle-snap/runs/phase7-evaluation"
+        ],
+        "phase8_export_audit_run_dir": [
+          "outputs/runs/phase8-gbc06-03-8-export-audit-v2-angle-snap"
+        ]
+      }
+    },
     "phase0-8-gbc06-17-gpt-direct-repair-source": {
       "run_id": "phase0-8-gbc06-17-gpt-direct-coverage-v1",
       "next_limit": 5,

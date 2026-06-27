@@ -747,6 +747,81 @@ next_experiments[0]=GBC06_03.png#8
 next_experiments[1]=GBC06_03.png#9
 ```
 
+The v30 report promotes `GBC06_03.png#8`, a speech-bubble vertical text record,
+through the full Phase 2-8 chain and records the small-angle snap fix used for
+the final lettering:
+
+```text
+phase2-gbc06-03-8-cta-detection-v1
+phase3-gbc06-03-8-font-comparison
+phase3-gbc06-03-8-mimo-font-selection
+phase5-gbc06-03-8-angle
+phase4-gbc06-03-8-layout-v2-angle-snap
+phase6-gbc06-03-8-region-fill-v2-angle-snap
+phase7-8-gbc06-03-8-preview-v2-angle-snap
+phase8-gbc06-03-8-export-audit-v2-angle-snap
+```
+
+The real commands were:
+
+```powershell
+python experiments/phase2_detect_text_regions.py --labelplus-file "GBC06 (已翻 斗笠)\翻译_0.txt" --output-root outputs/runs --run-id phase2-gbc06-03-8-cta-detection-v1 --sample-limit 1 --record-id "GBC06_03.png#8" --detection-strategy cta_mask --ctd-max-edge-distance-px 20
+python experiments/phase3_font_comparison.py --labelplus-file "GBC06 (已翻 斗笠)\翻译_0.txt" --detection-run-dir outputs/runs/phase2-gbc06-03-8-cta-detection-v1 --font-dir "工具箱漫画字体V2.5" --output-root outputs/runs --run-id phase3-gbc06-03-8-font-comparison --sample-limit 1 --font-limit 12 --record-id "GBC06_03.png#8"
+python experiments/phase3_mimo_font_selection.py --input-run-dir outputs/runs/phase3-gbc06-03-8-font-comparison --output-root outputs/runs --run-id phase3-gbc06-03-8-mimo-font-selection --sample-limit 1 --record-id "GBC06_03.png#8"
+python experiments/phase5_orientation_angle.py --detection-run-dir outputs/runs/phase2-gbc06-03-8-cta-detection-v1 --output-root outputs/runs --run-id phase5-gbc06-03-8-angle --sample-limit 1 --record-id "GBC06_03.png#8"
+python experiments/phase4_layout_search.py --selection-run-dir outputs/runs/phase3-gbc06-03-8-mimo-font-selection --angle-run-dir outputs/runs/phase5-gbc06-03-8-angle --detection-run-dir outputs/runs/phase2-gbc06-03-8-cta-detection-v1 --output-root outputs/runs --run-id phase4-gbc06-03-8-layout-v2-angle-snap --sample-limit 1 --record-id "GBC06_03.png#8"
+python experiments/phase6_bubble_cleanup.py --detection-run-dir outputs/runs/phase2-gbc06-03-8-cta-detection-v1 --layout-run-dir outputs/runs/phase4-gbc06-03-8-layout-v2-angle-snap --output-root outputs/runs --run-id phase6-gbc06-03-8-region-fill-v2-angle-snap --sample-limit 1 --cleanup-method region_fill --record-id "GBC06_03.png#8"
+python experiments/phase7_8_integrated_smoke.py --detection-run-dir outputs/runs/phase2-gbc06-03-8-cta-detection-v1 --cleanup-run-dir outputs/runs/phase6-gbc06-03-8-region-fill-v2-angle-snap --layout-run-dir outputs/runs/phase4-gbc06-03-8-layout-v2-angle-snap --font-selection-run-dir outputs/runs/phase3-gbc06-03-8-mimo-font-selection --output-root outputs/runs --run-id phase7-8-gbc06-03-8-preview-v2-angle-snap --sample-limit 1
+python experiments/phase8_export_quality_audit.py --phase8-run-dir outputs/runs/phase7-8-gbc06-03-8-preview-v2-angle-snap/runs/phase8-export --output-root outputs/runs --run-id phase8-gbc06-03-8-export-audit-v2-angle-snap
+```
+
+Key real-sample results:
+
+```text
+phase2 status=ok
+phase2 selected_text_box_xyxy=[1157,1341,1272,1560]
+phase2 cta_component=component-0020+component-0021+component-0022+component-0023+component-0024+component-0025+component-0026
+phase3 selected_font=[toolbox]文黑体-简繁-Bold(v2.4).ttf confidence=0.95
+phase5 orientation=vertical selected_angle=-6.3 confidence=0.823
+phase4 angle_snap applied: angle_degrees=0.0, font_size=32, measured=33x215, target=115x219, vertical_align=top
+phase6 method=bubble_region_fill status=cleaned
+phase7 MIMO score=9 usable=true original_text_removed=true art_preserved=true lettering_readable=true issues=[]
+phase8 exported_text_layer_count=1
+phase8 audit passed=true vertical_top_layer_count=1 record_issue_count=0 anchor_y=1341
+```
+
+The source crop's PCA estimate was `-6.3` degrees, but visual review showed this
+was a normal vertical manga bubble rather than a clearly tilted lettering block.
+Phase 4 now snaps small high-confidence `框内` vertical angles to `0.0` before
+rendering, preserving the Phase 5 diagnostic while avoiding visibly rotated
+Chinese lettering. The preview contact sheet is
+`outputs/runs/phase7-8-gbc06-03-8-preview-v2-angle-snap/runs/phase7-preview/debug/evaluation_contact_sheets/GBC06-03-png.png`.
+
+Observed v30 coverage result:
+
+```text
+base_record_count=44
+complete_record_count=44
+incomplete_record_count=0
+phase1_labelplus covered=44 missing=0
+phase2_detection covered=44 missing=0
+phase3_font_selection covered=42 missing=2
+phase4_layout covered=42 missing=2
+phase5_angle covered=42 missing=2
+phase6_cleanup covered=44 missing=0
+phase7_preview covered=44 missing=0
+phase8_export covered=44 missing=0
+GBC06_02.png#14 route_skipped_stages=phase3_font_selection,phase4_layout,phase5_angle
+GBC06_03.png#5 route_skipped_stages=phase3_font_selection,phase4_layout,phase5_angle
+phase6_gpt_replacement checked=3 failures=0 record_issues=0
+phase7_preview evaluations=21 usable=21/21 failed=0 low_score=0 records=44 record_issues=0
+phase8_export audits=11 passed=11/11 records=13 record_issues=0
+phase1_pending_detection_count=136
+next_records=[]
+next_experiments[0]=GBC06_03.png#9
+next_experiments[1]=GBC06_03.png#10
+```
+
 The first `next-limit=12` Phase 1 records missing detection in v17 are:
 
 ```text
@@ -1055,4 +1130,45 @@ Observed result:
 
 ```text
 exit 0, no whitespace errors reported
+```
+
+Fresh v30 registry coverage generation:
+
+```powershell
+python experiments/pipeline_coverage_report.py --registry-file docs/pipeline-runs.gbc06.json --registry-entry phase0-8-gbc06-v30-gbc06-03-8-angle-snap --output-root outputs/runs --next-limit 12
+```
+
+Observed result:
+
+```text
+outputs\runs\phase0-8-gbc06-pipeline-coverage-v30-gbc06-03-8-angle-snap
+base_record_count=44 complete_record_count=44 incomplete_record_count=0
+phase7_preview evaluations=21 usable=21/21 failed=0 low_score=0 records=44 record_issues=0
+phase8_export audits=11 passed=11/11 records=13 record_issues=0
+next_experiments[0].record_id=GBC06_03.png#9
+```
+
+Fresh targeted verification for the v30 angle snap, coverage, and Phase 7/8
+quality gates:
+
+```powershell
+python -m pytest tests/test_pipeline_coverage.py tests/test_pipeline_quality_coverage.py tests/test_pipeline_quality_phase7.py tests/test_phase7_preview_evaluation.py tests/test_phase8_export_quality_audit.py tests/test_phase7_8_smoke.py tests/test_phase4_layout.py tests/test_phase5_orientation.py -q
+```
+
+Observed result:
+
+```text
+93 passed in 7.88s
+```
+
+Fresh full regression:
+
+```powershell
+python -m pytest -q
+```
+
+Observed result:
+
+```text
+409 passed in 71.07s (0:01:11)
 ```
