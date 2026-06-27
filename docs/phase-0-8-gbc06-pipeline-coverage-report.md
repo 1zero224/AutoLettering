@@ -617,6 +617,136 @@ next_experiments[0]=GBC06_02.png#14
 next_experiments[1]=GBC06_03.png#7
 ```
 
+The v28 report promotes `GBC06_03.png#7`, the next speech-bubble record after
+the v18 direct-GPT fallback update, through the full Phase 2-8 chain:
+
+```text
+phase2-gbc06-03-7-cta-detection-v1
+phase3-gbc06-03-7-font-comparison
+phase3-gbc06-03-7-mimo-font-selection
+phase5-gbc06-03-7-angle
+phase4-gbc06-03-7-layout-v1
+phase6-gbc06-03-7-region-fill-v1
+phase7-8-gbc06-03-7-preview-v1
+phase8-gbc06-03-7-export-audit-v1
+```
+
+The real commands were:
+
+```powershell
+python experiments/phase2_detect_text_regions.py --labelplus-file "GBC06 (已翻 斗笠)\翻译_0.txt" --output-root outputs/runs --run-id phase2-gbc06-03-7-cta-detection-v1 --sample-limit 1 --record-id "GBC06_03.png#7" --detection-strategy cta_mask --ctd-max-edge-distance-px 20
+python experiments/phase3_font_comparison.py --labelplus-file "GBC06 (已翻 斗笠)\翻译_0.txt" --detection-run-dir outputs/runs/phase2-gbc06-03-7-cta-detection-v1 --font-dir "工具箱漫画字体V2.5" --output-root outputs/runs --run-id phase3-gbc06-03-7-font-comparison --sample-limit 1 --font-limit 12 --record-id "GBC06_03.png#7"
+python experiments/phase3_mimo_font_selection.py --input-run-dir outputs/runs/phase3-gbc06-03-7-font-comparison --output-root outputs/runs --run-id phase3-gbc06-03-7-mimo-font-selection --sample-limit 1 --record-id "GBC06_03.png#7"
+python experiments/phase5_orientation_angle.py --detection-run-dir outputs/runs/phase2-gbc06-03-7-cta-detection-v1 --output-root outputs/runs --run-id phase5-gbc06-03-7-angle --sample-limit 1 --record-id "GBC06_03.png#7"
+python experiments/phase4_layout_search.py --selection-run-dir outputs/runs/phase3-gbc06-03-7-mimo-font-selection --angle-run-dir outputs/runs/phase5-gbc06-03-7-angle --detection-run-dir outputs/runs/phase2-gbc06-03-7-cta-detection-v1 --output-root outputs/runs --run-id phase4-gbc06-03-7-layout-v1 --sample-limit 1 --record-id "GBC06_03.png#7"
+python experiments/phase6_bubble_cleanup.py --detection-run-dir outputs/runs/phase2-gbc06-03-7-cta-detection-v1 --layout-run-dir outputs/runs/phase4-gbc06-03-7-layout-v1 --output-root outputs/runs --run-id phase6-gbc06-03-7-region-fill-v1 --sample-limit 1 --cleanup-method region_fill --record-id "GBC06_03.png#7"
+python experiments/phase7_8_integrated_smoke.py --detection-run-dir outputs/runs/phase2-gbc06-03-7-cta-detection-v1 --cleanup-run-dir outputs/runs/phase6-gbc06-03-7-region-fill-v1 --layout-run-dir outputs/runs/phase4-gbc06-03-7-layout-v1 --font-selection-run-dir outputs/runs/phase3-gbc06-03-7-mimo-font-selection --output-root outputs/runs --run-id phase7-8-gbc06-03-7-preview-v1 --sample-limit 1
+python experiments/phase8_export_quality_audit.py --phase8-run-dir outputs/runs/phase7-8-gbc06-03-7-preview-v1/runs/phase8-export --output-root outputs/runs --run-id phase8-gbc06-03-7-export-audit-v1
+```
+
+Key real-sample results:
+
+```text
+phase2 status=ok
+phase2 selected_text_box_xyxy=[300,968,341,1208]
+phase2 cta_component=component-0016+component-0017+component-0018
+phase3 selected_font=[toolbox]拙黑体-简体(v2.4).ttf confidence=0.95
+phase5 orientation=vertical selected_angle=-0.3 confidence=0.989
+phase4 font_size=36 measured=36x238 target=41x240 angle=0.0 vertical_align=top
+phase6 method=bubble_region_fill status=cleaned
+phase7 MIMO score=10 usable=true original_text_removed=true art_preserved=true lettering_readable=true issues=[]
+phase8 exported_text_layer_count=1
+phase8 audit passed=true vertical_top_layer_count=1 record_issue_count=0 anchor_y=968
+```
+
+Observed v28 coverage result:
+
+```text
+base_record_count=42
+complete_record_count=42
+incomplete_record_count=0
+phase1_labelplus covered=42 missing=0
+phase2_detection covered=42 missing=0
+phase3_font_selection covered=41 missing=1
+phase4_layout covered=41 missing=1
+phase5_angle covered=41 missing=1
+phase6_cleanup covered=42 missing=0
+phase7_preview covered=42 missing=0
+phase8_export covered=42 missing=0
+GBC06_03.png#5 route_skipped_stages=phase3_font_selection,phase4_layout,phase5_angle
+phase6_gpt_replacement checked=2 failures=0 record_issues=0
+phase7_preview evaluations=19 usable=19/19 failed=0 low_score=0 records=42 record_issues=0
+phase8_export audits=9 passed=9/9 records=12 record_issues=0
+phase1_pending_detection_count=138
+next_records=[]
+next_experiments[0]=GBC06_02.png#14
+next_experiments[1]=GBC06_03.png#8
+```
+
+The v29 report promotes the existing accepted `GBC06_02.png#14` GPT SFX direct
+replacement chain into the global registry after adding the two missing
+independent quality artifacts:
+
+```text
+phase2-gbc06-02-14-cta-detection-v1
+phase6-gbc06-02-14-fallback-gpt-image2-v3-sfx-recovery
+phase6-gbc06-02-14-gpt-v3-sfx-recovery-quality
+phase7-8-gbc06-02-14-gpt-v3-sfx-quality-gate
+phase7-gbc06-02-14-gpt-v3-sfx-quality-gate-eval-v1
+phase8-gbc06-02-14-gpt-v3-sfx-quality-gate-audit-v1
+```
+
+The two follow-up quality commands were:
+
+```powershell
+python experiments/phase7_preview_evaluate.py --preview-run-dir outputs/runs/phase7-8-gbc06-02-14-gpt-v3-sfx-quality-gate/runs/phase7-preview --output-root outputs/runs --run-id phase7-gbc06-02-14-gpt-v3-sfx-quality-gate-eval-v1 --sample-limit 1
+python experiments/phase8_export_quality_audit.py --phase8-run-dir outputs/runs/phase7-8-gbc06-02-14-gpt-v3-sfx-quality-gate/runs/phase8-export --output-root outputs/runs --run-id phase8-gbc06-02-14-gpt-v3-sfx-quality-gate-audit-v1
+```
+
+Key `GBC06_02.png#14` result:
+
+```text
+phase2 status=fallback_required route=mimo_locator_gpt_image2_masked_edit
+phase6 status=cleaned replacement_method=gpt_image2_masked_edit text_overlay_required=false
+fallback_locator_validation.status=accepted semantic_correct=true tight_enough=false
+gpt_image2_edit.status=ok
+phase6 replacement quality score=10 usable=true exact_text_correct=true simplified_chinese_correct=true outside_mask_preserved=true issues=[]
+phase7 MIMO score=8 usable=true original_text_removed=true art_preserved=true lettering_readable=true issues=[]
+phase8 export has repair_source effective_method=gpt_image2_masked_edit and no editable text layer, as expected for direct GPT replacement
+phase8 audit passed=true record_count=0 record_issue_count=0 jsx_anchor_logic_present=true
+```
+
+This result follows the active non-bubble GPT fallback policy: the accepted
+locator bbox can be loose as long as it contains the intended original text;
+the edit scope is constrained by the `text_pixels` mask and the GPT prompt. The
+`tight_enough=false` diagnostic did not block the replacement because the
+semantic target, exact Chinese text, and outside-mask preservation checks passed.
+
+Observed v29 coverage result:
+
+```text
+base_record_count=43
+complete_record_count=43
+incomplete_record_count=0
+phase1_labelplus covered=43 missing=0
+phase2_detection covered=43 missing=0
+phase3_font_selection covered=41 missing=2
+phase4_layout covered=41 missing=2
+phase5_angle covered=41 missing=2
+phase6_cleanup covered=43 missing=0
+phase7_preview covered=43 missing=0
+phase8_export covered=43 missing=0
+GBC06_02.png#14 route_skipped_stages=phase3_font_selection,phase4_layout,phase5_angle
+GBC06_03.png#5 route_skipped_stages=phase3_font_selection,phase4_layout,phase5_angle
+phase6_gpt_replacement checked=3 failures=0 record_issues=0
+phase7_preview evaluations=20 usable=20/20 failed=0 low_score=0 records=43 record_issues=0
+phase8_export audits=10 passed=10/10 records=12 record_issues=0
+phase1_pending_detection_count=137
+next_records=[]
+next_experiments[0]=GBC06_03.png#8
+next_experiments[1]=GBC06_03.png#9
+```
+
 The first `next-limit=12` Phase 1 records missing detection in v17 are:
 
 ```text

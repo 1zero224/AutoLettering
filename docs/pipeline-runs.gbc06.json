@@ -253,6 +253,68 @@
         ]
       }
     },
+    "phase0-8-gbc06-v28-gbc06-03-7": {
+      "extends": "phase0-8-gbc06-v27-gbc06-03-4-6-gpt-v18",
+      "run_id": "phase0-8-gbc06-pipeline-coverage-v28-gbc06-03-7",
+      "next_limit": 12,
+      "append": {
+        "detection_run_dir": [
+          "outputs/runs/phase2-gbc06-03-7-cta-detection-v1"
+        ],
+        "font_selection_run_dir": [
+          "outputs/runs/phase3-gbc06-03-7-mimo-font-selection"
+        ],
+        "layout_run_dir": [
+          "outputs/runs/phase4-gbc06-03-7-layout-v1"
+        ],
+        "angle_run_dir": [
+          "outputs/runs/phase5-gbc06-03-7-angle"
+        ],
+        "cleanup_run_dirs": [
+          "outputs/runs/phase6-gbc06-03-7-region-fill-v1"
+        ],
+        "preview_run_dir": [
+          "outputs/runs/phase7-8-gbc06-03-7-preview-v1/runs/phase7-preview"
+        ],
+        "export_run_dir": [
+          "outputs/runs/phase7-8-gbc06-03-7-preview-v1/runs/phase8-export"
+        ],
+        "phase7_preview_evaluation_run_dir": [
+          "outputs/runs/phase7-8-gbc06-03-7-preview-v1/runs/phase7-evaluation"
+        ],
+        "phase8_export_audit_run_dir": [
+          "outputs/runs/phase8-gbc06-03-7-export-audit-v1"
+        ]
+      }
+    },
+    "phase0-8-gbc06-v29-gbc06-02-14-gpt-sfx": {
+      "extends": "phase0-8-gbc06-v28-gbc06-03-7",
+      "run_id": "phase0-8-gbc06-pipeline-coverage-v29-gbc06-02-14-gpt-sfx",
+      "next_limit": 12,
+      "append": {
+        "detection_run_dir": [
+          "outputs/runs/phase2-gbc06-02-14-cta-detection-v1"
+        ],
+        "cleanup_run_dirs": [
+          "outputs/runs/phase6-gbc06-02-14-fallback-gpt-image2-v3-sfx-recovery"
+        ],
+        "preview_run_dir": [
+          "outputs/runs/phase7-8-gbc06-02-14-gpt-v3-sfx-quality-gate/runs/phase7-preview"
+        ],
+        "export_run_dir": [
+          "outputs/runs/phase7-8-gbc06-02-14-gpt-v3-sfx-quality-gate/runs/phase8-export"
+        ],
+        "phase6_gpt_quality_run_dir": [
+          "outputs/runs/phase6-gbc06-02-14-gpt-v3-sfx-recovery-quality"
+        ],
+        "phase7_preview_evaluation_run_dir": [
+          "outputs/runs/phase7-gbc06-02-14-gpt-v3-sfx-quality-gate-eval-v1"
+        ],
+        "phase8_export_audit_run_dir": [
+          "outputs/runs/phase8-gbc06-02-14-gpt-v3-sfx-quality-gate-audit-v1"
+        ]
+      }
+    },
     "phase0-8-gbc06-17-gpt-direct-repair-source": {
       "run_id": "phase0-8-gbc06-17-gpt-direct-coverage-v1",
       "next_limit": 5,
