@@ -1757,3 +1757,66 @@ phase8_export audits=20 passed=20/20 records=22 record_issues=0
 phase1_pending_detection_count=127
 next_experiments[0].record_id=GBC06_04.png#7
 ```
+
+Fresh v40 registry extension for `GBC06_04.png#7`:
+
+```powershell
+python experiments/phase2_detect_text_regions.py --labelplus-file "GBC06 (已翻 斗笠)\翻译_0.txt" --output-root outputs/runs --run-id phase2-gbc06-04-7-cta-detection-v1 --sample-limit 1 --record-id "GBC06_04.png#7" --detection-strategy cta_mask
+python experiments/phase3_font_comparison.py --labelplus-file "GBC06 (已翻 斗笠)\翻译_0.txt" --detection-run-dir outputs/runs/phase2-gbc06-04-7-cta-detection-v1 --font-dir "工具箱漫画字体V2.5" --output-root outputs/runs --run-id phase3-gbc06-04-7-font-comparison-v1 --sample-limit 1 --font-limit 12 --record-id "GBC06_04.png#7"
+python experiments/phase5_orientation_angle.py --detection-run-dir outputs/runs/phase2-gbc06-04-7-cta-detection-v1 --output-root outputs/runs --run-id phase5-gbc06-04-7-angle-v1 --sample-limit 1 --record-id "GBC06_04.png#7"
+python experiments/phase3_mimo_font_selection.py --input-run-dir outputs/runs/phase3-gbc06-04-7-font-comparison-v1 --output-root outputs/runs --run-id phase3-gbc06-04-7-mimo-font-selection-v1 --sample-limit 1 --record-id "GBC06_04.png#7"
+python experiments/phase4_layout_search.py --selection-run-dir outputs/runs/phase3-gbc06-04-7-mimo-font-selection-v1 --angle-run-dir outputs/runs/phase5-gbc06-04-7-angle-v1 --detection-run-dir outputs/runs/phase2-gbc06-04-7-cta-detection-v1 --output-root outputs/runs --run-id phase4-gbc06-04-7-layout-v1 --sample-limit 1 --record-id "GBC06_04.png#7"
+python experiments/phase4_layout_search.py --selection-run-dir outputs/runs/phase3-gbc06-04-7-mimo-font-selection-v1 --angle-run-dir outputs/runs/phase5-gbc06-04-7-angle-v1 --detection-run-dir outputs/runs/phase2-gbc06-04-7-cta-detection-v1 --output-root outputs/runs --run-id phase4-gbc06-04-7-layout-v2-preserve-breaks --sample-limit 1 --record-id "GBC06_04.png#7"
+python experiments/phase6_bubble_cleanup.py --detection-run-dir outputs/runs/phase2-gbc06-04-7-cta-detection-v1 --layout-run-dir outputs/runs/phase4-gbc06-04-7-layout-v2-preserve-breaks --output-root outputs/runs --run-id phase6-gbc06-04-7-region-fill-v1 --sample-limit 1 --cleanup-method region_fill --record-id "GBC06_04.png#7"
+python experiments/phase7_8_integrated_smoke.py --detection-run-dir outputs/runs/phase2-gbc06-04-7-cta-detection-v1 --cleanup-run-dir outputs/runs/phase6-gbc06-04-7-region-fill-v1 --layout-run-dir outputs/runs/phase4-gbc06-04-7-layout-v2-preserve-breaks --font-selection-run-dir outputs/runs/phase3-gbc06-04-7-mimo-font-selection-v1 --output-root outputs/runs --run-id phase7-8-gbc06-04-7-preview-v1 --sample-limit 1
+python experiments/phase8_export_quality_audit.py --phase8-run-dir outputs/runs/phase7-8-gbc06-04-7-preview-v1/runs/phase8-export --output-root outputs/runs --run-id phase8-gbc06-04-7-export-audit-v1
+```
+
+Observed result:
+
+```text
+record_id=GBC06_04.png#7 translated_text=唱了就明白了 / 相信我
+phase2 status=ok threshold=30 bbox=[239,837,316,1027] selected_component_id=component-0009+component-0010 distance_px=19.0 route=cta_mask_lama_large_512px
+phase2 visual QA: selected the left bubble containing the full source text "歌えばわかる / 私を信じろ"; outer context includes character art but bbox purity is not the success criterion
+font=[toolbox]POP1-简繁(v2.5).ttf confidence=0.9
+phase5 detected_orientation=vertical confidence=0.895 selected_angle=-3.7; final layout keeps angle=0.0 because this is a small speech-bubble vertical text block
+phase4 v1 found a fitting layout but split the translation as "唱了就明白 / 了相信我", which is semantically poor
+phase4 v2 after the explicit-break preference fix preserves line_breaks=唱了就明白了 / 相信我, font_size=32, target=77x190, measured=64x180, overflow_ratio=0.0, vertical_align=top
+phase6 cleanup_method=bubble_region_fill bbox=[239,837,316,1027]
+phase7 MIMO score=10 usable=true original_text_removed=true art_preserved=true lettering_readable=true issues=[]
+phase8 audit passed=true vertical_top_layer_count=1 record_issue_count=0 anchor_y=837
+subagent QA=ACCEPT; optimization_now=no; note=layout is slightly tight but readable and non-blocking
+```
+
+This run added a small Phase 4 behavior fix: vertical layout scoring now gives a phrase-preserving bonus to explicit source translation line breaks when the font-size loss is modest. The regression test `test_search_fitting_layout_preserves_short_vertical_phrase_breaks_when_size_loss_is_small` covers the `唱了就明白了 / 相信我` case so future layout search does not trade semantic breaks for a small font-size gain.
+
+Review artifacts:
+
+```text
+outputs/runs/phase2-gbc06-04-7-cta-detection-v1/debug/detection/GBC06_04-7.png
+outputs/runs/phase3-gbc06-04-7-font-comparison-v1/debug/font_comparison/GBC06-04-png-7.png
+outputs/runs/phase4-gbc06-04-7-layout-v1/debug/layout_candidates/GBC06-04-png-7.png
+outputs/runs/phase4-gbc06-04-7-layout-v2-preserve-breaks/debug/layout_candidates/GBC06-04-png-7.png
+outputs/runs/phase6-gbc06-04-7-region-fill-v1/crops/before_after/GBC06-04-png-7.png
+outputs/runs/phase7-8-gbc06-04-7-preview-v1/runs/phase7-preview/crops/context_before_after/GBC06-04-png-7.png
+outputs/runs/phase7-8-gbc06-04-7-preview-v1/runs/phase7-preview/debug/evaluation_contact_sheets/GBC06-04-png.png
+outputs/runs/phase7-8-gbc06-04-7-preview-v1/runs/phase7-preview/pages/GBC06-04-png.png
+outputs/runs/phase8-gbc06-04-7-export-audit-v1/phase8-export-audit.json
+```
+
+Fresh v40 registry coverage generation:
+
+```powershell
+python experiments/pipeline_coverage_report.py --registry-file docs/pipeline-runs.gbc06.json --registry-entry phase0-8-gbc06-v40-gbc06-04-7 --output-root outputs/runs --next-limit 12
+```
+
+Observed result:
+
+```text
+outputs\runs\phase0-8-gbc06-pipeline-coverage-v40-gbc06-04-7
+base_record_count=54 complete_record_count=54 incomplete_record_count=0
+phase7_preview evaluations=31 usable=31/31 failed=0 low_score=0 records=54 record_issues=0
+phase8_export audits=21 passed=21/21 records=23 record_issues=0
+phase1_pending_detection_count=126
+next_experiments[0].record_id=GBC06_04.png#8
+```

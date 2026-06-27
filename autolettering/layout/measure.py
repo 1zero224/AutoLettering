@@ -174,9 +174,12 @@ def _layout_score(
 
 def _explicit_break_bonus(line_breaks: str, candidates: list[str], font_size: int, best_font_size: int) -> int:
     explicit = candidates[0] if candidates else ""
-    if line_breaks != explicit or "\n" not in explicit or not _has_title_style_vertical_columns(explicit):
+    if line_breaks != explicit or "\n" not in explicit:
         return 0
-    return 1 if font_size / best_font_size >= 0.7 else 0
+    size_score = font_size / max(1, best_font_size)
+    if _has_title_style_vertical_columns(explicit):
+        return 2 if size_score >= 0.7 else 0
+    return 1 if size_score >= 0.85 else 0
 
 
 def _has_title_style_vertical_columns(line_breaks: str) -> bool:

@@ -168,6 +168,26 @@ def test_search_fitting_layout_prefers_phrase_preserving_vertical_breaks_over_la
     assert result.overflow_ratio == 0.0
 
 
+def test_search_fitting_layout_preserves_short_vertical_phrase_breaks_when_size_loss_is_small(tmp_path: Path):
+    font_path = Path("D:/work/autolettering/工具箱漫画字体V2.5/[toolbox]POP1-简繁(v2.5).ttf")
+    if not font_path.exists():
+        font_path = _copy_font(tmp_path)
+
+    result = search_fitting_layout(
+        text="唱了就明白了\n相信我",
+        font_path=font_path,
+        target_size=(77, 190),
+        min_font_size=12,
+        max_font_size=48,
+        orientation="vertical",
+    )
+
+    assert result.status == "ok"
+    assert result.line_breaks == "唱了就明白了\n相信我"
+    assert result.font_size >= 30
+    assert result.overflow_ratio == 0.0
+
+
 def test_search_fitting_layout_accepts_min_font_bounded_overflow(tmp_path: Path):
     font_path = _copy_font(tmp_path)
     measured = measure_text_layout("所谓的街头表演\n就是在别人面前唱歌吗？", font_path, 12, orientation="vertical")
