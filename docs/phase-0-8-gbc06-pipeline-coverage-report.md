@@ -1820,3 +1820,73 @@ phase8_export audits=21 passed=21/21 records=23 record_issues=0
 phase1_pending_detection_count=126
 next_experiments[0].record_id=GBC06_04.png#8
 ```
+
+Fresh v41 registry extension for `GBC06_04.png#8`:
+
+```powershell
+python experiments/phase2_detect_text_regions.py --labelplus-file "GBC06 (已翻 斗笠)\翻译_0.txt" --output-root outputs/runs --run-id phase2-gbc06-04-8-cta-detection-v1 --sample-limit 1 --record-id "GBC06_04.png#8" --detection-strategy cta_mask
+python experiments/phase2_detect_text_regions.py --labelplus-file "GBC06 (已翻 斗笠)\翻译_0.txt" --output-root outputs/runs --run-id phase2-gbc06-04-8-cta-detection-v2-threshold40 --sample-limit 1 --record-id "GBC06_04.png#8" --detection-strategy cta_mask --ctd-max-edge-distance-px 40
+python experiments/phase3_font_comparison.py --labelplus-file "GBC06 (已翻 斗笠)\翻译_0.txt" --detection-run-dir outputs/runs/phase2-gbc06-04-8-cta-detection-v2-threshold40 --font-dir "工具箱漫画字体V2.5" --output-root outputs/runs --run-id phase3-gbc06-04-8-font-comparison-v1 --sample-limit 1 --font-limit 12 --record-id "GBC06_04.png#8"
+python experiments/phase5_orientation_angle.py --detection-run-dir outputs/runs/phase2-gbc06-04-8-cta-detection-v2-threshold40 --output-root outputs/runs --run-id phase5-gbc06-04-8-angle-v1 --sample-limit 1 --record-id "GBC06_04.png#8"
+python experiments/phase3_mimo_font_selection.py --input-run-dir outputs/runs/phase3-gbc06-04-8-font-comparison-v1 --output-root outputs/runs --run-id phase3-gbc06-04-8-mimo-font-selection-v1 --sample-limit 1 --record-id "GBC06_04.png#8"
+python experiments/phase4_layout_search.py --selection-run-dir outputs/runs/phase3-gbc06-04-8-mimo-font-selection-v1 --angle-run-dir outputs/runs/phase5-gbc06-04-8-angle-v1 --detection-run-dir outputs/runs/phase2-gbc06-04-8-cta-detection-v2-threshold40 --output-root outputs/runs --run-id phase4-gbc06-04-8-layout-v1 --sample-limit 1 --record-id "GBC06_04.png#8"
+python experiments/phase6_bubble_cleanup.py --detection-run-dir outputs/runs/phase2-gbc06-04-8-cta-detection-v2-threshold40 --layout-run-dir outputs/runs/phase4-gbc06-04-8-layout-v1 --output-root outputs/runs --run-id phase6-gbc06-04-8-region-fill-v1 --sample-limit 1 --cleanup-method region_fill --record-id "GBC06_04.png#8"
+python experiments/phase7_8_integrated_smoke.py --detection-run-dir outputs/runs/phase2-gbc06-04-8-cta-detection-v2-threshold40 --cleanup-run-dir outputs/runs/phase6-gbc06-04-8-region-fill-v1 --layout-run-dir outputs/runs/phase4-gbc06-04-8-layout-v1 --font-selection-run-dir outputs/runs/phase3-gbc06-04-8-mimo-font-selection-v1 --output-root outputs/runs --run-id phase7-8-gbc06-04-8-preview-v1 --sample-limit 1
+python experiments/phase8_export_quality_audit.py --phase8-run-dir outputs/runs/phase7-8-gbc06-04-8-preview-v1/runs/phase8-export --output-root outputs/runs --run-id phase8-gbc06-04-8-export-audit-v1
+```
+
+Observed result:
+
+```text
+record_id=GBC06_04.png#8 translated_text=我回去了
+phase2 v1 status=fallback_required threshold=30 nearest_component=component-0022 distance_px=35.44 reason=no_ctd_mask_within_threshold
+phase2 v2 status=ok threshold=40 bbox=[1277,1291,1313,1421] selected_component_id=component-0022 distance_px=35.44 route=cta_mask_lama_large_512px
+phase2 visual QA: selected the right-lower speech-bubble column containing the full source text "帰ります"; the v1 failure was a tight threshold, not a missing text-region detection
+font=[toolbox]书卷楷-简繁(v2.4).ttf confidence=0.8
+phase5 detected_orientation=vertical confidence=0.982 selected_angle=0.4
+phase4 final orientation=vertical angle=0.0 vertical_align=top font_size=34 target=36x130 measured=34x128 overflow_ratio=0.0
+phase4 line_breaks=我回去了
+phase6 cleanup_method=bubble_region_fill bbox=[1277,1291,1313,1421]
+phase7 MIMO score=10 usable=true original_text_removed=true art_preserved=true lettering_readable=true issues=[]
+phase8 audit passed=true vertical_top_layer_count=1 record_issue_count=0 anchor_y=1291
+subagent QA=ACCEPT; optimization_now=no
+```
+
+This run keeps the v1 `threshold=30` output as a useful failure control. The
+target component was correctly produced by CTA/CTD, but its mask edge was
+`35.44px` away from the LabelPlus point, just outside the default cutoff. The
+accepted v2 run uses `--ctd-max-edge-distance-px 40`, and only one component is
+within that threshold. Per the current detection acceptance rule, bbox purity is
+not the target; the selected region is acceptable because it contains the full
+target source text. For this bubble sample no GPT fallback is needed.
+
+Review artifacts:
+
+```text
+outputs/runs/phase2-gbc06-04-8-cta-detection-v1/debug/detection/GBC06_04-8.png
+outputs/runs/phase2-gbc06-04-8-cta-detection-v2-threshold40/debug/detection/GBC06_04-8.png
+outputs/runs/phase3-gbc06-04-8-font-comparison-v1/debug/font_comparison/GBC06-04-png-8.png
+outputs/runs/phase4-gbc06-04-8-layout-v1/debug/layout_candidates/GBC06-04-png-8.png
+outputs/runs/phase6-gbc06-04-8-region-fill-v1/crops/before_after/GBC06-04-png-8.png
+outputs/runs/phase7-8-gbc06-04-8-preview-v1/runs/phase7-preview/crops/context_before_after/GBC06-04-png-8.png
+outputs/runs/phase7-8-gbc06-04-8-preview-v1/runs/phase7-preview/debug/evaluation_contact_sheets/GBC06-04-png.png
+outputs/runs/phase7-8-gbc06-04-8-preview-v1/runs/phase7-preview/pages/GBC06-04-png.png
+outputs/runs/phase8-gbc06-04-8-export-audit-v1/phase8-export-audit.json
+```
+
+Fresh v41 registry coverage generation:
+
+```powershell
+python experiments/pipeline_coverage_report.py --registry-file docs/pipeline-runs.gbc06.json --registry-entry phase0-8-gbc06-v41-gbc06-04-8 --output-root outputs/runs --next-limit 12
+```
+
+Observed result:
+
+```text
+outputs\runs\phase0-8-gbc06-pipeline-coverage-v41-gbc06-04-8
+base_record_count=55 complete_record_count=55 incomplete_record_count=0
+phase7_preview evaluations=32 usable=32/32 failed=0 low_score=0 records=55 record_issues=0
+phase8_export audits=22 passed=22/22 records=24 record_issues=0
+phase1_pending_detection_count=125
+next_experiments[0].record_id=GBC06_04.png#9
+```
