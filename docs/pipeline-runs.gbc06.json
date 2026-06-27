@@ -451,6 +451,40 @@
         ]
       }
     },
+    "phase0-8-gbc06-v34-gbc06-04-1-merged-bubble": {
+      "extends": "phase0-8-gbc06-v33-gbc06-03-11",
+      "run_id": "phase0-8-gbc06-pipeline-coverage-v34-gbc06-04-1-merged-bubble",
+      "next_limit": 12,
+      "append": {
+        "detection_run_dir": [
+          "outputs/runs/phase2-gbc06-04-1-cta-detection-v2-merge-left-column"
+        ],
+        "font_selection_run_dir": [
+          "outputs/runs/phase3-gbc06-04-1-mimo-font-selection-v2-merge-left-column"
+        ],
+        "layout_run_dir": [
+          "outputs/runs/phase4-gbc06-04-1-layout-v3-conservative-merged-bubble"
+        ],
+        "angle_run_dir": [
+          "outputs/runs/phase5-gbc06-04-1-angle-v2-merge-left-column"
+        ],
+        "cleanup_run_dirs": [
+          "outputs/runs/phase6-gbc06-04-1-region-fill-v4-bubble-mask-conservative"
+        ],
+        "preview_run_dir": [
+          "outputs/runs/phase7-8-gbc06-04-1-preview-v4-bubble-mask-conservative/runs/phase7-preview"
+        ],
+        "export_run_dir": [
+          "outputs/runs/phase7-8-gbc06-04-1-preview-v4-bubble-mask-conservative/runs/phase8-export"
+        ],
+        "phase7_preview_evaluation_run_dir": [
+          "outputs/runs/phase7-8-gbc06-04-1-preview-v4-bubble-mask-conservative/runs/phase7-evaluation"
+        ],
+        "phase8_export_audit_run_dir": [
+          "outputs/runs/phase8-gbc06-04-1-export-audit-v4-bubble-mask-conservative"
+        ]
+      }
+    },
     "phase0-8-gbc06-17-gpt-direct-repair-source": {
       "run_id": "phase0-8-gbc06-17-gpt-direct-coverage-v1",
       "next_limit": 5,

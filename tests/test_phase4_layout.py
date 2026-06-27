@@ -878,6 +878,42 @@ def test_run_phase4_caps_multicolumn_vertical_translation_below_source_column_wi
     assert layout["font_size"] <= 31
 
 
+def test_run_phase4_caps_merged_bubble_columns_to_source_column_width(tmp_path: Path):
+    font_path = _copy_font(tmp_path)
+    source_crop_path = tmp_path / "source-crop.png"
+    Image.new("RGB", (176, 271), "white").save(source_crop_path)
+    phase2_run = tmp_path / "phase2-detection"
+    phase3_run = tmp_path / "phase3-selection"
+    phase5_run = tmp_path / "phase5-angle"
+    for path in [phase2_run, phase3_run, phase5_run]:
+        path.mkdir()
+    _write_font_selection(
+        phase3_run / "font-selections.jsonl",
+        font_path,
+        source_crop_path,
+        translated_text="那么\n桃香姐来唱\n不就好了吗！",
+    )
+    _write_detection_like_gbc06_04_record_1_merged_bubble(phase2_run / "detections.jsonl")
+    _write_small_positive_vertical_angle_result(phase5_run / "angle-results.jsonl")
+
+    run_dir = run_phase4(
+        selection_run_dir=phase3_run,
+        angle_run_dir=phase5_run,
+        detection_run_dir=phase2_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase4-gbc06-04-1-merged-bubble",
+        sample_limit=1,
+    )
+
+    layout = _read_jsonl(run_dir / "layout-results.jsonl")[0]["layout"]
+    assert layout["target_bbox"] == [1141, 174, 1317, 445]
+    assert layout["orientation"] == "vertical"
+    assert layout["angle_degrees"] == 0.0
+    assert layout["vertical_align"] == "top"
+    assert layout["font_size"] <= 36
+    assert layout["alignment"]["ink_height"] <= layout["target_height"] * 0.88
+
+
 def test_run_phase4_allows_large_nonbubble_cta_title_to_exceed_default_cap(tmp_path: Path):
     font_path = _copy_font(tmp_path)
     source_crop_path = tmp_path / "source-crop.png"
@@ -1153,6 +1189,19 @@ def _write_small_slant_vertical_angle_result(path: Path) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def _write_small_positive_vertical_angle_result(path: Path) -> None:
+    payload = {
+        "record_id": "page.png#1",
+        "status": "angle_estimated",
+        "orientation": {
+            "detected_orientation": "vertical",
+            "selected_angle_degrees": 3.6,
+            "confidence": 0.658,
+        },
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
 def _write_low_confidence_vertical_angle_result(path: Path) -> None:
     payload = {
         "record_id": "page.png#1",
@@ -1264,6 +1313,39 @@ def _write_detection_with_short_tight_target(path: Path) -> None:
             {"xyxy": [80, 40, 105, 160], "area": 3000, "score": 0.95},
             {"xyxy": [125, 40, 150, 160], "area": 3000, "score": 0.94},
         ],
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _write_detection_like_gbc06_04_record_1_merged_bubble(path: Path) -> None:
+    payload = {
+        "record_id": "page.png#1",
+        "status": "ok",
+        "image_name": "page.png",
+        "group_name": "框内",
+        "detection_method": "cta_mask",
+        "selected_text_box_xyxy": [1141, 174, 1317, 445],
+        "selected_text_full_xyxy": [1141, 174, 1317, 445],
+        "selected_text_body_xyxy": [1141, 174, 1317, 445],
+        "candidate_boxes": [
+            {"xyxy": [1141, 174, 1317, 445], "area": 47696, "score": 1.0, "polarity": "ctd_mask"},
+        ],
+        "cta_match_diagnostics": {
+            "match_status": "matched",
+            "selected_component_id": "component-0001+component-0002",
+            "top_candidates": [
+                {
+                    "component_id": "component-0001",
+                    "component_bbox_xyxy": [1183, 174, 1317, 349],
+                    "edge_distance_px": 12.728,
+                },
+                {
+                    "component_id": "component-0002",
+                    "component_bbox_xyxy": [1141, 176, 1182, 445],
+                    "edge_distance_px": 139.291,
+                },
+            ],
+        },
     }
     path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
 

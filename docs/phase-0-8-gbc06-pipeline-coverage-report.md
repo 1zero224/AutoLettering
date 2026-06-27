@@ -1351,3 +1351,75 @@ phase8_export audits=14 passed=14/14 records=16 record_issues=0
 phase1_pending_detection_count=133
 next_experiments[0].record_id=GBC06_04.png#1
 ```
+
+Fresh v34 registry extension for `GBC06_04.png#1`:
+
+```powershell
+python experiments/phase2_detect_text_regions.py --labelplus-file "GBC06 (已翻 斗笠)\翻译_0.txt" --output-root outputs/runs --run-id phase2-gbc06-04-1-cta-detection-v1 --sample-limit 1 --record-id "GBC06_04.png#1" --detection-strategy cta_mask --ctd-max-edge-distance-px 20
+python experiments/phase2_detect_text_regions.py --labelplus-file "GBC06 (已翻 斗笠)\翻译_0.txt" --output-root outputs/runs --run-id phase2-gbc06-04-1-cta-detection-v2-merge-left-column --sample-limit 1 --record-id "GBC06_04.png#1" --detection-strategy cta_mask --ctd-max-edge-distance-px 20
+python experiments/phase3_font_comparison.py --labelplus-file "GBC06 (已翻 斗笠)\翻译_0.txt" --detection-run-dir outputs/runs/phase2-gbc06-04-1-cta-detection-v2-merge-left-column --font-dir "工具箱漫画字体V2.5" --output-root outputs/runs --run-id phase3-gbc06-04-1-font-comparison-v2-merge-left-column --sample-limit 1 --font-limit 12 --record-id "GBC06_04.png#1"
+python experiments/phase5_orientation_angle.py --detection-run-dir outputs/runs/phase2-gbc06-04-1-cta-detection-v2-merge-left-column --output-root outputs/runs --run-id phase5-gbc06-04-1-angle-v2-merge-left-column --sample-limit 1 --record-id "GBC06_04.png#1"
+python experiments/phase3_mimo_font_selection.py --input-run-dir outputs/runs/phase3-gbc06-04-1-font-comparison-v2-merge-left-column --output-root outputs/runs --run-id phase3-gbc06-04-1-mimo-font-selection-v2-merge-left-column --sample-limit 1 --record-id "GBC06_04.png#1"
+python experiments/phase4_layout_search.py --selection-run-dir outputs/runs/phase3-gbc06-04-1-mimo-font-selection-v2-merge-left-column --angle-run-dir outputs/runs/phase5-gbc06-04-1-angle-v2-merge-left-column --detection-run-dir outputs/runs/phase2-gbc06-04-1-cta-detection-v2-merge-left-column --output-root outputs/runs --run-id phase4-gbc06-04-1-layout-v3-conservative-merged-bubble --sample-limit 1 --record-id "GBC06_04.png#1"
+python experiments/phase6_bubble_cleanup.py --detection-run-dir outputs/runs/phase2-gbc06-04-1-cta-detection-v2-merge-left-column --layout-run-dir outputs/runs/phase4-gbc06-04-1-layout-v3-conservative-merged-bubble --output-root outputs/runs --run-id phase6-gbc06-04-1-region-fill-v4-bubble-mask-conservative --sample-limit 1 --cleanup-method region_fill --record-id "GBC06_04.png#1"
+python experiments/phase7_8_integrated_smoke.py --detection-run-dir outputs/runs/phase2-gbc06-04-1-cta-detection-v2-merge-left-column --cleanup-run-dir outputs/runs/phase6-gbc06-04-1-region-fill-v4-bubble-mask-conservative --layout-run-dir outputs/runs/phase4-gbc06-04-1-layout-v3-conservative-merged-bubble --font-selection-run-dir outputs/runs/phase3-gbc06-04-1-mimo-font-selection-v2-merge-left-column --output-root outputs/runs --run-id phase7-8-gbc06-04-1-preview-v4-bubble-mask-conservative --sample-limit 1
+python experiments/phase8_export_quality_audit.py --phase8-run-dir outputs/runs/phase7-8-gbc06-04-1-preview-v4-bubble-mask-conservative/runs/phase8-export --output-root outputs/runs --run-id phase8-gbc06-04-1-export-audit-v4-bubble-mask-conservative
+```
+
+Observed result:
+
+```text
+record_id=GBC06_04.png#1 translated_text=那么 / 桃香姐来唱 / 不就好了吗！
+phase2 v1 bbox=[1183,174,1317,349] failed visual QA because it missed the left column "じゃないですか！" while the translation covers that meaning
+phase2 v2 status=ok threshold=20 bbox=[1141,174,1317,445] selected_component_id=component-0001+component-0002 route=cta_mask_lama_large_512px
+phase2 acceptance rule: the bbox may include extra bubble/art context, but it must contain all target source text; v2 does contain the full text
+font=[toolbox]与墨体-简体-Bold(v2.4).ttf confidence=0.95
+phase5 detected_orientation=vertical confidence=0.658 selected_angle=3.6
+phase4 v2 layout failed visual QA: font_size=46 measured_height=266/271 made the translation too crowded
+phase4 v3 final orientation=vertical angle=0.0 vertical_align=top font_size=35 target=176x271 measured=113x220
+phase6 cleanup_method=bubble_region_fill bbox=[1141,174,1317,445]
+phase7 MIMO score=10 usable=true original_text_removed=true art_preserved=true lettering_readable=true issues=[]
+phase8 audit passed=true vertical_top_layer_count=1 record_issue_count=0 anchor_y=174
+subagent QA=ACCEPT; it treated bbox looseness as acceptable because the full target Japanese text is included
+```
+
+Two fixes were needed for this record:
+
+- Phase 2 CTA/CTD component merging now accepts adjacent taller frame-in vertical columns when they touch the selected bubble text and have strong vertical overlap. This merged `component-0001+component-0002`, covering `だったら / 桃香さんが / 歌えばいい / じゃないですか！`.
+- Phase 4 now caps merged frame-in CTA/CTD multi-column bubble lettering using the selected component column widths from `cta_match_diagnostics`. This prevents the merged bbox from inflating a three-line translation to an overfilled `46px` layout; the accepted v3/v4 layout uses `35px`, `line_spacing=4`, `vertical_align=top`, and `angle=0.0`.
+
+Additional cleanup experiment:
+
+- `mask_fill` and `text_mask_inpaint` were tried on this sample, but both left visible Japanese glyph ghosts. The accepted path remains `region_fill` for this white speech bubble.
+- `region_fill_text_area` now has a small regression guard for simpler white-bubble cases where a cleanup region reaches external line art: it prefers white bubble pixels for fill color and avoids masking obvious external edge art. This does not fully solve all manga bubble-edge cases, but prevents the simplest rectangular white-patch regression.
+
+Review artifacts:
+
+```text
+outputs/runs/phase2-gbc06-04-1-cta-detection-v1/debug/detection/GBC06_04-1.png
+outputs/runs/phase2-gbc06-04-1-cta-detection-v2-merge-left-column/debug/detection/GBC06_04-1.png
+outputs/runs/phase4-gbc06-04-1-layout-v2-merge-left-column/debug/layout_candidates/GBC06-04-png-1.png
+outputs/runs/phase4-gbc06-04-1-layout-v3-conservative-merged-bubble/debug/layout_candidates/GBC06-04-png-1.png
+outputs/runs/phase6-gbc06-04-1-region-fill-v4-bubble-mask-conservative/crops/before_after/GBC06-04-png-1.png
+outputs/runs/phase7-8-gbc06-04-1-preview-v4-bubble-mask-conservative/runs/phase7-preview/crops/context_before_after/GBC06-04-png-1.png
+outputs/runs/phase7-8-gbc06-04-1-preview-v4-bubble-mask-conservative/runs/phase7-preview/debug/evaluation_contact_sheets/GBC06-04-png.png
+outputs/runs/phase7-8-gbc06-04-1-preview-v4-bubble-mask-conservative/runs/phase7-preview/pages/GBC06-04-png.png
+outputs/runs/phase8-gbc06-04-1-export-audit-v4-bubble-mask-conservative/phase8-export-audit.json
+```
+
+Fresh v34 registry coverage generation:
+
+```powershell
+python experiments/pipeline_coverage_report.py --registry-file docs/pipeline-runs.gbc06.json --registry-entry phase0-8-gbc06-v34-gbc06-04-1-merged-bubble --output-root outputs/runs --next-limit 12
+```
+
+Observed result:
+
+```text
+outputs\runs\phase0-8-gbc06-pipeline-coverage-v34-gbc06-04-1-merged-bubble
+base_record_count=48 complete_record_count=48 incomplete_record_count=0
+phase7_preview evaluations=25 usable=25/25 failed=0 low_score=0 records=48 record_issues=0
+phase8_export audits=15 passed=15/15 records=17 record_issues=0
+phase1_pending_detection_count=132
+next_experiments[0].record_id=GBC06_04.png#2
+```

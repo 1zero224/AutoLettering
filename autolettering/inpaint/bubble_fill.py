@@ -5,6 +5,7 @@ from statistics import median
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
+from .bubble_masks import bubble_fill_color, bubble_region_cleanup_mask, soft_region_mask
 from .models import BubbleFillResult
 from .nonbubble import inpaint_crop
 
@@ -161,15 +162,11 @@ def region_fill_text_area(
     with Image.open(image_path) as image:
         source = image.convert("RGB")
         region = _expand_bbox(text_bbox, source.size, padding_px)
-        fill_color = sample_border_color(image_path, region)
-        clean = source.copy()
+        fill_color = bubble_fill_color(source, region) or sample_border_color(image_path, region)
         before_crop = source.crop(bbox)
-        cleaned_crop = before_crop.copy()
-        cleanup_mask = Image.new("L", before_crop.size, 0)
-        local_region = _offset_bbox(region, bbox)
-        ImageDraw.Draw(cleaned_crop).rectangle(local_region, fill=fill_color)
-        ImageDraw.Draw(cleanup_mask).rectangle(local_region, fill=255)
-        clean.paste(cleaned_crop, bbox[:2])
+        cleanup_mask = bubble_region_cleanup_mask(source, bbox, region, fill_color)
+        fill_layer = Image.new("RGB", before_crop.size, fill_color)
+        cleaned_crop = Image.composite(fill_layer, before_crop, cleanup_mask)
 
     before_path = output_root / "before" / f"{safe_id}.png"
     cleaned_path = output_root / "cleaned" / f"{safe_id}.png"
@@ -209,7 +206,7 @@ def soft_region_fill_text_area(
         region = _expand_bbox(text_bbox, source.size, padding_px)
         fill_color = sample_border_color(image_path, region)
         before_crop = source.crop(bbox)
-        cleanup_mask = _soft_region_mask(before_crop.size, _offset_bbox(region, bbox), feather_px)
+        cleanup_mask = soft_region_mask(before_crop.size, _offset_bbox(region, bbox), feather_px)
         fill_layer = Image.new("RGB", before_crop.size, fill_color)
         cleaned_crop = Image.composite(fill_layer, before_crop, cleanup_mask)
 
@@ -250,36 +247,6 @@ def _text_mask(
     mask = Image.new("L", crop.size, 0)
     mask.paste(dark, text_local[:2])
     return mask
-
-
-def _soft_region_mask(
-    size: tuple[int, int],
-    region: tuple[int, int, int, int],
-    feather_px: int,
-) -> Image.Image:
-    hard = Image.new("L", size, 0)
-    ImageDraw.Draw(hard).rectangle(region, fill=255)
-    if feather_px <= 0:
-        return hard
-    blurred = hard.filter(ImageFilter.GaussianBlur(radius=feather_px))
-    core = _shrink_bbox(region, feather_px)
-    if core is not None:
-        ImageDraw.Draw(blurred).rectangle(core, fill=255)
-    mask = blurred.point(lambda value: 0 if value < 16 else value, mode="L")
-    if core is None:
-        ImageDraw.Draw(mask).rectangle(region, fill=255)
-    return mask
-
-
-def _shrink_bbox(
-    bbox: tuple[int, int, int, int],
-    inset: int,
-) -> tuple[int, int, int, int] | None:
-    x1, y1, x2, y2 = bbox
-    core = x1 + inset, y1 + inset, x2 - inset, y2 - inset
-    if core[0] >= core[2] or core[1] >= core[3]:
-        return None
-    return core
 
 
 def _offset_bbox(

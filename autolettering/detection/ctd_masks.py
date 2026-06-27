@@ -251,18 +251,38 @@ def _is_bubble_adjacent_vertical_column(
     if label is None or label.group_name != "框内":
         return False
     seed_width = _width(seed)
+    horizontal_gap = _horizontal_gap(bbox, cluster)
+    vertical_gap = _vertical_gap(bbox, cluster)
+    vertical_overlap = _vertical_overlap_ratio(bbox, cluster)
+    if _is_adjacent_tall_bubble_text_column(bbox, cluster, seed, horizontal_gap, vertical_gap, vertical_overlap):
+        return True
     if _width(bbox) > max(seed_width * 1.25, seed_width + 16):
         return False
     height_limit = max(_height(seed) * 1.25, _height(seed) + 36, _height(cluster) * 1.05, _height(cluster) + 12)
     if _height(bbox) > height_limit:
         return False
-    vertical_gap = _vertical_gap(bbox, cluster)
     if _horizontal_overlap_ratio(bbox, cluster) >= 0.55:
         return vertical_gap <= max(10, int(round(_height(seed) * 0.08)))
-    if _vertical_overlap_ratio(bbox, cluster) < 0.35:
+    if vertical_overlap < 0.35:
         return False
-    horizontal_gap = _horizontal_gap(bbox, cluster)
     return horizontal_gap <= max(12, int(round(seed_width * 0.35))) and vertical_gap == 0
+
+
+def _is_adjacent_tall_bubble_text_column(
+    bbox: tuple[int, int, int, int],
+    cluster: tuple[int, int, int, int],
+    seed: tuple[int, int, int, int],
+    horizontal_gap: int,
+    vertical_gap: int,
+    vertical_overlap: float,
+) -> bool:
+    if horizontal_gap > max(8, int(round(_width(seed) * 0.08))):
+        return False
+    if vertical_gap != 0 or vertical_overlap < 0.68:
+        return False
+    if _width(bbox) > max(_width(seed) * 0.72, _width(seed) + 12):
+        return False
+    return _height(bbox) <= max(_height(seed) * 1.7, _height(seed) + 120)
 
 
 def _merged_component(group: list[CtdMaskComponent]) -> CtdMaskComponent:

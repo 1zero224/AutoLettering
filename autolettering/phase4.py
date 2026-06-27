@@ -247,7 +247,8 @@ def _max_font_size(
     base_limit = _base_vertical_font_limit(detection, target_bbox)
     decorated_limit = _decorated_title_font_limit(detection, tuple(target_bbox), translated_text)
     column_width = _source_column_width(detection, tuple(target_bbox))
-    if column_width is None:
+    merged_bubble_limit = _merged_bubble_column_font_limit(detection, tuple(target_bbox), translated_text)
+    if column_width is None and merged_bubble_limit is None:
         return decorated_limit or base_limit
     if _very_short_vertical_translation(translated_text):
         multiplier = 0.9
@@ -257,8 +258,11 @@ def _max_font_size(
         multiplier = 0.92
     else:
         multiplier = 1.18
-    width_limit = int(round(column_width * multiplier))
-    limits = [base_limit, width_limit]
+    limits = [base_limit]
+    if column_width is not None:
+        limits.append(int(round(column_width * multiplier)))
+    if merged_bubble_limit is not None:
+        limits.append(merged_bubble_limit)
     if decorated_limit is not None:
         limits.append(decorated_limit)
     return max(12, min(limits))
@@ -367,6 +371,67 @@ def _source_column_width(detection: dict, target_bbox: tuple[int, int, int, int]
         if bbox and _inside(bbox, target_bbox) and _area(bbox) <= _area(target_bbox) * 0.8
     ]
     return max(widths) if widths else None
+
+
+def _merged_bubble_column_font_limit(
+    detection: dict,
+    target_bbox: tuple[int, int, int, int],
+    translated_text: str,
+) -> int | None:
+    if detection.get("group_name") != "框内" or not _explicit_multicolumn_translation(translated_text):
+        return None
+    if not _is_cta_or_ctd_detection(detection):
+        return None
+    component_bboxes = _selected_merged_component_bboxes(detection, target_bbox)
+    if len(component_bboxes) < 2:
+        return None
+    target_width = _width(target_bbox)
+    widths = [_width(bbox) for bbox in component_bboxes if _width(bbox) > 0]
+    if not widths:
+        return None
+    single_column_like = [width for width in widths if width <= target_width * 0.5]
+    representative_width = min(single_column_like or widths)
+    return int(round(representative_width * 0.86))
+
+
+def _selected_merged_component_bboxes(
+    detection: dict,
+    target_bbox: tuple[int, int, int, int],
+) -> list[tuple[int, int, int, int]]:
+    selected_ids = _selected_component_ids(detection)
+    if len(selected_ids) < 2:
+        return []
+    rows: list[tuple[int, int, int, int]] = []
+    seen: set[tuple[int, int, int, int]] = set()
+    for diagnostics_key in ("cta_match_diagnostics", "ctd_match_diagnostics"):
+        diagnostics = detection.get(diagnostics_key) or {}
+        for item in diagnostics.get("top_candidates") or []:
+            if item.get("component_id") not in selected_ids:
+                continue
+            bbox = _bbox_from_key(item, "component_bbox_xyxy")
+            if bbox is None or bbox in seen or not _inside(bbox, target_bbox):
+                continue
+            seen.add(bbox)
+            rows.append(bbox)
+    return rows
+
+
+def _selected_component_ids(detection: dict) -> set[str]:
+    component_id = None
+    for diagnostics_key in ("cta_match_diagnostics", "ctd_match_diagnostics"):
+        diagnostics = detection.get(diagnostics_key) or {}
+        component_id = diagnostics.get("selected_component_id")
+        if isinstance(component_id, str) and "+" in component_id:
+            break
+    if not isinstance(component_id, str) or "+" not in component_id:
+        for match_key in ("cta_match", "ctd_match"):
+            match = detection.get(match_key) or {}
+            component_id = match.get("component_id")
+            if isinstance(component_id, str) and "+" in component_id:
+                break
+    if not isinstance(component_id, str) or "+" not in component_id:
+        return set()
+    return {part for part in component_id.split("+") if part}
 
 
 def _candidate_bbox(item: dict) -> tuple[int, int, int, int] | None:

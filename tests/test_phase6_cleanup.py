@@ -116,6 +116,31 @@ def test_region_fill_text_area_removes_light_glyph_ghosts(tmp_path: Path):
         assert cleaned.convert("L").getpixel((30, 10)) < 40
 
 
+def test_region_fill_text_area_keeps_art_outside_white_bubble_in_cleanup_mask(tmp_path: Path):
+    image = Image.new("RGB", (120, 120), (238, 238, 238))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((20, 20, 92, 92), fill="white")
+    draw.rectangle((42, 30, 78, 78), fill="black")
+    draw.line((92, 92, 116, 116), fill=(80, 80, 80), width=4)
+    image_path = tmp_path / "page.png"
+    image.save(image_path)
+
+    result = region_fill_text_area(
+        image_path=image_path,
+        bbox=(20, 20, 116, 116),
+        text_bbox=(42, 30, 102, 102),
+        output_dir=tmp_path / "cleanup",
+        record_id="page.png#1",
+        padding_px=4,
+    )
+
+    with Image.open(result.cleanup_mask_path).convert("L") as mask, Image.open(result.cleaned_crop_path).convert("L") as cleaned:
+        assert cleaned.getpixel((40, 35)) > 245
+        assert mask.getpixel((60, 60)) == 255
+        assert mask.getpixel((86, 86)) == 0
+        assert cleaned.getpixel((86, 86)) < 120
+
+
 def test_soft_region_fill_text_area_feathers_cleanup_mask_edges(tmp_path: Path):
     image = Image.new("RGB", (80, 70), (245, 245, 245))
     draw = ImageDraw.Draw(image)
