@@ -1695,3 +1695,65 @@ phase8_export audits=19 passed=19/19 records=21 record_issues=0
 phase1_pending_detection_count=128
 next_experiments[0].record_id=GBC06_04.png#6
 ```
+
+Fresh v39 registry extension for `GBC06_04.png#6`:
+
+```powershell
+python experiments/phase2_detect_text_regions.py --labelplus-file "GBC06 (已翻 斗笠)\翻译_0.txt" --output-root outputs/runs --run-id phase2-gbc06-04-6-cta-detection-v1 --sample-limit 1 --record-id "GBC06_04.png#6" --detection-strategy cta_mask
+python experiments/phase3_font_comparison.py --labelplus-file "GBC06 (已翻 斗笠)\翻译_0.txt" --detection-run-dir outputs/runs/phase2-gbc06-04-6-cta-detection-v1 --font-dir "工具箱漫画字体V2.5" --output-root outputs/runs --run-id phase3-gbc06-04-6-font-comparison-v1 --sample-limit 1 --font-limit 12 --record-id "GBC06_04.png#6"
+python experiments/phase5_orientation_angle.py --detection-run-dir outputs/runs/phase2-gbc06-04-6-cta-detection-v1 --output-root outputs/runs --run-id phase5-gbc06-04-6-angle-v1 --sample-limit 1 --record-id "GBC06_04.png#6"
+python experiments/phase3_mimo_font_selection.py --input-run-dir outputs/runs/phase3-gbc06-04-6-font-comparison-v1 --output-root outputs/runs --run-id phase3-gbc06-04-6-mimo-font-selection-v1 --sample-limit 1 --record-id "GBC06_04.png#6"
+python experiments/phase4_layout_search.py --selection-run-dir outputs/runs/phase3-gbc06-04-6-mimo-font-selection-v1 --angle-run-dir outputs/runs/phase5-gbc06-04-6-angle-v1 --detection-run-dir outputs/runs/phase2-gbc06-04-6-cta-detection-v1 --output-root outputs/runs --run-id phase4-gbc06-04-6-layout-v1 --sample-limit 1 --record-id "GBC06_04.png#6"
+python experiments/phase6_bubble_cleanup.py --detection-run-dir outputs/runs/phase2-gbc06-04-6-cta-detection-v1 --layout-run-dir outputs/runs/phase4-gbc06-04-6-layout-v1 --output-root outputs/runs --run-id phase6-gbc06-04-6-region-fill-v1 --sample-limit 1 --cleanup-method region_fill --record-id "GBC06_04.png#6"
+python experiments/phase7_8_integrated_smoke.py --detection-run-dir outputs/runs/phase2-gbc06-04-6-cta-detection-v1 --cleanup-run-dir outputs/runs/phase6-gbc06-04-6-region-fill-v1 --layout-run-dir outputs/runs/phase4-gbc06-04-6-layout-v1 --font-selection-run-dir outputs/runs/phase3-gbc06-04-6-mimo-font-selection-v1 --output-root outputs/runs --run-id phase7-8-gbc06-04-6-preview-v1 --sample-limit 1
+python experiments/phase8_export_quality_audit.py --phase8-run-dir outputs/runs/phase7-8-gbc06-04-6-preview-v1/runs/phase8-export --output-root outputs/runs --run-id phase8-gbc06-04-6-export-audit-v1
+```
+
+Observed result:
+
+```text
+record_id=GBC06_04.png#6 translated_text=无论如何…
+phase2 status=ok threshold=30 bbox=[706,1044,739,1202] selected_component_id=component-0018 distance_px=20.0 route=cta_mask_lama_large_512px
+phase2 visual QA: selected the narrow bubble column containing the full source text "どうして…"; bbox purity is not the success criterion as long as the target source text is included
+font=[toolbox]丸书体-简体-Medium(v2.4).ttf confidence=0.9
+phase5 detected_orientation=vertical confidence=0.989 selected_angle=0.2
+phase4 final orientation=vertical angle=0.0 vertical_align=top font_size=33 target=33x158 measured=33x155 overflow_ratio=0.0
+phase4 line_breaks=无论如何…
+phase6 cleanup_method=bubble_region_fill bbox=[706,1044,739,1202]
+phase7 MIMO score=10 usable=true original_text_removed=true art_preserved=true lettering_readable=true issues=[]
+phase8 audit passed=true vertical_top_layer_count=1 record_issue_count=0 anchor_y=1044
+manual visual QA: accepted; Chinese is vertical, top-aligned, unrotated, and readable in the original bubble area
+subagent QA=ACCEPT; optimization_now=no
+```
+
+Review artifacts:
+
+```text
+outputs/runs/phase2-gbc06-04-6-cta-detection-v1/debug/detection/GBC06_04-6.png
+outputs/runs/phase3-gbc06-04-6-font-comparison-v1/debug/font_comparison/GBC06-04-png-6.png
+outputs/runs/phase4-gbc06-04-6-layout-v1/debug/layout_candidates/GBC06-04-png-6.png
+outputs/runs/phase6-gbc06-04-6-region-fill-v1/crops/before_after/GBC06-04-png-6.png
+outputs/runs/phase7-8-gbc06-04-6-preview-v1/runs/phase7-preview/crops/context_before_after/GBC06-04-png-6.png
+outputs/runs/phase7-8-gbc06-04-6-preview-v1/runs/phase7-preview/debug/evaluation_contact_sheets/GBC06-04-png.png
+outputs/runs/phase7-8-gbc06-04-6-preview-v1/runs/phase7-preview/pages/GBC06-04-png.png
+outputs/runs/phase8-gbc06-04-6-export-audit-v1/phase8-export-audit.json
+```
+
+Current GPT direct-replacement prompt check: `autolettering/models/gpt_image.py` already treats the bbox as a loose container that may include people, props, background, or other manga artwork, and instructs `gpt-image-2` to replace only the target original Japanese lettering while preserving all non-text pixels. Future non-bubble direct replacement experiments should therefore accept loose boxes that contain the target text and rely on this prompt/mask contract instead of chasing bbox purity.
+
+Fresh v39 registry coverage generation:
+
+```powershell
+python experiments/pipeline_coverage_report.py --registry-file docs/pipeline-runs.gbc06.json --registry-entry phase0-8-gbc06-v39-gbc06-04-6 --output-root outputs/runs --next-limit 12
+```
+
+Observed result:
+
+```text
+outputs\runs\phase0-8-gbc06-pipeline-coverage-v39-gbc06-04-6
+base_record_count=53 complete_record_count=53 incomplete_record_count=0
+phase7_preview evaluations=30 usable=30/30 failed=0 low_score=0 records=53 record_issues=0
+phase8_export audits=20 passed=20/20 records=22 record_issues=0
+phase1_pending_detection_count=127
+next_experiments[0].record_id=GBC06_04.png#7
+```
