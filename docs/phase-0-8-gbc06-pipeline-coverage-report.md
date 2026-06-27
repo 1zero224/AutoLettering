@@ -1231,3 +1231,61 @@ phase8_export audits=12 passed=12/12 records=14 record_issues=0
 phase1_pending_detection_count=135
 next_experiments[0].record_id=GBC06_03.png#10
 ```
+
+Fresh v32 registry extension for `GBC06_03.png#10`:
+
+```powershell
+python experiments/phase2_detect_text_regions.py --labelplus-file "GBC06 (已翻 斗笠)\翻译_0.txt" --output-root outputs/runs --run-id phase2-gbc06-03-10-cta-detection-v1 --sample-limit 1 --record-id "GBC06_03.png#10" --detection-strategy cta_mask --ctd-max-edge-distance-px 20
+python experiments/phase3_font_comparison.py --labelplus-file "GBC06 (已翻 斗笠)\翻译_0.txt" --detection-run-dir outputs/runs/phase2-gbc06-03-10-cta-detection-v1 --font-dir "工具箱漫画字体V2.5" --output-root outputs/runs --run-id phase3-gbc06-03-10-font-comparison --sample-limit 1 --font-limit 12 --record-id "GBC06_03.png#10"
+python experiments/phase5_orientation_angle.py --detection-run-dir outputs/runs/phase2-gbc06-03-10-cta-detection-v1 --output-root outputs/runs --run-id phase5-gbc06-03-10-angle --sample-limit 1 --record-id "GBC06_03.png#10"
+python experiments/phase3_mimo_font_selection.py --input-run-dir outputs/runs/phase3-gbc06-03-10-font-comparison --output-root outputs/runs --run-id phase3-gbc06-03-10-mimo-font-selection --sample-limit 1 --record-id "GBC06_03.png#10"
+python experiments/phase4_layout_search.py --selection-run-dir outputs/runs/phase3-gbc06-03-10-mimo-font-selection --angle-run-dir outputs/runs/phase5-gbc06-03-10-angle --detection-run-dir outputs/runs/phase2-gbc06-03-10-cta-detection-v1 --output-root outputs/runs --run-id phase4-gbc06-03-10-layout-v1 --sample-limit 1 --record-id "GBC06_03.png#10"
+python experiments/phase6_bubble_cleanup.py --detection-run-dir outputs/runs/phase2-gbc06-03-10-cta-detection-v1 --layout-run-dir outputs/runs/phase4-gbc06-03-10-layout-v1 --output-root outputs/runs --run-id phase6-gbc06-03-10-region-fill-v1 --sample-limit 1 --cleanup-method region_fill --record-id "GBC06_03.png#10"
+python experiments/phase7_8_integrated_smoke.py --detection-run-dir outputs/runs/phase2-gbc06-03-10-cta-detection-v1 --cleanup-run-dir outputs/runs/phase6-gbc06-03-10-region-fill-v1 --layout-run-dir outputs/runs/phase4-gbc06-03-10-layout-v1 --font-selection-run-dir outputs/runs/phase3-gbc06-03-10-mimo-font-selection --output-root outputs/runs --run-id phase7-8-gbc06-03-10-preview-v1 --sample-limit 1
+python experiments/phase8_export_quality_audit.py --phase8-run-dir outputs/runs/phase7-8-gbc06-03-10-preview-v1/runs/phase8-export --output-root outputs/runs --run-id phase8-gbc06-03-10-export-audit-v1
+```
+
+Observed result:
+
+```text
+record_id=GBC06_03.png#10 translated_text=没关系
+phase2 status=ok threshold=20 bbox=[449,1340,487,1438] nearest_edge_distance=20.0 route=cta_mask_lama_large_512px
+phase2 visual QA: selected the target "大丈夫" text region; bbox purity was not treated as a failure because the desired text content is contained
+font=[toolbox]与墨体-简体-Bold(v2.4).ttf confidence=0.95
+phase5 detected_orientation=vertical confidence=0.957 selected_angle=0.0
+phase4 final orientation=vertical angle=0.0 vertical_align=top font_size=33 target=38x98 measured=33x97
+phase6 cleanup_method=bubble_region_fill bbox=[449,1340,487,1438]
+phase7 MIMO score=10 usable=true original_text_removed=true art_preserved=true lettering_readable=true issues=[]
+phase8 audit passed=true vertical_top_layer_count=1 record_issue_count=0 anchor_y=1340
+```
+
+This sample keeps the relaxed detection acceptance rule explicit: the CTA mask was accepted because it contains the intended source text. The nearby LabelPlus point is outside the tight text bbox by about `20px`, but that is an expected point-to-mask-edge match and should not trigger bbox expansion or visual fallback on its own.
+
+Review artifacts:
+
+```text
+outputs/runs/phase2-gbc06-03-10-cta-detection-v1/debug/detection/GBC06_03-10.png
+outputs/runs/phase4-gbc06-03-10-layout-v1/debug/layout_candidates/GBC06-03-png-10.png
+outputs/runs/phase6-gbc06-03-10-region-fill-v1/crops/before_after/GBC06-03-png-10.png
+outputs/runs/phase7-8-gbc06-03-10-preview-v1/runs/phase7-preview/crops/context_before_after/GBC06-03-png-10.png
+outputs/runs/phase7-8-gbc06-03-10-preview-v1/runs/phase7-preview/debug/evaluation_contact_sheets/GBC06-03-png.png
+outputs/runs/phase7-8-gbc06-03-10-preview-v1/runs/phase7-preview/pages/GBC06-03-png.png
+outputs/runs/phase8-gbc06-03-10-export-audit-v1/phase8-export-audit.json
+```
+
+Fresh v32 registry coverage generation:
+
+```powershell
+python experiments/pipeline_coverage_report.py --registry-file docs/pipeline-runs.gbc06.json --registry-entry phase0-8-gbc06-v32-gbc06-03-10 --output-root outputs/runs --next-limit 12
+```
+
+Observed result:
+
+```text
+outputs\runs\phase0-8-gbc06-pipeline-coverage-v32-gbc06-03-10
+base_record_count=46 complete_record_count=46 incomplete_record_count=0
+phase7_preview evaluations=23 usable=23/23 failed=0 low_score=0 records=46 record_issues=0
+phase8_export audits=13 passed=13/13 records=15 record_issues=0
+phase1_pending_detection_count=134
+next_experiments[0].record_id=GBC06_03.png#11
+```
