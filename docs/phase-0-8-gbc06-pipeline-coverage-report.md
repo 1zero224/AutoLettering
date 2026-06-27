@@ -1565,3 +1565,65 @@ phase8_export audits=17 passed=17/17 records=19 record_issues=0
 phase1_pending_detection_count=130
 next_experiments[0].record_id=GBC06_04.png#4
 ```
+
+Fresh v37 registry extension for `GBC06_04.png#4`:
+
+```powershell
+python experiments/phase2_detect_text_regions.py --labelplus-file "GBC06 (已翻 斗笠)\翻译_0.txt" --output-root outputs/runs --run-id phase2-gbc06-04-4-cta-detection-v1 --sample-limit 1 --record-id "GBC06_04.png#4" --detection-strategy cta_mask
+python experiments/phase3_font_comparison.py --labelplus-file "GBC06 (已翻 斗笠)\翻译_0.txt" --detection-run-dir outputs/runs/phase2-gbc06-04-4-cta-detection-v1 --font-dir "工具箱漫画字体V2.5" --output-root outputs/runs --run-id phase3-gbc06-04-4-font-comparison-v1 --sample-limit 1 --font-limit 12 --record-id "GBC06_04.png#4"
+python experiments/phase5_orientation_angle.py --detection-run-dir outputs/runs/phase2-gbc06-04-4-cta-detection-v1 --output-root outputs/runs --run-id phase5-gbc06-04-4-angle-v1 --sample-limit 1 --record-id "GBC06_04.png#4"
+python experiments/phase3_mimo_font_selection.py --input-run-dir outputs/runs/phase3-gbc06-04-4-font-comparison-v1 --output-root outputs/runs --run-id phase3-gbc06-04-4-mimo-font-selection-v1 --sample-limit 1 --record-id "GBC06_04.png#4"
+python experiments/phase4_layout_search.py --selection-run-dir outputs/runs/phase3-gbc06-04-4-mimo-font-selection-v1 --angle-run-dir outputs/runs/phase5-gbc06-04-4-angle-v1 --detection-run-dir outputs/runs/phase2-gbc06-04-4-cta-detection-v1 --output-root outputs/runs --run-id phase4-gbc06-04-4-layout-v1 --sample-limit 1 --record-id "GBC06_04.png#4"
+python experiments/phase6_bubble_cleanup.py --detection-run-dir outputs/runs/phase2-gbc06-04-4-cta-detection-v1 --layout-run-dir outputs/runs/phase4-gbc06-04-4-layout-v1 --output-root outputs/runs --run-id phase6-gbc06-04-4-region-fill-v1 --sample-limit 1 --cleanup-method region_fill --record-id "GBC06_04.png#4"
+python experiments/phase7_8_integrated_smoke.py --detection-run-dir outputs/runs/phase2-gbc06-04-4-cta-detection-v1 --cleanup-run-dir outputs/runs/phase6-gbc06-04-4-region-fill-v1 --layout-run-dir outputs/runs/phase4-gbc06-04-4-layout-v1 --font-selection-run-dir outputs/runs/phase3-gbc06-04-4-mimo-font-selection-v1 --output-root outputs/runs --run-id phase7-8-gbc06-04-4-preview-v1 --sample-limit 1
+python experiments/phase8_export_quality_audit.py --phase8-run-dir outputs/runs/phase7-8-gbc06-04-4-preview-v1/runs/phase8-export --output-root outputs/runs --run-id phase8-gbc06-04-4-export-audit-v1
+```
+
+Observed result:
+
+```text
+record_id=GBC06_04.png#4 translated_text=我说过吧？
+phase2 status=ok threshold=30 bbox=[1248,849,1283,1000] selected_component_id=component-0011 distance_px=10.0 route=cta_mask_lama_large_512px
+phase2 visual QA: selected the right-side bubble column that corresponds to the short source text likely reading "と言ったろ？"; no semantic source column is missing
+font=[toolbox]文黑体-简繁-Bold(v2.4).ttf confidence=0.95
+phase5 detected_orientation=vertical confidence=0.986 selected_angle=0.0
+phase4 final orientation=vertical angle=0.0 vertical_align=top font_size=31 target=35x151 measured=31x148 overflow_ratio=0.0
+phase4 line_breaks=我说过吧？
+phase6 cleanup_method=bubble_region_fill bbox=[1248,849,1283,1000] fill_color=[255,255,255]
+phase7 MIMO score=10 usable=true original_text_removed=true art_preserved=true lettering_readable=true issues=[]
+phase8 audit passed=true vertical_top_layer_count=1 record_issue_count=0 anchor_y=849
+```
+
+This sample is a narrow white-bubble vertical text column. The accepted layout
+keeps the obvious vertical manga lettering unrotated and top-aligned; the
+measured ink height nearly fills the target height without overflow.
+
+Review artifacts:
+
+```text
+outputs/runs/phase2-gbc06-04-4-cta-detection-v1/debug/detection/GBC06_04-4.png
+outputs/runs/phase3-gbc06-04-4-font-comparison-v1/debug/font_comparison/GBC06-04-png-4.png
+outputs/runs/phase4-gbc06-04-4-layout-v1/debug/layout_candidates/GBC06-04-png-4.png
+outputs/runs/phase6-gbc06-04-4-region-fill-v1/crops/before_after/GBC06-04-png-4.png
+outputs/runs/phase7-8-gbc06-04-4-preview-v1/runs/phase7-preview/crops/context_before_after/GBC06-04-png-4.png
+outputs/runs/phase7-8-gbc06-04-4-preview-v1/runs/phase7-preview/debug/evaluation_contact_sheets/GBC06-04-png.png
+outputs/runs/phase7-8-gbc06-04-4-preview-v1/runs/phase7-preview/pages/GBC06-04-png.png
+outputs/runs/phase8-gbc06-04-4-export-audit-v1/phase8-export-audit.json
+```
+
+Fresh v37 registry coverage generation:
+
+```powershell
+python experiments/pipeline_coverage_report.py --registry-file docs/pipeline-runs.gbc06.json --registry-entry phase0-8-gbc06-v37-gbc06-04-4 --output-root outputs/runs --next-limit 12
+```
+
+Observed result:
+
+```text
+outputs\runs\phase0-8-gbc06-pipeline-coverage-v37-gbc06-04-4
+base_record_count=51 complete_record_count=51 incomplete_record_count=0
+phase7_preview evaluations=28 usable=28/28 failed=0 low_score=0 records=51 record_issues=0
+phase8_export audits=18 passed=18/18 records=20 record_issues=0
+phase1_pending_detection_count=129
+next_experiments[0].record_id=GBC06_04.png#5
+```

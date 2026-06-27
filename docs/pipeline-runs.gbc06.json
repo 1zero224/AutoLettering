@@ -553,6 +553,40 @@
         ]
       }
     },
+    "phase0-8-gbc06-v37-gbc06-04-4": {
+      "extends": "phase0-8-gbc06-v36-gbc06-04-3",
+      "run_id": "phase0-8-gbc06-pipeline-coverage-v37-gbc06-04-4",
+      "next_limit": 12,
+      "append": {
+        "detection_run_dir": [
+          "outputs/runs/phase2-gbc06-04-4-cta-detection-v1"
+        ],
+        "font_selection_run_dir": [
+          "outputs/runs/phase3-gbc06-04-4-mimo-font-selection-v1"
+        ],
+        "layout_run_dir": [
+          "outputs/runs/phase4-gbc06-04-4-layout-v1"
+        ],
+        "angle_run_dir": [
+          "outputs/runs/phase5-gbc06-04-4-angle-v1"
+        ],
+        "cleanup_run_dirs": [
+          "outputs/runs/phase6-gbc06-04-4-region-fill-v1"
+        ],
+        "preview_run_dir": [
+          "outputs/runs/phase7-8-gbc06-04-4-preview-v1/runs/phase7-preview"
+        ],
+        "export_run_dir": [
+          "outputs/runs/phase7-8-gbc06-04-4-preview-v1/runs/phase8-export"
+        ],
+        "phase7_preview_evaluation_run_dir": [
+          "outputs/runs/phase7-8-gbc06-04-4-preview-v1/runs/phase7-evaluation"
+        ],
+        "phase8_export_audit_run_dir": [
+          "outputs/runs/phase8-gbc06-04-4-export-audit-v1"
+        ]
+      }
+    },
     "phase0-8-gbc06-17-gpt-direct-repair-source": {
       "run_id": "phase0-8-gbc06-17-gpt-direct-coverage-v1",
       "next_limit": 5,
