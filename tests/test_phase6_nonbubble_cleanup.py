@@ -763,6 +763,74 @@ def test_run_phase6_nonbubble_cleanup_ctd_match_can_experimentally_override_meth
     assert row["gpt_image2_edit"]["inpaint_method"] == "bt_patchmatch"
 
 
+def test_run_phase6_nonbubble_cleanup_comic_detector_bbox_is_not_ctd_matched(tmp_path: Path, monkeypatch):
+    image_path = _write_nonbubble_image(tmp_path / "page.png")
+    detection_run = tmp_path / "phase2"
+    detection_run.mkdir()
+    _write_detection(
+        detection_run / "detections.jsonl",
+        image_path,
+        rows=[
+            {
+                "record_id": "page.png#2",
+                "group_name": "框外",
+                "detection_method": "comic_rtdetrv2",
+                "selected_text_box_xyxy": [20, 15, 90, 75],
+                "text_region_kind": "comic_text_bubble_rtdetrv2_matched",
+                "text_region_source": "comic_text_bubble_rtdetrv2",
+                "text_region_mask_bbox_xyxy": [20, 15, 90, 75],
+                "comic_text_bubble_detector_class": "text_free",
+            }
+        ],
+    )
+    calls = {}
+
+    def fake_inpaint(**kwargs):
+        calls.update(kwargs)
+        output_dir = Path(kwargs["output_dir"])
+        cleaned = output_dir / "cleaned.png"
+        mask = output_dir / "mask.png"
+        gpt_mask = output_dir / "gpt-mask.png"
+        before_after = output_dir / "before-after.png"
+        input_crop = output_dir / "input.png"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (70, 60), "white").save(cleaned)
+        Image.new("RGB", (70, 60), "black").save(input_crop)
+        Image.new("L", (70, 60), 255).save(mask)
+        Image.new("RGBA", (70, 60), (0, 0, 0, 0)).save(gpt_mask)
+        Image.new("RGB", (140, 60), "white").save(before_after)
+        return NonBubbleInpaintResult(
+            record_id=kwargs["record_id"],
+            method="bt_patchmatch_inpaint",
+            bbox=kwargs["bbox"],
+            input_crop_path=input_crop,
+            text_mask_path=mask,
+            gpt_mask_path=gpt_mask,
+            cleaned_crop_path=cleaned,
+            before_after_path=before_after,
+            dark_pixel_count=42,
+        )
+
+    monkeypatch.setattr("autolettering.phase6_nonbubble.inpaint_nonbubble_text", fake_inpaint)
+
+    run_dir = run_phase6_nonbubble_cleanup(
+        detection_run_dir=detection_run,
+        output_root=tmp_path / "outputs",
+        run_id="phase6-comic-detector-bbox",
+        sample_limit=1,
+        inpaint_method="bt_patchmatch",
+    )
+
+    row = _read_jsonl(run_dir / "cleanup-results.jsonl")[0]
+    assert calls["bbox"] == (20, 15, 90, 75)
+    assert calls["method"] == "bt_patchmatch"
+    assert calls["text_mask_path"] is None
+    assert row["cleanup"]["method"] == "bt_patchmatch_inpaint"
+    assert "route" not in row["cleanup"]
+    assert row["gpt_image2_edit"]["status"] == "dry_run"
+    assert row["gpt_image2_edit"].get("reason") != "cta_mask_matched_inpaint_path"
+
+
 def test_run_phase6_nonbubble_cleanup_prefers_canonical_text_region_mask_path(tmp_path: Path, monkeypatch):
     image_path = _write_nonbubble_image(tmp_path / "page.png")
     legacy_mask = tmp_path / "legacy-mask.png"

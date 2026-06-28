@@ -536,7 +536,10 @@ def _cleanup_bbox_for_detection(detection: dict) -> tuple[int, int, int, int]:
 
 
 def _is_ctd_matched_detection(detection: dict) -> bool:
-    return matched_text_mask_bbox(detection) is not None
+    has_ctd_match = (detection.get("cta_match") or detection.get("ctd_match") or {}).get("status") == "matched"
+    has_ctd_source = detection.get("text_region_source") == "ctd_refined_mask_component"
+    has_ctd_method = detection.get("detection_method") in {"cta_mask", "ctd_mask"}
+    return (has_ctd_match or has_ctd_source or has_ctd_method) and matched_text_mask_bbox(detection) is not None
 
 
 def _ctd_component_mask_path(detection: dict) -> str | None:

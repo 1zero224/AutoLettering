@@ -6,6 +6,7 @@ import pytest
 from PIL import Image, ImageDraw
 
 from autolettering.detection.cv_text import detect_text_region, detection_result_to_dict
+from autolettering.detection.comic_text_bubble import ComicTextBubbleDetection
 from autolettering.detection.regions import build_search_region
 from autolettering.labelplus.models import ManifestImage, ManifestLabel
 from autolettering.phase2 import run_phase2
@@ -362,6 +363,173 @@ Comment
     assert record["recognized_orientation"] == "vertical"
 
 
+def test_run_phase2_can_use_direct_comic_rtdetrv2_detector(tmp_path: Path, monkeypatch):
+    project_dir = tmp_path / "sample_project"
+    project_dir.mkdir()
+
+    image_path = project_dir / "page.png"
+    Image.new("RGB", (240, 240), "white").save(image_path)
+    (project_dir / "翻译_0.txt").write_text(
+        """1,0
+-
+框外
+-
+Comment
+
+>>>>>>>>[page.png]<<<<<<<<
+----------------[1]----------------[0.500,0.500,1]
+测试框外
+""",
+        encoding="utf-8",
+    )
+
+    fake_model = tmp_path / "detector.onnx"
+    fake_model.write_bytes(b"fake")
+    monkeypatch.setattr("autolettering.phase2.ComicTextBubbleDetector", _FakeComicTextBubbleDetector)
+
+    run_dir = run_phase2(
+        project_dir / "翻译_0.txt",
+        output_root=tmp_path / "outputs",
+        run_id="phase2-comic-rtdetrv2-test",
+        sample_limit=1,
+        detection_strategy="comic_rtdetrv2",
+        comic_detector_model_path=fake_model,
+        comic_detector_conf_threshold=0.42,
+        comic_detector_max_distance_px=80,
+    )
+
+    record = json.loads((run_dir / "detections.jsonl").read_text(encoding="utf-8").strip())
+    match = record["comic_text_bubble_match"]
+
+    assert record["status"] == "ok"
+    assert record["detection_method"] == "comic_rtdetrv2"
+    assert record["selected_text_box_xyxy"] == [88, 82, 135, 150]
+    assert record["selected_text_full_xyxy"] == [88, 82, 135, 150]
+    assert record["selected_text_body_xyxy"] == [88, 82, 135, 150]
+    assert record["text_region_kind"] == "comic_text_bubble_rtdetrv2_matched"
+    assert record["text_region_source"] == "comic_text_bubble_rtdetrv2"
+    assert record["lettering_route"]["route"] == "comic_text_bubble_detect_then_configured_cleanup"
+    assert match["status"] == "matched"
+    assert match["selected_label"] == "text_free"
+    assert match["selected_score"] == 0.88
+    assert match["threshold_px"] == 80
+    assert record["comic_text_bubble_detections"][0]["label"] == "text_free"
+    review_row = next(csv.DictReader((run_dir / "reports" / "manual-review.csv").read_text(encoding="utf-8").splitlines()))
+    assert review_row["comic_match_status"] == "matched"
+    assert review_row["comic_match_label"] == "text_free"
+    assert review_row["comic_match_score"] == "0.88"
+    assert review_row["comic_match_distance_px"] == "0.0"
+    assert review_row["comic_match_threshold_px"] == "80"
+    report = (run_dir / "reports" / "phase2-report.md").read_text(encoding="utf-8")
+    assert "Comic text/bubble RT-DETRv2" in report
+    assert "`comic_text_bubble_detections`" in report
+    assert "selected comic detector label" in report
+    assert f"Comic detector model: `{fake_model}`" in report
+    assert "Comic detector confidence threshold: `0.42`" in report
+    assert "Comic detector max match distance: `80px`" in report
+
+
+def test_run_phase2_comic_fallback_expands_context_with_detector_candidates(tmp_path: Path, monkeypatch):
+    project_dir = tmp_path / "sample_project"
+    project_dir.mkdir()
+
+    image_path = project_dir / "page.png"
+    Image.new("RGB", (300, 300), "white").save(image_path)
+    (project_dir / "翻译_0.txt").write_text(
+        """1,0
+-
+框外
+-
+Comment
+
+>>>>>>>>[page.png]<<<<<<<<
+----------------[1]----------------[0.500,0.500,1]
+测试框外
+""",
+        encoding="utf-8",
+    )
+
+    fake_model = tmp_path / "detector.onnx"
+    fake_model.write_bytes(b"fake")
+    monkeypatch.setattr("autolettering.phase2.ComicTextBubbleDetector", _FakeDistantComicTextBubbleDetector)
+
+    run_dir = run_phase2(
+        project_dir / "翻译_0.txt",
+        output_root=tmp_path / "outputs",
+        run_id="phase2-comic-rtdetrv2-fallback-test",
+        sample_limit=1,
+        radius_x=20,
+        radius_y=20,
+        detection_strategy="comic_rtdetrv2",
+        comic_detector_model_path=fake_model,
+        comic_detector_max_distance_px=10,
+    )
+
+    record = json.loads((run_dir / "detections.jsonl").read_text(encoding="utf-8").strip())
+    fallback = record["fallback"]
+
+    assert record["status"] == "fallback_required"
+    assert record["comic_text_bubble_match"]["failure_reason"] == "no_comic_text_box_within_threshold"
+    assert fallback["context_source"] == "labelplus_search_region_plus_comic_text_bubble_candidates"
+    assert fallback["source_context_bbox_xyxy"] == [130, 130, 170, 170]
+    assert fallback["expanded_source_context_bbox_xyxy"] == [130, 130, 260, 260]
+    assert fallback["context_candidate_detection_ids"] == ["text_free-1"]
+    assert fallback["context_candidate_bboxes_xyxy"] == [[220, 220, 260, 260]]
+    assert fallback["context_candidate_labels"] == ["text_free"]
+    assert fallback["context_candidate_scores"] == [0.74]
+    assert fallback["upstream_match_metric"] == "labelplus_point_to_comic_text_box_distance"
+    assert fallback["upstream_match_threshold_px"] == 10
+
+
+def test_run_phase2_comic_fallback_does_not_use_bubble_only_candidates(tmp_path: Path, monkeypatch):
+    project_dir = tmp_path / "sample_project"
+    project_dir.mkdir()
+
+    image_path = project_dir / "page.png"
+    Image.new("RGB", (300, 300), "white").save(image_path)
+    (project_dir / "翻译_0.txt").write_text(
+        """1,0
+-
+框外
+-
+Comment
+
+>>>>>>>>[page.png]<<<<<<<<
+----------------[1]----------------[0.500,0.500,1]
+测试框外
+""",
+        encoding="utf-8",
+    )
+
+    fake_model = tmp_path / "detector.onnx"
+    fake_model.write_bytes(b"fake")
+    monkeypatch.setattr("autolettering.phase2.ComicTextBubbleDetector", _FakeBubbleOnlyComicTextBubbleDetector)
+
+    run_dir = run_phase2(
+        project_dir / "翻译_0.txt",
+        output_root=tmp_path / "outputs",
+        run_id="phase2-comic-rtdetrv2-bubble-only-fallback-test",
+        sample_limit=1,
+        radius_x=20,
+        radius_y=20,
+        detection_strategy="comic_rtdetrv2",
+        comic_detector_model_path=fake_model,
+        comic_detector_max_distance_px=10,
+    )
+
+    record = json.loads((run_dir / "detections.jsonl").read_text(encoding="utf-8").strip())
+    fallback = record["fallback"]
+
+    assert record["status"] == "fallback_required"
+    assert record["comic_text_bubble_match"]["failure_reason"] == "no_comic_text_box"
+    assert record["comic_text_bubble_match"]["top_candidates"][0]["label"] == "bubble"
+    assert fallback["context_source"] == "labelplus_search_region"
+    assert fallback["source_context_bbox_xyxy"] == [130, 130, 170, 170]
+    assert fallback["expanded_source_context_bbox_xyxy"] == [130, 130, 170, 170]
+    assert "context_candidate_detection_ids" not in fallback
+    assert "context_candidate_bboxes_xyxy" not in fallback
+
+
 def test_run_phase2_can_filter_by_record_id(tmp_path: Path):
     project_dir = tmp_path / "sample_project"
     project_dir.mkdir()
@@ -424,3 +592,37 @@ class _FakeModelTextRegionClient:
             "request": {"kind": kind},
             "response": {"status": "ok"},
         }
+
+
+class _FakeComicTextBubbleDetector:
+    def __init__(self, model_path, conf_threshold=0.5, classes=None):
+        self.model_path = Path(model_path)
+        self.conf_threshold = conf_threshold
+
+    def detect_image(self, image_path: str | Path):
+        return [
+            ComicTextBubbleDetection(label="text_free", score=0.88, bbox_xyxy=(88, 82, 135, 150)),
+            ComicTextBubbleDetection(label="bubble", score=0.99, bbox_xyxy=(20, 20, 210, 210)),
+        ]
+
+
+class _FakeDistantComicTextBubbleDetector:
+    def __init__(self, model_path, conf_threshold=0.5, classes=None):
+        self.model_path = Path(model_path)
+        self.conf_threshold = conf_threshold
+
+    def detect_image(self, image_path: str | Path):
+        return [
+            ComicTextBubbleDetection(label="text_free", score=0.74, bbox_xyxy=(220, 220, 260, 260)),
+        ]
+
+
+class _FakeBubbleOnlyComicTextBubbleDetector:
+    def __init__(self, model_path, conf_threshold=0.5, classes=None):
+        self.model_path = Path(model_path)
+        self.conf_threshold = conf_threshold
+
+    def detect_image(self, image_path: str | Path):
+        return [
+            ComicTextBubbleDetection(label="bubble", score=0.95, bbox_xyxy=(105, 105, 195, 195)),
+        ]

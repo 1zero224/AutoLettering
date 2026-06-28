@@ -1,3 +1,6 @@
+from pathlib import Path
+
+import pytest
 from PIL import Image, ImageDraw
 
 from experiments import (
@@ -94,6 +97,95 @@ def test_phase2_detection_cli_builds_mimo_config_from_env(monkeypatch):
     assert config.model == "mimo-v2.5"
     assert config.max_completion_tokens == 1024
     assert config.thinking_type == "disabled"
+
+
+def test_phase2_detection_cli_accepts_comic_rtdetrv2_detector_options():
+    parser = phase2_detect_text_regions.build_parser()
+
+    args = parser.parse_args(
+        [
+            "--detection-strategy",
+            "comic_rtdetrv2",
+            "--comic-detector-model-path",
+            "comic-text-and-bubble-detector/detector-v4-s_int8.onnx",
+            "--comic-detector-conf-threshold",
+            "0.37",
+            "--comic-detector-max-distance-px",
+            "96",
+        ]
+    )
+
+    assert args.detection_strategy == "comic_rtdetrv2"
+    assert args.comic_detector_model_path == "comic-text-and-bubble-detector/detector-v4-s_int8.onnx"
+    assert args.comic_detector_conf_threshold == 0.37
+    assert args.comic_detector_max_distance_px == 96
+
+    alias_args = parser.parse_args(["--detection-strategy", "comic_text_bubble_rtdetrv2"])
+    assert alias_args.detection_strategy == "comic_text_bubble_rtdetrv2"
+
+
+def test_phase2_detection_cli_rejects_invalid_comic_detector_thresholds():
+    parser = phase2_detect_text_regions.build_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--comic-detector-conf-threshold", "nan"])
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--comic-detector-conf-threshold", "1.1"])
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--comic-detector-max-distance-px", "-1"])
+
+
+def test_phase2_detection_cli_main_passes_comic_detector_options(monkeypatch, tmp_path, capsys):
+    calls = {}
+    model_path = r"comic-text-and-bubble-detector\detector_int8.onnx"
+
+    def fake_run_phase2(*args, **kwargs):
+        calls["args"] = args
+        calls["kwargs"] = kwargs
+        return tmp_path / "outputs" / "phase2-cli"
+
+    monkeypatch.setattr(phase2_detect_text_regions, "run_phase2", fake_run_phase2)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "phase2_detect_text_regions.py",
+            "--labelplus-file",
+            r"GBC06 (已翻 斗笠)\翻译_0.txt",
+            "--output-root",
+            str(tmp_path / "outputs"),
+            "--run-id",
+            "phase2-cli",
+            "--sample-limit",
+            "7",
+            "--record-id",
+            "GBC06_17.png#3",
+            "--detection-strategy",
+            "comic_text_bubble_rtdetrv2",
+            "--comic-detector-model-path",
+            model_path,
+            "--comic-detector-conf-threshold",
+            "0.51",
+            "--comic-detector-max-distance-px",
+            "123",
+            "--env-file",
+            str(tmp_path / "missing.env"),
+        ],
+    )
+
+    phase2_detect_text_regions.main()
+
+    assert calls["args"] == (Path(r"GBC06 (已翻 斗笠)\翻译_0.txt"),)
+    assert calls["kwargs"]["output_root"] == tmp_path / "outputs"
+    assert calls["kwargs"]["run_id"] == "phase2-cli"
+    assert calls["kwargs"]["sample_limit"] == 7
+    assert calls["kwargs"]["record_ids"] == ["GBC06_17.png#3"]
+    assert calls["kwargs"]["detection_strategy"] == "comic_text_bubble_rtdetrv2"
+    assert calls["kwargs"]["comic_detector_model_path"] == Path(model_path)
+    assert calls["kwargs"]["comic_detector_conf_threshold"] == 0.51
+    assert calls["kwargs"]["comic_detector_max_distance_px"] == 123
+    assert str(tmp_path / "outputs" / "phase2-cli") in capsys.readouterr().out
 
 
 def test_phase2_cta_threshold_sweep_cli_accepts_repeatable_thresholds():

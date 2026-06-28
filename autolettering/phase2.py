@@ -6,6 +6,14 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from .detection.comic_text_bubble import (
+    DEFAULT_COMIC_DETECTOR_MODEL_PATH,
+    ComicTextBubbleDetection,
+    ComicTextBubbleDetector,
+    detections_payload,
+    match_payload,
+    select_comic_text_detection,
+)
 from .detection.cv_text import detect_text_region, detection_result_to_dict, draw_detection_debug
 from .detection.ctd_masks import (
     CtdMaskComponent,
@@ -34,6 +42,7 @@ CTA_MATCH_DIAGNOSTICS_SCHEMA_VERSION = "autolettering.cta_mask_match_diagnostics
 CTA_MATCH_DIAGNOSTICS_TOP_LIMIT = 12
 FALLBACK_CONTEXT_CLUSTER_GAP_PX = 140.0
 FALLBACK_CONTEXT_DISTANCE_RATIO_LIMIT = 2.0
+DEFAULT_COMIC_DETECTOR_MAX_DISTANCE_PX = 120.0
 
 
 def run_phase2(
@@ -48,6 +57,9 @@ def run_phase2(
     ctd_max_edge_distance_px: float = 30.0,
     call_model_text_recognition: bool = False,
     model_text_recognition_client: Any | None = None,
+    comic_detector_model_path: str | Path | None = None,
+    comic_detector_conf_threshold: float = 0.5,
+    comic_detector_max_distance_px: float = DEFAULT_COMIC_DETECTOR_MAX_DISTANCE_PX,
 ) -> Path:
     manifest = parse_labelplus_project(labelplus_file)
     run_dir = Path(output_root) / (run_id or _timestamp_run_id().replace("phase1", "phase2"))
@@ -64,6 +76,9 @@ def run_phase2(
         ctd_max_edge_distance_px=ctd_max_edge_distance_px,
         call_model_text_recognition=call_model_text_recognition,
         model_text_recognition_client=model_text_recognition_client,
+        comic_detector_model_path=comic_detector_model_path,
+        comic_detector_conf_threshold=comic_detector_conf_threshold,
+        comic_detector_max_distance_px=comic_detector_max_distance_px,
     )
 
     _write_phase2_report(
@@ -76,6 +91,9 @@ def run_phase2(
         radius_y=radius_y,
         detection_strategy=strategy,
         call_model_text_recognition=call_model_text_recognition,
+        comic_detector_model_path=comic_detector_model_path or DEFAULT_COMIC_DETECTOR_MODEL_PATH,
+        comic_detector_conf_threshold=comic_detector_conf_threshold,
+        comic_detector_max_distance_px=comic_detector_max_distance_px,
     )
     return run_dir
 
@@ -107,6 +125,9 @@ def _write_detections(
     ctd_max_edge_distance_px: float,
     call_model_text_recognition: bool,
     model_text_recognition_client: Any | None,
+    comic_detector_model_path: str | Path | None,
+    comic_detector_conf_threshold: float,
+    comic_detector_max_distance_px: float,
 ) -> tuple[int, int]:
     ok_count = failed_count = 0
     rows: list[dict] = []
@@ -115,8 +136,11 @@ def _write_detections(
     else:
         ctd_matches = {}
         ctd_diagnostics = {}
+    comic_detector = _comic_detector(detection_strategy, comic_detector_model_path, comic_detector_conf_threshold)
+    comic_detections_by_image: dict[tuple[str, str], list[ComicTextBubbleDetection]] = {}
     with (run_dir / "detections.jsonl").open("w", encoding="utf-8", newline="\n") as handle:
         for image, label in selected_records:
+            comic_detections = _comic_detections_for_image(comic_detector, comic_detections_by_image, image)
             payload = _detect_record(
                 run_dir,
                 image,
@@ -129,6 +153,8 @@ def _write_detections(
                 ctd_max_edge_distance_px=ctd_max_edge_distance_px,
                 call_model_text_recognition=call_model_text_recognition,
                 model_text_recognition_client=model_text_recognition_client,
+                comic_detections=comic_detections,
+                comic_detector_max_distance_px=comic_detector_max_distance_px,
             )
             rows.append(payload)
             ok_count += int(payload["status"] == "ok")
@@ -150,6 +176,8 @@ def _detect_record(
     ctd_max_edge_distance_px: float | None = None,
     call_model_text_recognition: bool = False,
     model_text_recognition_client: Any | None = None,
+    comic_detections: list[ComicTextBubbleDetection] | None = None,
+    comic_detector_max_distance_px: float = DEFAULT_COMIC_DETECTOR_MAX_DISTANCE_PX,
 ) -> dict:
     result = _detect_with_strategy(
         image,
@@ -158,6 +186,8 @@ def _detect_record(
         radius_y,
         detection_strategy=detection_strategy,
         ctd_match=ctd_match,
+        comic_detections=comic_detections,
+        comic_detector_max_distance_px=comic_detector_max_distance_px,
     )
     debug_path = run_dir / "debug" / "detection" / f"{Path(image.image_name).stem}-{label.record_index}.png"
 
@@ -181,7 +211,12 @@ def _detect_record(
         if _is_cta_mask_strategy(detection_strategy):
             payload["cta_match_diagnostics"] = ctd_match_diagnostics
         payload["ctd_match_diagnostics"] = ctd_match_diagnostics
+    if _is_comic_text_bubble_strategy(detection_strategy):
+        _add_comic_text_bubble_payload(payload, label, comic_detections or [], comic_detector_max_distance_px)
     if result.status == "fallback_required":
+        fallback_candidate_context = None
+        if _is_comic_text_bubble_strategy(detection_strategy):
+            fallback_candidate_context = _comic_fallback_context_candidates(payload.get("comic_text_bubble_match"))
         payload["fallback"] = _mimo_gpt_fallback_payload(
             label,
             image.width,
@@ -191,7 +226,16 @@ def _detect_record(
             payload.get("failure_reason"),
             ctd_max_edge_distance_px=ctd_max_edge_distance_px,
             ctd_match_diagnostics=ctd_match_diagnostics,
+            fallback_candidate_context=fallback_candidate_context,
         )
+        if _is_comic_text_bubble_strategy(detection_strategy):
+            payload["fallback"].update(
+                {
+                    "upstream_match_metric": "labelplus_point_to_comic_text_box_distance",
+                    "upstream_text_region_source": "comic_text_bubble_rtdetrv2",
+                    "upstream_match_threshold_px": comic_detector_max_distance_px,
+                }
+            )
     payload["lettering_route"] = _lettering_route_payload(payload, detection_strategy)
     payload.update(_text_region_payload(payload, detection_strategy))
     if call_model_text_recognition:
@@ -325,9 +369,20 @@ def _detect_with_strategy(
     radius_y: int,
     detection_strategy: str,
     ctd_match: CtdMaskMatch | None,
+    comic_detections: list[ComicTextBubbleDetection] | None = None,
+    comic_detector_max_distance_px: float = DEFAULT_COMIC_DETECTOR_MAX_DISTANCE_PX,
 ) -> DetectionResult:
     if detection_strategy == "cv":
         return detect_text_region(image.image_path, label, image.width, image.height, radius_x, radius_y)
+    if _is_comic_text_bubble_strategy(detection_strategy):
+        return _detect_with_comic_text_bubble(
+            image,
+            label,
+            radius_x,
+            radius_y,
+            comic_detections or [],
+            comic_detector_max_distance_px,
+        )
     if not _is_cta_mask_strategy(detection_strategy):
         raise ValueError(f"unsupported_detection_strategy:{detection_strategy}")
     search_region = build_search_region(label.x_px, label.y_px, image.width, image.height, radius_x, radius_y)
@@ -361,6 +416,84 @@ def _detect_with_strategy(
         confidence=0.0,
         failure_reason=reason,
     )
+
+
+def _detect_with_comic_text_bubble(
+    image: ManifestImage,
+    label: ManifestLabel,
+    radius_x: int,
+    radius_y: int,
+    detections: list[ComicTextBubbleDetection],
+    max_distance_px: float,
+) -> DetectionResult:
+    search_region = build_search_region(label.x_px, label.y_px, image.width, image.height, radius_x, radius_y)
+    match = select_comic_text_detection(detections, (label.x_px, label.y_px), max_distance_px=max_distance_px)
+    candidate_boxes = [
+        CandidateBox(
+            xyxy=detection.bbox_xyxy,
+            area=max(1, (detection.bbox_xyxy[2] - detection.bbox_xyxy[0]) * (detection.bbox_xyxy[3] - detection.bbox_xyxy[1])),
+            dark_pixel_count=0,
+            center_distance=round(_point_to_bbox_distance((label.x_px, label.y_px), detection.bbox_xyxy), 3),
+            score=detection.score,
+            polarity=f"comic_text_bubble:{detection.label}",
+        )
+        for detection in detections
+        if detection.label in {"text_bubble", "text_free"}
+    ]
+    selected = match.selected_detection
+    if selected is None:
+        return DetectionResult(
+            record_id=label.id,
+            status="fallback_required",
+            search_region_xyxy=search_region,
+            candidate_boxes=candidate_boxes,
+            selected_text_box_xyxy=None,
+            confidence=0.0,
+            failure_reason=match.failure_reason,
+        )
+    return DetectionResult(
+        record_id=label.id,
+        status="ok",
+        search_region_xyxy=search_region,
+        candidate_boxes=candidate_boxes,
+        selected_text_box_xyxy=selected.bbox_xyxy,
+        confidence=selected.score,
+        failure_reason=None,
+    )
+
+
+def _comic_detector(
+    detection_strategy: str,
+    model_path: str | Path | None,
+    conf_threshold: float,
+) -> ComicTextBubbleDetector | None:
+    if not _is_comic_text_bubble_strategy(detection_strategy):
+        return None
+    return ComicTextBubbleDetector(model_path or DEFAULT_COMIC_DETECTOR_MODEL_PATH, conf_threshold=conf_threshold)
+
+
+def _comic_detections_for_image(
+    detector: ComicTextBubbleDetector | None,
+    cache: dict[tuple[str, str], list[ComicTextBubbleDetection]],
+    image: ManifestImage,
+) -> list[ComicTextBubbleDetection] | None:
+    if detector is None:
+        return None
+    key = (image.image_name, str(image.image_path))
+    if key not in cache:
+        cache[key] = detector.detect_image(image.image_path)
+    return cache[key]
+
+
+def _add_comic_text_bubble_payload(
+    payload: dict,
+    label: ManifestLabel,
+    detections: list[ComicTextBubbleDetection],
+    threshold_px: float,
+) -> None:
+    match = select_comic_text_detection(detections, (label.x_px, label.y_px), max_distance_px=threshold_px)
+    payload["comic_text_bubble_detections"] = detections_payload(detections)
+    payload["comic_text_bubble_match"] = match_payload(match, threshold_px)
 
 
 def _ctd_matches_by_record(
@@ -504,6 +637,8 @@ def _ctd_match_payload(match: CtdMaskMatch) -> dict:
 
 
 def _normalize_detection_strategy(strategy: str) -> str:
+    if strategy in {"comic_rtdetrv2", "comic_text_bubble_rtdetrv2"}:
+        return "comic_rtdetrv2"
     if strategy == "ctd_mask":
         return "ctd_mask"
     if strategy in {"cta_mask", "cta"}:
@@ -517,6 +652,10 @@ def _is_cta_mask_strategy(strategy: str) -> bool:
     return strategy in {"cta_mask", "ctd_mask"}
 
 
+def _is_comic_text_bubble_strategy(strategy: str) -> bool:
+    return strategy == "comic_rtdetrv2"
+
+
 def _mimo_gpt_fallback_payload(
     label: ManifestLabel,
     image_width: int,
@@ -526,9 +665,10 @@ def _mimo_gpt_fallback_payload(
     trigger_reason: str | None = None,
     ctd_max_edge_distance_px: float | None = None,
     ctd_match_diagnostics: dict | None = None,
+    fallback_candidate_context: _FallbackContextCandidates | None = None,
 ) -> dict:
     source_bbox = build_search_region(label.x_px, label.y_px, image_width, image_height, radius_x, radius_y)
-    candidate_context = _fallback_context_candidates(ctd_match_diagnostics)
+    candidate_context = fallback_candidate_context or _fallback_context_candidates(ctd_match_diagnostics)
     expanded_source_bbox = _union_bboxes([source_bbox, *candidate_context.bboxes])
     context_bbox = _near_square_bbox(expanded_source_bbox, image_width, image_height)
     payload = {
@@ -549,20 +689,31 @@ def _mimo_gpt_fallback_payload(
         "preferred_mask_shape": "tight_local_bbox",
     }
     if candidate_context.bboxes:
-        payload["context_candidate_component_ids"] = candidate_context.component_ids
+        payload[candidate_context.id_field] = candidate_context.candidate_ids
         payload["context_candidate_bboxes_xyxy"] = [list(bbox) for bbox in candidate_context.bboxes]
+        payload.update(candidate_context.extra_fields)
     return payload
 
 
 class _FallbackContextCandidates:
-    def __init__(self, component_ids: list[str], bboxes: list[tuple[int, int, int, int]]) -> None:
-        self.component_ids = component_ids
+    def __init__(
+        self,
+        candidate_ids: list[str],
+        bboxes: list[tuple[int, int, int, int]],
+        source_with_candidates: str = "labelplus_search_region_plus_ctd_candidates",
+        id_field: str = "context_candidate_component_ids",
+        extra_fields: dict | None = None,
+    ) -> None:
+        self.candidate_ids = candidate_ids
         self.bboxes = bboxes
+        self.source_with_candidates = source_with_candidates
+        self.id_field = id_field
+        self.extra_fields = extra_fields or {}
 
     @property
     def source(self) -> str:
         if self.bboxes:
-            return "labelplus_search_region_plus_ctd_candidates"
+            return self.source_with_candidates
         return "labelplus_search_region"
 
 
@@ -595,6 +746,40 @@ def _fallback_context_candidates(ctd_match_diagnostics: dict | None) -> _Fallbac
     )
 
 
+def _comic_fallback_context_candidates(match: dict | None) -> _FallbackContextCandidates:
+    source = "labelplus_search_region_plus_comic_text_bubble_candidates"
+    if not match or match.get("status") != "fallback_required":
+        return _FallbackContextCandidates([], [], source_with_candidates=source)
+    usable_candidates = []
+    for index, candidate in enumerate(match.get("top_candidates") or [], start=1):
+        parsed_candidate = _comic_fallback_context_candidate_tuple(candidate, index)
+        if parsed_candidate is not None:
+            usable_candidates.append(parsed_candidate)
+    if not usable_candidates:
+        return _FallbackContextCandidates([], [], source_with_candidates=source)
+    selected = [usable_candidates[0]]
+    selected_bbox = usable_candidates[0][1]
+    max_distance = usable_candidates[0][2] * FALLBACK_CONTEXT_DISTANCE_RATIO_LIMIT
+    for candidate in usable_candidates[1:]:
+        if candidate[2] > max_distance:
+            continue
+        if _bbox_gap_px(candidate[1], selected_bbox) > FALLBACK_CONTEXT_CLUSTER_GAP_PX:
+            continue
+        selected.append(candidate)
+        selected_bbox = _union_bboxes([selected_bbox, candidate[1]])
+    return _FallbackContextCandidates(
+        [candidate[0] for candidate in selected],
+        [candidate[1] for candidate in selected],
+        source_with_candidates=source,
+        id_field="context_candidate_detection_ids",
+        extra_fields={
+            "context_candidate_labels": [candidate[3] for candidate in selected],
+            "context_candidate_scores": [candidate[4] for candidate in selected],
+            "context_candidate_distances_px": [candidate[2] for candidate in selected],
+        },
+    )
+
+
 def _fallback_context_candidate_tuple(
     candidate: dict,
 ) -> tuple[str, tuple[int, int, int, int], float] | None:
@@ -606,6 +791,25 @@ def _fallback_context_candidate_tuple(
     if not isinstance(distance_px, int | float):
         return None
     return str(component_id), _bbox_tuple(bbox), float(distance_px)
+
+
+def _comic_fallback_context_candidate_tuple(
+    candidate: dict,
+    index: int,
+) -> tuple[str, tuple[int, int, int, int], float, str, float] | None:
+    label = candidate.get("label")
+    if label not in {"text_bubble", "text_free"}:
+        return None
+    bbox = candidate.get("bbox_xyxy")
+    if not _is_bbox_like(bbox):
+        return None
+    distance_px = candidate.get("distance_px")
+    if not isinstance(distance_px, int | float):
+        return None
+    score = candidate.get("score")
+    if not isinstance(score, int | float):
+        return None
+    return f"{label}-{index}", _bbox_tuple(bbox), float(distance_px), str(label), float(score)
 
 
 def _is_bbox_like(value: object) -> bool:
@@ -636,6 +840,30 @@ def _bbox_gap_px(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> 
 
 
 def _text_region_payload(payload: dict, detection_strategy: str) -> dict:
+    if _is_comic_text_bubble_strategy(detection_strategy):
+        match = payload.get("comic_text_bubble_match") or {}
+        if payload.get("status") == "ok" and match.get("status") == "matched":
+            return {
+                "text_region_kind": "comic_text_bubble_rtdetrv2_matched",
+                "text_region_source": "comic_text_bubble_rtdetrv2",
+                "text_region_mask_path": None,
+                "text_region_mask_bbox_xyxy": match.get("selected_bbox_xyxy"),
+                "match_status": "matched",
+                "text_region_user_strategy": detection_strategy,
+                "upstream_text_region_source": "comic_text_bubble_detector",
+                "comic_text_bubble_detector_class": match.get("selected_label"),
+                "comic_text_bubble_detector_score": match.get("selected_score"),
+            }
+        if payload.get("status") == "fallback_required":
+            return {
+                "text_region_kind": "comic_text_bubble_rtdetrv2_fallback_context_only",
+                "text_region_source": "mimo_vision_model",
+                "text_region_mask_path": None,
+                "text_region_mask_bbox_xyxy": None,
+                "match_status": "fallback_required",
+                "text_region_user_strategy": detection_strategy,
+                "upstream_text_region_source": "comic_text_bubble_rtdetrv2",
+            }
     if _is_cta_mask_strategy(detection_strategy):
         match = payload.get("cta_match") or payload.get("ctd_match") or {}
         common = _ctd_text_region_contract(detection_strategy)
@@ -729,6 +957,15 @@ def _expand_bbox_to_size(
 
 
 def _lettering_route_payload(payload: dict, detection_strategy: str) -> dict:
+    if _is_comic_text_bubble_strategy(detection_strategy) and payload.get("status") == "ok":
+        return {
+            "route": "comic_text_bubble_detect_then_configured_cleanup",
+            "text_region_source": "comic_text_bubble_rtdetrv2",
+            "text_region_user_strategy": detection_strategy,
+            "repair_method": "configured_by_phase6",
+            "requires_mimo_locator": False,
+            "requires_gpt_image2_replacement": False,
+        }
     if _is_cta_mask_strategy(detection_strategy) and payload.get("status") == "ok":
         return {
             "route": "cta_mask_lama_large_512px",
@@ -740,11 +977,16 @@ def _lettering_route_payload(payload: dict, detection_strategy: str) -> dict:
             "requires_gpt_image2_replacement": False,
         }
     if payload.get("status") == "fallback_required":
+        upstream_source = None
+        if _is_cta_mask_strategy(detection_strategy):
+            upstream_source = "ctd_refined_mask_component"
+        elif _is_comic_text_bubble_strategy(detection_strategy):
+            upstream_source = "comic_text_bubble_rtdetrv2"
         return {
             "route": "mimo_locator_gpt_image2_masked_edit",
             "text_region_source": "mimo_vision_model",
             "text_region_user_strategy": detection_strategy,
-            "upstream_text_region_source": "ctd_refined_mask_component" if _is_cta_mask_strategy(detection_strategy) else None,
+            "upstream_text_region_source": upstream_source,
             "repair_method": "gpt_image2_masked_edit",
             "requires_mimo_locator": True,
             "requires_gpt_image2_replacement": True,
@@ -764,7 +1006,7 @@ def _add_derived_text_bboxes(payload: dict) -> tuple[tuple[int, int, int, int] |
         payload["selected_text_body_xyxy"] = None
         return None, None
 
-    if payload.get("detection_method") in {"cta_mask", "ctd_mask"}:
+    if payload.get("detection_method") in {"cta_mask", "ctd_mask", "comic_rtdetrv2"}:
         bbox = tuple(int(value) for value in payload["selected_text_box_xyxy"])
         payload["selected_text_full_xyxy"] = list(bbox)
         payload["selected_text_body_xyxy"] = list(bbox)
@@ -775,6 +1017,14 @@ def _add_derived_text_bboxes(payload: dict) -> tuple[tuple[int, int, int, int] |
     payload["selected_text_full_xyxy"] = list(full_bbox)
     payload["selected_text_body_xyxy"] = list(body_bbox)
     return full_bbox, body_bbox
+
+
+def _point_to_bbox_distance(point_xy: tuple[int, int], bbox: tuple[int, int, int, int]) -> float:
+    x, y = point_xy
+    x1, y1, x2, y2 = bbox
+    dx = max(x1 - x, x - x2, 0)
+    dy = max(y1 - y, y - y2, 0)
+    return float((dx * dx + dy * dy) ** 0.5)
 
 
 def _write_manual_review_csv(output_path: Path, rows: list[dict]) -> None:
@@ -791,6 +1041,11 @@ def _write_manual_review_csv(output_path: Path, rows: list[dict]) -> None:
         "mask_match_nearest_component_id",
         "mask_match_nearest_edge_distance_px",
         "mask_match_within_threshold_count",
+        "comic_match_status",
+        "comic_match_label",
+        "comic_match_score",
+        "comic_match_distance_px",
+        "comic_match_threshold_px",
         "debug_image_path",
         "manual_decision",
         "review_notes",
@@ -805,6 +1060,7 @@ def _write_manual_review_csv(output_path: Path, rows: list[dict]) -> None:
 
 def _manual_review_row(row: dict) -> dict:
     diagnostics = row.get("cta_match_diagnostics") or row.get("ctd_match_diagnostics") or {}
+    comic_match = row.get("comic_text_bubble_match") or {}
     return {
         "record_id": row["record_id"],
         "status": row["status"],
@@ -818,6 +1074,11 @@ def _manual_review_row(row: dict) -> dict:
         "mask_match_nearest_component_id": diagnostics.get("nearest_component_id", ""),
         "mask_match_nearest_edge_distance_px": _csv_value(diagnostics.get("nearest_edge_distance_px")),
         "mask_match_within_threshold_count": _csv_value(diagnostics.get("within_threshold_count")),
+        "comic_match_status": comic_match.get("status", ""),
+        "comic_match_label": comic_match.get("selected_label", ""),
+        "comic_match_score": _csv_value(comic_match.get("selected_score")),
+        "comic_match_distance_px": _csv_value(comic_match.get("distance_px")),
+        "comic_match_threshold_px": _csv_value(comic_match.get("threshold_px")),
         "debug_image_path": row.get("debug_image_path", ""),
         "manual_decision": "",
         "review_notes": "",
@@ -840,7 +1101,18 @@ def _write_phase2_report(
     radius_y: int,
     detection_strategy: str,
     call_model_text_recognition: bool = False,
+    comic_detector_model_path: str | Path | None = None,
+    comic_detector_conf_threshold: float | None = None,
+    comic_detector_max_distance_px: float | None = None,
 ) -> None:
+    strategy_notes = _phase2_strategy_notes(detection_strategy)
+    detector_notes = _phase2_detector_notes(
+        detection_strategy,
+        comic_detector_model_path,
+        comic_detector_conf_threshold,
+        comic_detector_max_distance_px,
+    )
+    artifacts = _phase2_artifact_lines(detection_strategy)
     lines = [
         "# Phase 2 Detection Report",
         "",
@@ -854,21 +1126,84 @@ def _write_phase2_report(
         f"- Search radius: `{radius_x} x {radius_y}`",
         f"- Detection strategy: `{detection_strategy}`",
         f"- Direct model text-region recognition: `{call_model_text_recognition}`",
-        "- CTA strategy note: `cta_mask` is the user-facing CTA-first route; the actual BallonsTranslator detector module is `ctd` / `ComicTextDetector`.",
-        "- CTD mask matching: split `ctd-refined-mask.png` into connected components, then uniquely match LabelPlus points by point-to-mask-edge distance.",
+        *detector_notes,
+        *strategy_notes,
         "",
         "## Generated Artifacts",
         "",
-        "- `detections.jsonl`",
-        "- `debug/detection/*.png`",
-        "- `debug/ctd_masks/<page>/cta-closed-mask-components.json`",
-        "- `debug/ctd_masks/<page>/ctd-mask-edge-distances.jsonl`",
-        "- `reports/manual-review.csv`",
+        *artifacts,
         "",
-        "CTA/CTD detection rows include `cta_match_diagnostics` / `ctd_match_diagnostics` with nearest mask candidates, threshold counts, and the selected component id.",
-        "`manual-review.csv` repeats the nearest mask-match fields for fast spreadsheet triage.",
+        *_phase2_row_notes(detection_strategy),
+        *_phase2_manual_review_notes(detection_strategy),
         "",
         "Debug overlay colors: raw selected box = red, full text evidence box = green, body text box = purple.",
     ]
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _phase2_strategy_notes(detection_strategy: str) -> list[str]:
+    if _is_comic_text_bubble_strategy(detection_strategy):
+        return [
+            "- Comic text/bubble RT-DETRv2: directly runs the local ONNX detector and matches LabelPlus points to `text_bubble` / `text_free` boxes.",
+            "- Detector labels: `bubble`, `text_bubble`, `text_free`; only text labels are selected as Phase 2 text regions.",
+        ]
+    if _is_cta_mask_strategy(detection_strategy):
+        return [
+            "- CTA strategy note: `cta_mask` is the user-facing CTA-first route; the actual BallonsTranslator detector module is `ctd` / `ComicTextDetector`.",
+            "- CTD mask matching: split `ctd-refined-mask.png` into connected components, then uniquely match LabelPlus points by point-to-mask-edge distance.",
+        ]
+    return ["- CV strategy note: legacy local connected-component text detection prototype."]
+
+
+def _phase2_detector_notes(
+    detection_strategy: str,
+    comic_detector_model_path: str | Path | None,
+    comic_detector_conf_threshold: float | None,
+    comic_detector_max_distance_px: float | None,
+) -> list[str]:
+    if not _is_comic_text_bubble_strategy(detection_strategy):
+        return []
+    return [
+        f"- Comic detector model: `{comic_detector_model_path or DEFAULT_COMIC_DETECTOR_MODEL_PATH}`",
+        f"- Comic detector confidence threshold: `{comic_detector_conf_threshold}`",
+        f"- Comic detector max match distance: `{comic_detector_max_distance_px}px`",
+    ]
+
+
+def _phase2_artifact_lines(detection_strategy: str) -> list[str]:
+    lines = [
+        "- `detections.jsonl`",
+        "- `debug/detection/*.png`",
+        "- `reports/manual-review.csv`",
+    ]
+    if _is_cta_mask_strategy(detection_strategy):
+        lines.insert(2, "- `debug/ctd_masks/<page>/cta-closed-mask-components.json`")
+        lines.insert(3, "- `debug/ctd_masks/<page>/ctd-mask-edge-distances.jsonl`")
+    return lines
+
+
+def _phase2_row_notes(detection_strategy: str) -> list[str]:
+    if _is_comic_text_bubble_strategy(detection_strategy):
+        return [
+            "Comic RT-DETRv2 rows include `comic_text_bubble_detections` and `comic_text_bubble_match` with all detector boxes, nearest candidates, and selected class/score.",
+        ]
+    if _is_cta_mask_strategy(detection_strategy):
+        return [
+            "CTA/CTD detection rows include `cta_match_diagnostics` / `ctd_match_diagnostics` with nearest mask candidates, threshold counts, and the selected component id.",
+        ]
+    return []
+
+
+def _phase2_manual_review_notes(detection_strategy: str) -> list[str]:
+    if _is_comic_text_bubble_strategy(detection_strategy):
+        return [
+            "`manual-review.csv` repeats the selected comic detector label, score, and LabelPlus-point distance for fast spreadsheet triage.",
+        ]
+    if _is_cta_mask_strategy(detection_strategy):
+        return [
+            "`manual-review.csv` repeats the nearest mask-match fields for fast spreadsheet triage.",
+        ]
+    return [
+        "`manual-review.csv` repeats selected text boxes and debug image paths for fast spreadsheet triage.",
+    ]
